@@ -436,7 +436,7 @@ export default {
                 const planRaw = body.plan_type || body.planType || 'monthly';
                 const isAnnual = planRaw === 'annual' || planRaw === 'yearly';
                 const priceId = isAnnual
-                    ? 'price_1SjKUPRr7a5Py1C0SoaFNKuC'
+                    ? 'price_1TaNmTRr7a5Py1C04bl5J8DC'
                     : 'price_1SjKSQRr7a5Py1C0K1jRHpPc';
                 const params = new URLSearchParams();
                 params.append('mode', 'subscription');
