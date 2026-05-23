@@ -1,9 +1,10 @@
 // FinanceFlow Runtime Configuration
-window.STRIPE_PUBLISHABLE_KEY = 'pk_test_development_key_placeholder';
-window.APP_URL = 'http://localhost:5173';
-window.API_URL = 'http://localhost:5173/api';
-window.APP_ENV = 'development'; // 'development' | 'production' — se sustituye en build
-window.BANK_SIMULATOR_ENABLED = false; // Activar solo para demos
+window.STRIPE_PUBLISHABLE_KEY = 'pk_live_51PhqUIRr7a5Py1C0O4KbbPtgPyrWs1kcoxLh9Cl5vfnWgqpNbgWvMDiVEOuQA1gYxzojqpZhaGdVIJkdX0lhsKYT00KKJ4yP0r';
+window.APP_URL = 'https://financeflow-7nd.pages.dev';
+window.API_URL = 'https://financeflow.victor-a97.workers.dev/api';
+window.DATA_MODE = 'remote';
+window.APP_ENV = 'production';
+window.BANK_SIMULATOR_ENABLED = false;
 
 window.APP_CONFIG = {
     brandName: 'FinanceFlow',
@@ -12,5 +13,5 @@ window.APP_CONFIG = {
     helpUrl: 'https://www.contabilidadpersonal.com/category/financeflow/',
     privacyUrl: 'https://www.contabilidadpersonal.com/politica-de-privacidad/',
     termsUrl: 'https://www.contabilidadpersonal.com/terminos-y-condiciones/',
-    supportEmail: 'soporte@contabilidadpersonal.com'
+    supportEmail: 'clientes@contabilidadpersonal.com'
 };
