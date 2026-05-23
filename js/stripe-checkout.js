@@ -4,7 +4,7 @@ class StripeCheckout {
         this.stripe = null;
         this.priceIds = {
             monthly: 'price_1SjKSQRr7a5Py1C0K1jRHpPc',
-            yearly: 'price_1SjKUPRr7a5Py1C0SoaFNKuC'
+            yearly: 'price_1TaNmTRr7a5Py1C04bl5J8DC'
         };
         this.init();
     }
