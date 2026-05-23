@@ -1,74 +1,55 @@
 // Service Worker - FinanceFlow
-// Cachea las páginas principales para carga rápida y soporte offline básico.
+// IMPORTANTE: NO cachea páginas HTML ni JS de la app, para que los usuarios
+// siempre reciban la última versión. Solo cachea imágenes/iconos estáticos.
 
-const CACHE_NAME = 'financeflow-v1';
+const CACHE_NAME = 'financeflow-v2'; // subir versión fuerza limpieza de la caché vieja
 const OFFLINE_URL = './offline.html';
 
-// Recursos que se cachean al instalar
 const PRECACHE_URLS = [
-    './',
-    './index.html',
-    './login.html',
-    './register.html',
-    './pricing.html',
     './offline.html',
-    './public/config.js',
-    './public/manifest.json'
+    './public/logo.png'
 ];
 
-// Instalación: precachear recursos esenciales
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then((cache) => cache.addAll(PRECACHE_URLS).catch(() => {
-                // Si algún recurso falla, no abortar la instalación completa
-                return Promise.resolve();
-            }))
+            .then((cache) => cache.addAll(PRECACHE_URLS).catch(() => Promise.resolve()))
             .then(() => self.skipWaiting())
     );
 });
 
-// Activación: limpiar cachés antiguas
+// Activación: BORRAR todas las cachés antiguas (incluida la v1 que servía HTML viejo)
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys().then((keys) =>
-            Promise.all(
-                keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-            )
-        ).then(() => self.clients.claim())
+            Promise.all(keys.map((k) => caches.delete(k)))
+        ).then(() => caches.open(CACHE_NAME))
+         .then((cache) => cache.addAll(PRECACHE_URLS).catch(() => Promise.resolve()))
+         .then(() => self.clients.claim())
     );
 });
 
-// Fetch: estrategia network-first para navegación, cache-first para estáticos
 self.addEventListener('fetch', (event) => {
     const { request } = event;
-
-    // No interceptar peticiones a la API ni a dominios externos (Stripe, GoCardless, CDNs)
     const url = new URL(request.url);
-    const isApi = url.pathname.includes('/api/');
-    const isExternal = url.origin !== self.location.origin;
 
-    if (isApi || isExternal || request.method !== 'GET') {
-        return; // dejar pasar a la red directamente
+    if (url.pathname.includes('/api/') || url.origin !== self.location.origin || request.method !== 'GET') {
+        return;
     }
 
-    // Navegación (documentos HTML): network-first, fallback a caché y luego offline
-    if (request.mode === 'navigate') {
+    const isHTML = request.mode === 'navigate' || url.pathname.endsWith('.html');
+    const isAppCode = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+
+    if (isHTML || isAppCode) {
         event.respondWith(
-            fetch(request)
-                .then((response) => {
-                    const copy = response.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-                    return response;
-                })
-                .catch(() =>
-                    caches.match(request).then((cached) => cached || caches.match(OFFLINE_URL))
-                )
+            fetch(request).catch(() => {
+                if (isHTML) return caches.match(OFFLINE_URL);
+                return new Response('', { status: 504 });
+            })
         );
         return;
     }
 
-    // Estáticos: cache-first
     event.respondWith(
         caches.match(request).then((cached) =>
             cached ||
