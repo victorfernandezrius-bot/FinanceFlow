@@ -103,42 +103,36 @@ const DataClient = {
 
     // ===== SESSION =====
     async getSession() {
-        if (MODE === 'local') {
-            return {
-                token: lsGet(KEYS.token),
-                currentUser: lsGet(KEYS.currentUser)
-            };
-        }
-        const r = await authFetch(`${window.API_URL}/auth/session`);
-        return r.ok ? r.json() : { token: null, currentUser: null };
+        // La sesión vive en localStorage en ambos modos (el token se envía
+        // al Worker en cada petición vía authFetch).
+        return {
+            token: lsGet(KEYS.token),
+            currentUser: lsGet(KEYS.currentUser)
+        };
     },
 
     async saveSession(session) {
-        if (MODE === 'local') {
-            // Acepta tanto {token, currentUser} como {token, user}
-            const user = session.currentUser || session.user || null;
-            if (session.token) lsSet(KEYS.token, session.token);
-            if (user) lsSet(KEYS.currentUser, user);
-            return session;
+        // En AMBOS modos guardamos la sesión en localStorage, porque el
+        // frontend (dashboard, etc.) la lee de ahí para mantener al usuario logueado.
+        const user = session.currentUser || session.user || null;
+        if (session.token) {
+            lsSet(KEYS.token, session.token);
+            setAuthToken(session.token);
         }
-        const r = await authFetch(`${window.API_URL}/auth/session`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(session)
-        });
-        return r.ok ? r.json() : null;
+        if (user) lsSet(KEYS.currentUser, user);
+        return session;
     },
 
     async clearSession() {
-        if (MODE === 'local') {
-            lsDel(KEYS.token);
-            lsDel(KEYS.currentUser);
-            return true;
+        // Borrar siempre la sesión local
+        lsDel(KEYS.token);
+        lsDel(KEYS.currentUser);
+        setAuthToken(null);
+        // En remoto, además notificar al Worker (sin bloquear si falla)
+        if (MODE === 'remote') {
+            try { await authFetch(`${window.API_URL}/auth/logout`, { method: 'POST' }); } catch (e) {}
         }
-        const r = await authFetch(`${window.API_URL}/auth/logout`, {
-            method: 'POST'
-        });
-        return r.ok;
+        return true;
     },
 
     // ===== ACCOUNTS =====
