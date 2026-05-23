@@ -2002,6 +2002,11 @@
                 
                 try {
                     this.currentUser = JSON.parse(storedUser);
+                    // CRÍTICO: inyectar el token en el DataClient antes de cargar datos,
+                    // si no las peticiones a la API salen sin autenticación y devuelven vacío.
+                    if (typeof DataClient.setAuthToken === 'function') {
+                        DataClient.setAuthToken(token);
+                    }
                     console.log('Usuario autenticado:', this.currentUser.name);
                     this.init();
                 } catch (error) {
