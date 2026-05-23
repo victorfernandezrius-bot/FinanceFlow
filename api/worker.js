@@ -431,8 +431,11 @@ export default {
             // ---------- STRIPE ----------
             if (path === '/api/stripe/create-checkout' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
-                const { plan_type } = await request.json(); // 'monthly' | 'annual'
-                const priceId = plan_type === 'annual'
+                const body = await request.json();
+                // Aceptar tanto plan_type como planType; normalizar 'annual'/'yearly'
+                const planRaw = body.plan_type || body.planType || 'monthly';
+                const isAnnual = planRaw === 'annual' || planRaw === 'yearly';
+                const priceId = isAnnual
                     ? 'price_1SjKUPRr7a5Py1C0SoaFNKuC'
                     : 'price_1SjKSQRr7a5Py1C0K1jRHpPc';
                 const params = new URLSearchParams();
@@ -440,11 +443,11 @@ export default {
                 params.append('line_items[0][price]', priceId);
                 params.append('line_items[0][quantity]', '1');
                 params.append('success_url', `${env.APP_URL}/dashboard.html?upgrade=success&session_id={CHECKOUT_SESSION_ID}`);
-                params.append('cancel_url', `${env.APP_URL}/pricing.html?upgrade=cancelled`);
+                params.append('cancel_url', `${env.APP_URL}/dashboard.html?upgrade=cancelled`);
                 params.append('client_reference_id', uid);
                 params.append('customer_email', authUser.email);
                 params.append('metadata[user_id]', uid);
-                params.append('metadata[plan_type]', plan_type);
+                params.append('metadata[plan_type]', isAnnual ? 'annual' : 'monthly');
 
                 const resp = await fetch('https://api.stripe.com/v1/checkout/sessions', {
                     method: 'POST',
