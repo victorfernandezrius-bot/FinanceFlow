@@ -1,0 +1,27 @@
+name = "cp-api"
+main = "api/worker.js"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Base de datos D1 (ya creada)
+[[d1_databases]]
+binding = "DB"
+database_name = "cp-db"
+database_id = "74410e1d-4bd3-40ec-af72-528ad92fd3a1"
+
+# KV para tokens de GoCardless y caché (ya creado)
+[[kv_namespaces]]
+binding = "CACHE"
+id = "e85a2416b563411189118400f714b0ab"
+
+[vars]
+APP_URL = "https://app.contabilidadpersonal.com"
+
+# ---------------------------------------------------------
+# SECRETS (NO van aquí). Configúralos con:
+#   wrangler secret put JWT_SECRET
+#   wrangler secret put STRIPE_SECRET_KEY
+#   wrangler secret put STRIPE_WEBHOOK_SECRET
+#   wrangler secret put GOCARDLESS_SECRET_ID
+#   wrangler secret put GOCARDLESS_SECRET_KEY
+# ---------------------------------------------------------

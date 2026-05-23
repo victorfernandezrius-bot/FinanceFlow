@@ -1,0 +1,16 @@
+{
+  "name": "saas-financeflow",
+  "version": "1.0.0",
+  "description": "FinanceFlow - SaaS de Contabilidad Personal (Cloudflare)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
+    "deploy:pages": "wrangler pages deploy . --project-name=cp-app",
+    "db:schema": "wrangler d1 execute cp-db --remote --file=db/schema.sql",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}

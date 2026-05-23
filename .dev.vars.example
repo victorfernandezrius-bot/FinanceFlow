@@ -1,0 +1,6 @@
+# Copia este archivo a .dev.vars (NO lo subas a git) para desarrollo local con `wrangler dev`
+JWT_SECRET="genera-una-cadena-larga-aleatoria-aqui"
+STRIPE_SECRET_KEY="sk_live_..."
+STRIPE_WEBHOOK_SECRET="whsec_..."
+GOCARDLESS_SECRET_ID="tu-secret-id"
+GOCARDLESS_SECRET_KEY="tu-secret-key"

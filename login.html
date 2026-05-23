@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0158C9">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="FinanceFlow">
+    <link rel="manifest" href="./public/manifest.json">
+    <link rel="apple-touch-icon" href="./public/logo.png">
+    <title>Iniciar Sesión - FinanceFlow</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Paleta de marca Contabilidad Personal */
+        :root {
+            --verde-principal: #61CE70;
+            --negro: #000000;
+            --blanco: #FFFFFF;
+            --azul-oscuro: #0158C9;
+            --azul-claro: #5EC6FF;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul-claro) 100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div class="max-w-md w-full space-y-8">
+            <div class="text-center">
+                <div class="flex justify-center mb-4">
+                    <img src="./public/logo.png" alt="FinanceFlow Logo" style="height: 3.5rem;">
+                </div>
+                <h2 class="text-3xl font-bold" style="color: var(--negro);">Iniciar Sesión</h2>
+                <p class="mt-2 text-gray-600">Accede a tu cuenta de FinanceFlow</p>
+            </div>
+            
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <!-- Mensaje de error -->
+                <div id="error-message" class="hidden mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-circle text-red-400 mr-2"></i>
+                        <span id="error-text" class="text-sm text-red-700"></span>
+                    </div>
+                </div>
+
+                <!-- Mensaje de éxito -->
+                <div id="success-message" class="hidden mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                        <span id="success-text" class="text-sm text-green-700"></span>
+                    </div>
+                </div>
+                
+                <form id="login-form" class="space-y-6">
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
+                        <div class="mt-1 relative">
+                            <input id="email" name="email" type="email" required 
+                                   class="appearance-none relative block w-full px-3 py-3 border border-gray-300 rounded-lg placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                   placeholder="tu@email.com">
+                            <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                <i class="fas fa-envelope text-gray-400"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-700">Contraseña</label>
+                        <div class="mt-1 relative">
+                            <input id="password" name="password" type="password" required
+                                   class="appearance-none relative block w-full px-3 py-3 border border-gray-300 rounded-lg placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
+                                   placeholder="Tu contraseña">
+                            <button type="button" id="toggle-password"
+                                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                                    tabindex="-1"
+                                    title="Mostrar/ocultar contraseña">
+                                <i id="toggle-password-icon" class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <input id="remember-me" name="remember-me" type="checkbox" 
+                                   class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="remember-me" class="ml-2 block text-sm text-gray-700">
+                                Recordarme
+                            </label>
+                        </div>
+                        
+                        <div class="text-sm">
+                            <button type="button" id="forgot-password-btn" class="font-medium text-blue-600 hover:text-blue-700">
+                                ¿Olvidaste tu contraseña?
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <button type="submit" id="login-btn"
+                                class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white transition-colors" 
+                                style="background-color: var(--azul-oscuro);"
+                                onmouseover="this.style.backgroundColor='var(--verde-principal)'" 
+                                onmouseout="this.style.backgroundColor='var(--azul-oscuro)'">
+                            <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                                <i class="fas fa-sign-in-alt" style="color: var(--azul-claro);"></i>
+                            </span>
+                            Iniciar Sesión
+                        </button>
+                    </div>
+                </form>
+                
+                <div class="mt-6">
+                    <!-- Botón Google -->
+                    <div class="relative mb-4">
+                        <div class="absolute inset-0 flex items-center">
+                            <div class="w-full border-t border-gray-300"></div>
+                        </div>
+                        <div class="relative flex justify-center text-sm">
+                            <span class="px-2 bg-white text-gray-500">o continúa con</span>
+                        </div>
+                    </div>
+                    <button id="google-login-btn" type="button"
+                            class="w-full flex items-center justify-center gap-3 py-3 px-4 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors shadow-sm font-medium text-gray-700 text-sm mb-4">
+                        <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+                            <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                            <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
+                            <path d="M9 3.58c1.321 0 2.508.454 3.440 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 6.293C4.672 4.166 6.656 3.58 9 3.58z" fill="#EA4335"/>
+                        </svg>
+                        Continuar con Google
+                    </button>
+
+                    <!-- Separador crear cuenta -->
+                    <div class="relative">
+                        <div class="absolute inset-0 flex items-center">
+                            <div class="w-full border-t border-gray-300"></div>
+                        </div>
+                        <div class="relative flex justify-center text-sm">
+                            <span class="px-2 bg-white text-gray-500">¿No tienes cuenta?</span>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <a href="./register.html" class="w-full flex justify-center py-3 px-4 border border-blue-600 text-sm font-medium rounded-lg text-blue-600 bg-white hover:bg-blue-50 transition-colors">
+                            <i class="fas fa-user-plus mr-2"></i>
+                            Crear cuenta gratuita
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="text-center">
+                <a href="./index.html" class="text-sm text-gray-600 hover:text-gray-900 flex items-center justify-center">
+                    <i class="fas fa-arrow-left mr-2"></i>
+                    Volver al inicio
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6 flex items-center">
+            <i class="fas fa-spinner fa-spin text-blue-600 text-xl mr-3"></i>
+            <span class="text-gray-700">Iniciando sesión...</span>
+        </div>
+    </div>
+
+    <script type="module">
+        import Auth from './js/auth.js';
+        
+        class LoginPage {
+            constructor() {
+                this.init();
+            }
+
+            init() {
+                // Verificar si ya está autenticado
+                if (Auth.isAuthenticated()) {
+                    window.location.href = './dashboard.html';
+                    return;
+                }
+
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                const form = document.getElementById('login-form');
+
+                form.addEventListener('submit', (e) => {
+                    this.handleLogin(e);
+                });
+
+                // Limpiar mensajes al escribir
+                const inputs = form.querySelectorAll('input');
+                inputs.forEach(input => {
+                    input.addEventListener('input', () => {
+                        this.hideMessages();
+                    });
+                });
+            }
+
+            async handleLogin(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(e.target);
+                const email = formData.get('email').trim();
+                const password = formData.get('password');
+                
+                // Validaciones básicas
+                if (!email || !password) {
+                    this.showError('Por favor, completa todos los campos');
+                    return;
+                }
+
+                if (!this.validateEmail(email)) {
+                    this.showError('Por favor, introduce un email válido');
+                    return;
+                }
+
+                this.showLoading(true);
+                this.hideMessages();
+                
+                try {
+                    const result = await Auth.login(email, password);
+                    
+                    if (result.success) {
+                        this.showSuccess('¡Login exitoso! Redirigiendo...');
+                        
+                        // Redirigir al dashboard después de un breve delay
+                        setTimeout(() => {
+                            window.location.href = './dashboard.html';
+                        }, 1000);
+                        
+                    } else {
+                        this.showError(result.error || 'Error al iniciar sesión');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error en login:', error);
+                    this.showError('Error inesperado. Por favor, intenta de nuevo.');
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            validateEmail(email) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email);
+            }
+
+            showError(message) {
+                const errorDiv = document.getElementById('error-message');
+                const errorText = document.getElementById('error-text');
+                
+                errorText.textContent = message;
+                errorDiv.classList.remove('hidden');
+                
+                // Auto-hide después de 5 segundos
+                setTimeout(() => {
+                    this.hideMessages();
+                }, 5000);
+            }
+
+            showSuccess(message) {
+                const successDiv = document.getElementById('success-message');
+                const successText = document.getElementById('success-text');
+                
+                successText.textContent = message;
+                successDiv.classList.remove('hidden');
+            }
+
+            hideMessages() {
+                document.getElementById('error-message').classList.add('hidden');
+                document.getElementById('success-message').classList.add('hidden');
+            }
+
+            showLoading(show) {
+                const overlay = document.getElementById('loading-overlay');
+                const submitBtn = document.getElementById('login-btn');
+                
+                if (show) {
+                    overlay.classList.remove('hidden');
+                    submitBtn.disabled = true;
+                    submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                } else {
+                    overlay.classList.add('hidden');
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            }
+        }
+
+        // Inicializar página de login
+        new LoginPage();
+        
+        // Forgot Password functionality
+        document.getElementById('forgot-password-btn').addEventListener('click', () => {
+            document.getElementById('forgot-password-modal').classList.remove('hidden');
+        });
+
+        document.getElementById('close-forgot-modal').addEventListener('click', () => {
+            document.getElementById('forgot-password-modal').classList.add('hidden');
+        });
+
+        document.getElementById('cancel-forgot-btn').addEventListener('click', () => {
+            document.getElementById('forgot-password-modal').classList.add('hidden');
+        });
+
+        document.getElementById('forgot-password-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById('reset-email').value;
+            
+            // Mostrar loading
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Enviando...';
+            
+            try {
+                // Simular envío (integrar con backend real después)
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                alert(`Se ha enviado un enlace de recuperación a ${email}`);
+                document.getElementById('forgot-password-modal').classList.add('hidden');
+                document.getElementById('forgot-password-form').reset();
+            } catch (error) {
+                alert('Error al enviar el enlace. Inténtalo de nuevo.');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Enviar Enlace';
+            }
+        });
+
+        // Toggle mostrar/ocultar contraseña
+        document.getElementById('toggle-password').addEventListener('click', () => {
+            const passwordInput = document.getElementById('password');
+            const icon = document.getElementById('toggle-password-icon');
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        });
+
+        // Cerrar modal al hacer clic fuera
+        document.getElementById('forgot-password-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'forgot-password-modal') {
+                document.getElementById('forgot-password-modal').classList.add('hidden');
+            }
+        });
+
+        // ── Google OAuth ──────────────────────────────────────────────────────
+        window.addEventListener('load', () => {
+            if (typeof google === 'undefined') return;
+            google.accounts.id.initialize({
+                client_id: '1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleusercontent.com',
+                callback: async (response) => {
+                    document.getElementById('loading-overlay').classList.remove('hidden');
+                    const result = await Auth.loginWithGoogle(response.credential);
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                    if (result.success) {
+                        document.getElementById('success-text').textContent = '¡Acceso con Google correcto! Redirigiendo...';
+                        document.getElementById('success-message').classList.remove('hidden');
+                        setTimeout(() => { window.location.href = './dashboard.html'; }, 1000);
+                    } else {
+                        document.getElementById('error-text').textContent = result.error || 'Error al iniciar con Google';
+                        document.getElementById('error-message').classList.remove('hidden');
+                    }
+                },
+                ux_mode: 'popup',
+                cancel_on_tap_outside: true
+            });
+        });
+
+        document.getElementById('google-login-btn').addEventListener('click', () => {
+            if (typeof google === 'undefined') {
+                document.getElementById('error-text').textContent = 'Servicio de Google no disponible. Comprueba tu conexión.';
+                document.getElementById('error-message').classList.remove('hidden');
+                return;
+            }
+            google.accounts.id.prompt();
+        });
+    </script>
+
+    <!-- Modal Recuperar Contraseña -->
+    <div id="forgot-password-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
+        <div class="relative p-8 bg-white w-full max-w-md m-auto rounded-lg shadow-lg">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold text-gray-900">Recuperar Contraseña</h3>
+                <button id="close-forgot-modal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <form id="forgot-password-form" class="space-y-4">
+                <div>
+                    <label for="reset-email" class="block text-sm font-medium text-gray-700 mb-2">
+                        Email de tu cuenta
+                    </label>
+                    <input type="email" 
+                           id="reset-email" 
+                           required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                           placeholder="tu@email.com">
+                </div>
+                
+                <div class="bg-blue-50 border border-blue-200 rounded-md p-4">
+                    <p class="text-sm text-blue-800">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        Te enviaremos un enlace para restablecer tu contraseña
+                    </p>
+                </div>
+                
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button type="button" id="cancel-forgot-btn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        Enviar Enlace
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./public/sw.js')
+                    .catch(err => console.log('SW no disponible:', err));
+            });
+        }
+    </script>
+</body>
+</html>
