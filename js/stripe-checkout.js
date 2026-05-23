@@ -49,11 +49,14 @@ class StripeCheckout {
             }
 
             // Create checkout session via API call
-            const response = await fetch('./api/stripe/create-checkout', {
+            const apiBase = window.API_URL || './api';
+            const response = await fetch(`${apiBase}/stripe/create-checkout`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('financeflow_token') || ''}`
                 },
+                credentials: 'include',
                 body: JSON.stringify(requestBody)
             });
 
@@ -67,28 +70,25 @@ class StripeCheckout {
                 throw new Error(session.error);
             }
 
-            if (!session.sessionId) {
-                throw new Error('No se recibió ID de sesión válido');
+            // El Worker devuelve checkout_url directamente: redirigir ahí
+            if (session.checkout_url) {
+                window.location.href = session.checkout_url;
+                return;
             }
 
-            // Redirect to Stripe Checkout
-            const result = await this.stripe.redirectToCheckout({
-                sessionId: session.sessionId
-            });
-
+            // Fallback: si solo viene session_id, usar redirectToCheckout de Stripe.js
+            const sid = session.session_id || session.sessionId;
+            if (!sid) {
+                throw new Error('No se recibió una sesión de pago válida');
+            }
+            const result = await this.stripe.redirectToCheckout({ sessionId: sid });
             if (result.error) {
                 throw new Error(result.error.message);
             }
 
         } catch (error) {
             console.error('Stripe checkout error:', error);
-            
-            // Show more specific error messages
-            if (error.message.includes('fetch') || error.message.includes('HTTP 404')) {
-                // If API endpoint is not available, redirect to Stripe test mode directly
-                window.open(`https://checkout.stripe.com/pay/cs_test_${Math.random().toString(36).substr(2, 9)}`, '_self');
-                return;
-            } else if (error.message.includes('session')) {
+            if (error.message && error.message.includes('session')) {
                 this.showError('Error al crear la sesión de pago. Inténtalo de nuevo.');
             } else {
                 this.showError('Error al procesar el pago. Contacta soporte si persiste.');
