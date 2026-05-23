@@ -44,7 +44,13 @@ function setAuthToken(t) {
 // fetch con Authorization automático
 async function authFetch(url, options = {}) {
     const headers = { ...(options.headers || {}) };
-    if (_authToken) headers['Authorization'] = `Bearer ${_authToken}`;
+    // Si no hay token en memoria, intentar recuperarlo de localStorage (a prueba de fallos)
+    let token = _authToken;
+    if (!token && typeof localStorage !== 'undefined') {
+        token = localStorage.getItem('financeflow_token');
+        if (token) _authToken = token;
+    }
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     return fetch(url, { ...options, headers, credentials: 'include' });
 }
 
