@@ -2007,6 +2007,16 @@
                     if (typeof DataClient.setAuthToken === 'function') {
                         DataClient.setAuthToken(token);
                     }
+                    // CRÍTICO 2: asegurar que Auth.currentUser está poblado YA, sin esperar
+                    // a que termine el init async de Auth (que puede tardar por el 404 del trial).
+                    // El accountingManager.refresh() lee de Auth.currentUser, así que debe existir.
+                    if (Auth && !Auth.currentUser) {
+                        Auth.currentUser = this.currentUser;
+                        Auth.token = token;
+                    }
+                    if (this.accountingManager && this.accountingManager.auth && !this.accountingManager.auth.currentUser) {
+                        this.accountingManager.auth.currentUser = this.currentUser;
+                    }
                     console.log('Usuario autenticado:', this.currentUser.name);
                     this.init();
                 } catch (error) {
