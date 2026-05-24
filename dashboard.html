@@ -2557,11 +2557,11 @@
                     }
                 } else {
                     upgradeSection.innerHTML = `
-                        <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                            <h4 class="font-semibold text-blue-900 mb-2">¿Necesitas más funciones?</h4>
-                            <p class="text-sm text-blue-700 mb-3">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
-                            <button onclick="dashboard.showPlanSelector()" class="w-full bg-blue-600 text-white py-2 rounded-md text-sm font-medium hover:bg-blue-700">
-                                <i class="fas fa-star mr-2"></i>
+                        <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:1rem;border-radius:0.5rem;">
+                            <h4 style="font-weight:600;color:#1e3a8a;margin-bottom:0.5rem;">¿Necesitas más funciones?</h4>
+                            <p style="font-size:0.875rem;color:#1d4ed8;margin-bottom:0.75rem;">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
+                            <button onclick="dashboard.showPlanSelector()" style="width:100%;background:#2563eb;color:#fff;padding:0.5rem;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:500;cursor:pointer;" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+                                <i class="fas fa-star" style="margin-right:0.5rem;"></i>
                                 Ver Planes
                             </button>
                         </div>
