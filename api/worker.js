@@ -357,6 +357,20 @@ export default {
                 }
             }
 
+            // ---------- PREMIUM TRIAL ----------
+            if (path === '/api/premium-trial') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (method === 'GET') {
+                    const row = await env.DB.prepare('SELECT premium_trial_expires_at FROM users WHERE id=?').bind(uid).first();
+                    return json({ expiry: row?.premium_trial_expires_at || null }, 200, cors);
+                }
+                if (method === 'POST') {
+                    const { expiry } = await request.json();
+                    await env.DB.prepare('UPDATE users SET premium_trial_expires_at=? WHERE id=?').bind(expiry, uid).run();
+                    return json({ success: true }, 200, cors);
+                }
+            }
+
             // ---------- NOTIFICATIONS ----------
             if (path === '/api/notifications') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
