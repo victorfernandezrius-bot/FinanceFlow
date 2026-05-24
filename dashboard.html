@@ -2093,14 +2093,24 @@
                 // En este punto sabemos que hay un usuario válido
                 this.setupEventListeners();
                 this.setupSidebar();
-                this.checkPaymentSuccess();
-                this.renderUserInfo();
-                this.renderPlanBadge();
-                this.renderUpgradeSection();
-                this.renderBankConnectionSection();
-                this.showNotificationsContainer();
-                this.showNotificationsContainer();
-                await this.loadDashboardData();
+
+                // CRÍTICO: cargar los datos ANTES de los renders.
+                // Si un render fallara, los datos ya estarían en caché.
+                try {
+                    await this.loadDashboardData();
+                } catch (e) {
+                    console.error('Error cargando datos del dashboard:', e);
+                }
+
+                // Renders protegidos: si uno falla, no rompe los demás ni la carga de datos
+                const safe = (fn, name) => { try { fn.call(this); } catch (e) { console.error('Error en ' + name + ':', e); } };
+                safe(this.checkPaymentSuccess, 'checkPaymentSuccess');
+                safe(this.renderUserInfo, 'renderUserInfo');
+                safe(this.renderPlanBadge, 'renderPlanBadge');
+                safe(this.renderUpgradeSection, 'renderUpgradeSection');
+                safe(this.renderBankConnectionSection, 'renderBankConnectionSection');
+                safe(this.showNotificationsContainer, 'showNotificationsContainer');
+
                 this.showSection('dashboard');
             }
             
@@ -4101,21 +4111,28 @@
             }
 
             async loadDashboardData() {
-                await this.accountingManager.loadUserData();
-                // Cargar datos de negocio adicionales en caché (autocontrol, banco)
+                // 1. Cargar cuentas y movimientos (lo esencial) — con su propio try
+                try {
+                    await this.accountingManager.loadUserData();
+                } catch (e) {
+                    console.error('Error cargando cuentas/movimientos:', e);
+                }
+
+                // 2. Datos de negocio adicionales — protegidos para que un fallo
+                //    aquí no impida pintar las cuentas
                 const uid = this.currentUser?.id;
                 if (uid) {
-                    this._autocontrolPlan = await DataClient.getAutocontrolPlan(uid);
-                    const assoc = await DataClient.getAutocontrolAssociations(uid);
-                    if (assoc) this.accountAssociations = assoc;
-                    const conns = await DataClient.listBankConnections(uid);
-                    this._bankConnection = (conns && conns.length) ? conns[0] : null;
-                    this._scenariosCache = await DataClient.getScenarios(uid);
+                    try { this._autocontrolPlan = await DataClient.getAutocontrolPlan(uid); } catch (e) { console.error('autocontrolPlan:', e); }
+                    try { const assoc = await DataClient.getAutocontrolAssociations(uid); if (assoc) this.accountAssociations = assoc; } catch (e) { console.error('assoc:', e); }
+                    try { const conns = await DataClient.listBankConnections(uid); this._bankConnection = (conns && conns.length) ? conns[0] : null; } catch (e) { console.error('bankConns:', e); }
+                    try { this._scenariosCache = await DataClient.getScenarios(uid); } catch (e) { console.error('scenarios:', e); }
                 }
-                this.updateDashboardMetrics();
-                this.renderIncomeExpensesChart();
-                this.renderRecentMovements();
-                this.renderInsights();
+
+                // 3. Renders — cada uno protegido
+                try { this.updateDashboardMetrics(); } catch (e) { console.error('updateDashboardMetrics:', e); }
+                try { this.renderIncomeExpensesChart(); } catch (e) { console.error('renderIncomeExpensesChart:', e); }
+                try { this.renderRecentMovements(); } catch (e) { console.error('renderRecentMovements:', e); }
+                try { this.renderInsights(); } catch (e) { console.error('renderInsights:', e); }
             }
 
             // ====================================================
