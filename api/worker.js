@@ -436,12 +436,13 @@ export default {
                 const planRaw = body.plan_type || body.planType || 'monthly';
                 const isAnnual = planRaw === 'annual' || planRaw === 'yearly';
                 const priceId = isAnnual
-                    ? 'price_1TaNmTRr7a5Py1C04bl5J8DC'
+                    ? 'price_1SjKUPRr7a5Py1C0SoaFNKuC'
                     : 'price_1SjKSQRr7a5Py1C0K1jRHpPc';
                 const params = new URLSearchParams();
                 params.append('mode', 'subscription');
                 params.append('line_items[0][price]', priceId);
                 params.append('line_items[0][quantity]', '1');
+                params.append('allow_promotion_codes', 'true');
                 params.append('success_url', `${env.APP_URL}/dashboard.html?upgrade=success&session_id={CHECKOUT_SESSION_ID}`);
                 params.append('cancel_url', `${env.APP_URL}/dashboard.html?upgrade=cancelled`);
                 params.append('client_reference_id', uid);
