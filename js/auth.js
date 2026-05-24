@@ -412,7 +412,12 @@ class AuthSystem {
     // Refresca la caché del trial premium (llamar tras login / init)
     async refreshPremiumTrial() {
         if (!this.currentUser) { this._premiumTrialExpiry = null; return; }
-        this._premiumTrialExpiry = await DataClient.getPremiumTrial(this.currentUser.id);
+        try {
+            this._premiumTrialExpiry = await DataClient.getPremiumTrial(this.currentUser.id);
+        } catch (e) {
+            console.error('Error obteniendo premium trial (no crítico):', e);
+            this._premiumTrialExpiry = null;
+        }
     }
 
     hasPremiumTrial() {
