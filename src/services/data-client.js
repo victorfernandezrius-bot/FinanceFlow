@@ -357,8 +357,12 @@ const DataClient = {
     // ===== PREMIUM TRIAL =====
     async getPremiumTrial(userId) {
         if (MODE === 'local') return lsGet(KEYS.premiumTrial(userId));
-        const r = await authFetch(`${window.API_URL}/premium-trial?userId=${userId}`);
-        return r.ok ? (await r.json())?.expiry ?? null : null;
+        try {
+            const r = await authFetch(`${window.API_URL}/premium-trial?userId=${userId}`);
+            return r.ok ? (await r.json())?.expiry ?? null : null;
+        } catch (e) {
+            return null;
+        }
     },
 
     async savePremiumTrial(userId, expiry) {
