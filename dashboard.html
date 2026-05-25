@@ -2007,16 +2007,6 @@
                     if (typeof DataClient.setAuthToken === 'function') {
                         DataClient.setAuthToken(token);
                     }
-                    // CRÍTICO 2: asegurar que Auth.currentUser está poblado YA, sin esperar
-                    // a que termine el init async de Auth (que puede tardar por el 404 del trial).
-                    // El accountingManager.refresh() lee de Auth.currentUser, así que debe existir.
-                    if (Auth && !Auth.currentUser) {
-                        Auth.currentUser = this.currentUser;
-                        Auth.token = token;
-                    }
-                    if (this.accountingManager && this.accountingManager.auth && !this.accountingManager.auth.currentUser) {
-                        this.accountingManager.auth.currentUser = this.currentUser;
-                    }
                     console.log('Usuario autenticado:', this.currentUser.name);
                     this.init();
                 } catch (error) {
@@ -2103,23 +2093,14 @@
                 // En este punto sabemos que hay un usuario válido
                 this.setupEventListeners();
                 this.setupSidebar();
-
-                // CRÍTICO: cargar los datos ANTES de los renders.
-                try {
-                    await this.loadDashboardData();
-                } catch (e) {
-                    console.error('Error cargando datos del dashboard:', e);
-                }
-
-                // Renders protegidos: si uno falla, no rompe los demás ni la carga de datos
-                const safe = (fn, name) => { try { fn.call(this); } catch (e) { console.error('Error en ' + name + ':', e); } };
-                safe(this.checkPaymentSuccess, 'checkPaymentSuccess');
-                safe(this.renderUserInfo, 'renderUserInfo');
-                safe(this.renderPlanBadge, 'renderPlanBadge');
-                safe(this.renderUpgradeSection, 'renderUpgradeSection');
-                safe(this.renderBankConnectionSection, 'renderBankConnectionSection');
-                safe(this.showNotificationsContainer, 'showNotificationsContainer');
-
+                this.checkPaymentSuccess();
+                this.renderUserInfo();
+                this.renderPlanBadge();
+                this.renderUpgradeSection();
+                this.renderBankConnectionSection();
+                this.showNotificationsContainer();
+                this.showNotificationsContainer();
+                await this.loadDashboardData();
                 this.showSection('dashboard');
             }
             
@@ -2577,10 +2558,10 @@
                 } else {
                     upgradeSection.innerHTML = `
                         <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:1rem;border-radius:0.5rem;">
-                            <h4 style="font-weight:600;color:#1e3a8a;margin-bottom:0.5rem;">¿Necesitas más funciones?</h4>
-                            <p style="font-size:0.875rem;color:#1d4ed8;margin-bottom:0.75rem;">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
-                            <button onclick="dashboard.showPlanSelector()" style="width:100%;background:#2563eb;color:#fff;padding:0.5rem;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:500;cursor:pointer;" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
-                                <i class="fas fa-star" style="margin-right:0.5rem;"></i>
+                            <h4 style="font-weight:600;color:#111827;margin-bottom:0.5rem;">¿Necesitas más funciones?</h4>
+                            <p style="font-size:0.875rem;color:#1f2937;margin-bottom:0.75rem;">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
+                            <button onclick="dashboard.showPlanSelector()" style="width:100%;background:#2563eb;color:#ffffff;padding:0.5rem;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:600;cursor:pointer;" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+                                <i class="fas fa-star" style="margin-right:0.5rem;color:#ffffff;"></i>
                                 Ver Planes
                             </button>
                         </div>
@@ -4120,27 +4101,21 @@
             }
 
             async loadDashboardData() {
-                // 1. Cargar cuentas y movimientos (lo esencial)
-                try {
-                    await this.accountingManager.loadUserData();
-                } catch (e) {
-                    console.error('Error cargando cuentas/movimientos:', e);
-                }
-
-                // 2. Datos de negocio adicionales — protegidos
+                await this.accountingManager.loadUserData();
+                // Cargar datos de negocio adicionales en caché (autocontrol, banco)
                 const uid = this.currentUser?.id;
                 if (uid) {
-                    try { this._autocontrolPlan = await DataClient.getAutocontrolPlan(uid); } catch (e) { console.error('autocontrolPlan:', e); }
-                    try { const assoc = await DataClient.getAutocontrolAssociations(uid); if (assoc) this.accountAssociations = assoc; } catch (e) { console.error('assoc:', e); }
-                    try { const conns = await DataClient.listBankConnections(uid); this._bankConnection = (conns && conns.length) ? conns[0] : null; } catch (e) { console.error('bankConns:', e); }
-                    try { this._scenariosCache = await DataClient.getScenarios(uid); } catch (e) { console.error('scenarios:', e); }
+                    this._autocontrolPlan = await DataClient.getAutocontrolPlan(uid);
+                    const assoc = await DataClient.getAutocontrolAssociations(uid);
+                    if (assoc) this.accountAssociations = assoc;
+                    const conns = await DataClient.listBankConnections(uid);
+                    this._bankConnection = (conns && conns.length) ? conns[0] : null;
+                    this._scenariosCache = await DataClient.getScenarios(uid);
                 }
-
-                // 3. Renders protegidos
-                try { this.updateDashboardMetrics(); } catch (e) { console.error('updateDashboardMetrics:', e); }
-                try { this.renderIncomeExpensesChart(); } catch (e) { console.error('renderIncomeExpensesChart:', e); }
-                try { this.renderRecentMovements(); } catch (e) { console.error('renderRecentMovements:', e); }
-                try { this.renderInsights(); } catch (e) { console.error('renderInsights:', e); }
+                this.updateDashboardMetrics();
+                this.renderIncomeExpensesChart();
+                this.renderRecentMovements();
+                this.renderInsights();
             }
 
             // ====================================================
@@ -5804,29 +5779,29 @@
                 modal.id = 'plan-selector-modal';
                 modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:1rem;';
                 modal.innerHTML = `
-                    <div style="background:#fff;border-radius:1rem;max-width:440px;width:100%;padding:1.75rem;box-shadow:0 20px 50px rgba(0,0,0,0.3);">
+                    <div style="background:#ffffff;border-radius:1rem;max-width:440px;width:100%;padding:1.75rem;box-shadow:0 20px 50px rgba(0,0,0,0.3);">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
                             <h3 style="font-size:1.25rem;font-weight:700;color:#111827;">Elige tu plan Premium</h3>
                             <button onclick="document.getElementById('plan-selector-modal').remove()" style="background:none;border:none;font-size:1.5rem;color:#9ca3af;cursor:pointer;line-height:1;">&times;</button>
                         </div>
-                        <p style="color:#6b7280;font-size:0.9rem;margin-bottom:1.25rem;">Desbloquea todas las funciones: conexión bancaria, plan de autocontrol, reglas de categorización y notificaciones.</p>
+                        <p style="color:#4b5563;font-size:0.9rem;margin-bottom:1.25rem;">Desbloquea todas las funciones: conexión bancaria, plan de autocontrol, reglas de categorización y notificaciones.</p>
 
-                        <button onclick="dashboard.goToCheckout('monthly')" style="width:100%;border:2px solid #e5e7eb;border-radius:0.75rem;padding:1rem;margin-bottom:0.75rem;text-align:left;cursor:pointer;background:#fff;transition:all .15s;" onmouseover="this.style.borderColor='#0158C9'" onmouseout="this.style.borderColor='#e5e7eb'">
+                        <button onclick="dashboard.goToCheckout('monthly')" style="width:100%;border:2px solid #e5e7eb;border-radius:0.75rem;padding:1rem;margin-bottom:0.75rem;text-align:left;cursor:pointer;background:#ffffff;transition:all .15s;" onmouseover="this.style.borderColor='#0158C9'" onmouseout="this.style.borderColor='#e5e7eb'">
                             <div style="display:flex;justify-content:space-between;align-items:center;">
                                 <div>
-                                    <p style="font-weight:600;color:#111827;">Mensual</p>
-                                    <p style="font-size:0.8rem;color:#6b7280;">Facturación cada mes</p>
+                                    <p style="font-weight:600;color:#111827;margin:0;">Mensual</p>
+                                    <p style="font-size:0.8rem;color:#4b5563;margin:0;">Facturación cada mes</p>
                                 </div>
                                 <i class="fas fa-chevron-right" style="color:#0158C9;"></i>
                             </div>
                         </button>
 
                         <button onclick="dashboard.goToCheckout('yearly')" style="width:100%;border:2px solid #0158C9;border-radius:0.75rem;padding:1rem;text-align:left;cursor:pointer;background:#eff6ff;position:relative;transition:all .15s;">
-                            <span style="position:absolute;top:-10px;right:12px;background:#61CE70;color:#fff;font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:9999px;">AHORRA</span>
+                            <span style="position:absolute;top:-10px;right:12px;background:#61CE70;color:#ffffff;font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:9999px;">AHORRA</span>
                             <div style="display:flex;justify-content:space-between;align-items:center;">
                                 <div>
-                                    <p style="font-weight:600;color:#111827;">Anual</p>
-                                    <p style="font-size:0.8rem;color:#6b7280;">Facturación una vez al año</p>
+                                    <p style="font-weight:600;color:#111827;margin:0;">Anual</p>
+                                    <p style="font-size:0.8rem;color:#4b5563;margin:0;">Facturación una vez al año</p>
                                 </div>
                                 <i class="fas fa-chevron-right" style="color:#0158C9;"></i>
                             </div>
