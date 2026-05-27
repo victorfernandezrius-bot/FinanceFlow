@@ -4447,10 +4447,9 @@
             updateDashboardMetrics() {
                 const stats = this.accountingManager.calculateFinancialStats();
                 
-                // Calcular saldo de cuentas bancarias (activos)
-                const bankBalance = this.accountingManager.getAccounts()
-                    .filter(acc => acc.tipo === 'activo')
-                    .reduce((sum, acc) => sum + acc.saldo_actual, 0);
+              // Saldo bancario: solo cuentas marcadas como "dinero en el banco"
+                // (si no hay ninguna marcada, calculateBankBalance hace fallback a todos los activos)
+                const bankBalance = this.accountingManager.calculateBankBalance();
                 
                 document.getElementById('total-balance').textContent = this.formatCurrency(stats.saldo_total);
                 document.getElementById('bank-balance').textContent = this.formatCurrency(bankBalance);
