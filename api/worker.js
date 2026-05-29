@@ -658,7 +658,7 @@ function welcomeEmailHTML(name) {
           <tr><td style="padding:32px;">
             <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido, ${name}! 👋</h2>
             <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
-              Gracias por unirte a Contabilidad Personal. Ya puedes empezar a controlar tus finanzas con precisión:
+              Gracias por unirte a Finance Flow. Ya puedes empezar a controlar tus finanzas con precisión:
               crea tus cuentas, registra movimientos y descubre tu situación financiera real.
             </p>
             <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">
