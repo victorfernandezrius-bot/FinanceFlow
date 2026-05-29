@@ -136,9 +136,15 @@ export default {
                      VALUES (?,?,?,?,?,?,?)`)
                     .bind(id, email.toLowerCase(), name, pwHash, plan, planExp, now).run();
 
-                const token = await signJWT({ sub: id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, created_at: now };
-                return json({ success: true, token, currentUser: user }, 201, cors);
+                const token = await signJWT({ sub: id, exp: Math.floor(Date.now() / 1e3) + 30 * 86400 }, env.JWT_SECRET);
+        const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, created_at: now };
+        // Enviar email de bienvenida (sin bloquear la respuesta)
+        ctx.waitUntil(sendEmail(env, {
+          to: email.toLowerCase(),
+          subject: '¡Bienvenido a Finance Flow!',
+          html: welcomeEmailHTML(name)
+        }));
+        return json({ success: true, token, currentUser: user }, 201, cors);
             }
 
             if (path === '/api/auth/login' && method === 'POST') {
@@ -606,4 +612,75 @@ async function verifyStripeSignature(payload, sigHeader, secret) {
         const expected = [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
         return expected === parts.v1;
     } catch { return false; }
+}
+// ---------- Resend correos app ----------
+async function sendEmail(env, { to, subject, html }) {
+  if (!env.RESEND_API_KEY) {
+    console.error('RESEND_API_KEY no configurada');
+    return false;
+  }
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: 'Contabilidad Personal <no-reply@contabilidadpersonal.com>',
+        to: [to],
+        subject,
+        html
+      })
+    });
+    if (!r.ok) {
+      const err = await r.text();
+      console.error('Error Resend:', err);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('Excepción enviando email:', e);
+    return false;
+  }
+}
+function welcomeEmailHTML(name) {
+  return `
+  <!DOCTYPE html>
+  <html lang="es">
+  <body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
+      <tr><td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+          <tr><td style="background:#0158C9;padding:28px 32px;">
+            <h1 style="margin:0;color:#ffffff;font-size:22px;">Contabilidad Personal</h1>
+          </td></tr>
+          <tr><td style="padding:32px;">
+            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido, ${name}! 👋</h2>
+            <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
+              Gracias por unirte a Contabilidad Personal. Ya puedes empezar a controlar tus finanzas con precisión:
+              crea tus cuentas, registra movimientos y descubre tu situación financiera real.
+            </p>
+            <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">
+              Entra en tu panel y da de alta tu primera cuenta para comenzar.
+            </p>
+            <a href="https://app.contabilidadpersonal.com/dashboard"
+               style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;
+                      padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">
+              Ir a mi panel
+            </a>
+            <p style="margin:28px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">
+              Si no has creado esta cuenta, puedes ignorar este correo.
+            </p>
+          </td></tr>
+          <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;">
+            <p style="margin:0;color:#9ca3af;font-size:12px;">
+              © 2026 Contabilidad Personal · contabilidadpersonal.com
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+  </html>`;
 }
