@@ -685,7 +685,7 @@ class AccountingManager {
     calculateBankBalance() {
         const allActivos = this.getAccounts('activo');
         // Si hay cuentas marcadas como bancarias, usar solo esas
-        const bankAccounts = allActivos.filter(acc => acc.is_bank_account === true);
+        const bankAccounts = allActivos.filter(acc => acc.is_bank_account === true || acc.is_bank_account === 1);
         const accountsToSum = bankAccounts.length > 0 ? bankAccounts : allActivos;
         return accountsToSum.reduce((total, account) => {
             return total + (account.saldo_actual || 0);
