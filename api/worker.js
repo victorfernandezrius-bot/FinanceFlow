@@ -506,6 +506,14 @@ export default {
                         await env.DB.prepare(
                             `UPDATE users SET plan='premium', plan_expires_at=?, stripe_customer_id=?, stripe_subscription_id=?, updated_at=? WHERE id=?`)
                             .bind(exp, s.customer || null, s.subscription || null, new Date().toISOString(), userId).run();
+                        const u = await env.DB.prepare('SELECT email, name FROM users WHERE id=?').bind(userId).first();
+                        if (u && u.email) {
+                            ctx.waitUntil(sendEmail(env, {
+                                to: u.email,
+                                subject: '¡Bienvenido a Premium! - Contabilidad Personal',
+                                html: premiumActivatedEmailHTML(u.name || '', planType)
+                            }));
+                        }
                     }
                 }
                 if (event.type === 'customer.subscription.deleted') {
@@ -683,4 +691,18 @@ function welcomeEmailHTML(name) {
     </table>
   </body>
   </html>`;
+}
+function premiumActivatedEmailHTML(name, planType) {
+    const planLabel = planType === 'annual' ? 'anual' : 'mensual';
+    return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+    <tr><td style="background:#61CE70;padding:28px 32px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">¡Ya eres Premium! 🎉</h1></td></tr>
+    <tr><td style="padding:32px;">
+    <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Gracias, ${name}</h2>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Tu suscripción <strong>Premium ${planLabel}</strong> está activa. Ya tienes acceso a conexión bancaria, plan de autocontrol, reglas de categorización y notificaciones inteligentes.</p>
+    <a href="https://app.contabilidadpersonal.com/dashboard" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Ir a mi panel</a>
+    </td></tr>
+    <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Contabilidad Personal · contabilidadpersonal.com</p></td></tr>
+    </table></td></tr></table></body></html>`;
 }
