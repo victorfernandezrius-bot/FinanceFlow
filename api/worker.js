@@ -47,7 +47,7 @@ async function signJWT(payload, secret) {
     const key = await crypto.subtle.importKey('raw', enc.encode(secret),
         { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
-    const b64sig = btoa(String.fromCharCode(...new Uint8Array(sig)))
+    const b64sig = btoa(String.CharCode(...new Uint8Array(sig)))
         .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
     return `${data}.${b64sig}`;
 }
@@ -635,7 +635,7 @@ async function sendEmail(env, { to, subject, html }) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        from: 'Contabilidad Personal <no-reply@contabilidadpersonal.com>',
+        from: 'Finance Flow <no-reply@contabilidadpersonal.com>',
         to: [to],
         subject,
         html
@@ -660,8 +660,11 @@ function welcomeEmailHTML(name) {
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
       <tr><td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-          <tr><td style="background:#0158C9;padding:28px 32px;">
-            <h1 style="margin:0;color:#ffffff;font-size:22px;">Contabilidad Personal</h1>
+          <tr><td style="background:#0158C9;padding:24px 32px;">
+            <table cellpadding="0" cellspacing="0"><tr>
+              <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
+              <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+            </tr></table>
           </td></tr>
           <tr><td style="padding:32px;">
             <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido, ${name}! 👋</h2>
