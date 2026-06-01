@@ -47,8 +47,7 @@ async function signJWT(payload, secret) {
     const key = await crypto.subtle.importKey('raw', enc.encode(secret),
         { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
-    const b64sig = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, "")...
-        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const b64sig = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, "").replace(/\+/g, '-').replace(/\//g, '_');
     return `${data}.${b64sig}`;
 }
 
