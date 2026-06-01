@@ -93,7 +93,7 @@
         
         /* Componentes adaptativos */
         .card-mobile {
-            background-color: var(--bg-primary);
+            -color: var(--bg-primary);
             border: 1px solid var(--border-color);
             border-radius: var(--space-2);
             padding: var(--space-4);
@@ -130,7 +130,7 @@
                 padding: var(--space-4);
                 border: 1px solid var(--border-color);
                 border-radius: var(--space-2);
-                background-color: var(--bg-primary);
+                -color: var(--bg-primary);
             }
             
             .table-adaptive td {
@@ -238,7 +238,7 @@
             display: none;
             position: fixed;
             inset: 0;
-            background-color: rgba(0, 0, 0, 0.5);
+            -color: rgba(0, 0, 0, 0.5);
             z-index: 40;
             transition: opacity 0.3s ease-in-out;
         }
@@ -249,7 +249,7 @@
         }
         
         .premium-badge {
-            background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+            : linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
             color: #1a1a1a !important;
         }
         
@@ -262,7 +262,7 @@
             content: '';
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255, 255, 255, 0.8);
+            : rgba(255, 255, 255, 0.8);
             border-radius: 0.5rem;
             z-index: 1;
         }
@@ -339,7 +339,7 @@
             position: relative;
             width: 60px;
             height: 30px;
-            background: var(--border-color);
+            : var(--border-color);
             border-radius: 15px;
             cursor: pointer;
             transition: all 0.3s ease;
@@ -353,7 +353,7 @@
             left: 2px;
             width: 22px;
             height: 22px;
-            background: var(--text-primary);
+            : var(--text-primary);
             border-radius: 50%;
             transition: all 0.3s ease;
             display: flex;
@@ -363,7 +363,7 @@
         
         html.dark .theme-toggle::after {
             transform: translateX(26px);
-            background: var(--azul-claro);
+            : var(--azul-claro);
         }
         
         html.dark .theme-toggle {
@@ -432,6 +432,11 @@
         html.dark #user-menu a:hover {
             background-color: #2a2a2a !important;
         }
+        /* Forzar texto legible en modal de planes y recuadro upgrade, incluso en dark mode */
+        #plan-selector-modal h3, #plan-selector-modal p { color: #111827 !important; }
+        #plan-selector-modal p[style*="4b5563"] { color: #4b5563 !important; }
+        #upgrade-section h4 { color: #111827 !important; }
+        #upgrade-section p { color: #1f2937 !important; }
     </style>
 </head>
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
@@ -2574,9 +2579,9 @@
                     }
                 } else {
                     upgradeSection.innerHTML = `
-                        <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:1rem;border-radius:0.5rem;">
-                            <h4 style="font-weight:600;color:#111827;margin-bottom:0.5rem;">¿Necesitas más funciones?</h4>
-                            <p style="font-size:0.875rem;color:#1f2937;margin-bottom:0.75rem;">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
+                        <div style="background:#eff6ff;border:1px solid #bfdbfe;padding:1rem;border-radius:0.5rem;color-scheme:light;">
+                            <h4 style="font-weight:600;color:#111827 !important;margin-bottom:0.5rem;">¿Necesitas más funciones?</h4>
+                            <p style="font-size:0.875rem;color:#1f2937 !important;margin-bottom:0.75rem;">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
                             <button onclick="dashboard.showPlanSelector()" style="width:100%;background:#2563eb;color:#ffffff;padding:0.5rem;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:600;cursor:pointer;" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
                                 <i class="fas fa-star" style="margin-right:0.5rem;color:#ffffff;"></i>
                                 Ver Planes
