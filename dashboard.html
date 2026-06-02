@@ -432,11 +432,9 @@
         html.dark #user-menu a:hover {
             background-color: #2a2a2a !important;
         }
-        /* Forzar texto legible en modal de planes y recuadro upgrade, incluso en dark mode */
-        #plan-selector-modal h3, #plan-selector-modal p { color: #111827 !important; }
-        #plan-selector-modal p[style*="4b5563"] { color: #4b5563 !important; }
-        #upgrade-section h4 { color: #111827 !important; }
-        #upgrade-section p { color: #1f2937 !important; }
+/* Forzar texto legible SOLO en el modal de planes, sin afectar al resto del dashboard */
+        #plan-selector-modal h3 { color: #111827 !important; }
+        #plan-selector-modal p { color: #374151 !important; }
     </style>
 </head>
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
