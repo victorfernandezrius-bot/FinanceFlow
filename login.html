@@ -328,11 +328,14 @@
             submitBtn.disabled = true;
             submitBtn.textContent = 'Enviando...';
             
-            try {
-                // Simular envío (integrar con backend real después)
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                alert(`Se ha enviado un enlace de recuperación a ${email}`);
+         try {
+                const API = window.API_URL || 'https://financeflow.victor-a97.workers.dev/api';
+                await fetch(`${API}/auth/forgot-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: (email || '').trim().toLowerCase() })
+                });
+                alert('Si ese email está registrado, recibirás un enlace para restablecer tu contraseña. Revisa tu bandeja de entrada y la carpeta de spam.');
                 document.getElementById('forgot-password-modal').classList.add('hidden');
                 document.getElementById('forgot-password-form').reset();
             } catch (error) {
@@ -340,7 +343,6 @@
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Enviar Enlace';
-            }
         });
 
         // Toggle mostrar/ocultar contraseña
