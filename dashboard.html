@@ -7573,17 +7573,16 @@
                             <hr style="border-color: var(--border-color);">
                             
                             <button 
-                                id="change-password-btn" 
+                                id="delete-account-btn" 
                                 class="w-full text-left rounded-md transition-colors duration-200" 
-                                style="padding: var(--space-3); color: var(--text-primary); border: 1px solid var(--border-color);"
-                                onmouseover="this.style.backgroundColor='var(--bg-secondary)'" 
+                                style="padding: var(--space-3); color: #dc2626; border: 1px solid #f3c2c2;"
+                                onmouseover="this.style.backgroundColor='rgba(220,38,38,0.06)'" 
                                 onmouseout="this.style.backgroundColor='transparent'"
                             >
-                                <i class="fas fa-key mr-2" style="color: var(--brand-primary);"></i>
-                                <span class="font-medium">Cambiar Contraseña</span>
-                                <p class="small-text mt-1" style="color: var(--text-secondary);">Actualizar tu contraseña de acceso</p>
+                                <i class="fas fa-trash-alt mr-2" style="color: #dc2626;"></i>
+                                <span class="font-medium">Eliminar mi cuenta</span>
+                                <p class="small-text mt-1" style="color: var(--text-secondary);">Borra permanentemente tu cuenta y todos tus datos</p>
                             </button>
-                        </div>
                         
                         <div class="flex justify-end mt-8">
                             <button onclick="document.getElementById('settings-modal').remove()" class="btn-responsive" style="background-color: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);">
@@ -7611,14 +7610,85 @@
                 }
                 
                 // Botón cambiar contraseña
-                const changePasswordBtn = document.getElementById('change-password-btn');
-                if (changePasswordBtn) {
-                    changePasswordBtn.addEventListener('click', () => {
-                        this.showChangePasswordModal();
+               // Botón eliminar cuenta
+                const deleteAccountBtn = document.getElementById('delete-account-btn');
+                if (deleteAccountBtn) {
+                    deleteAccountBtn.addEventListener('click', () => {
+                        this.showDeleteAccountModal();
                     });
                 }
+            showDeleteAccountModal() {
+                const settingsModal = document.getElementById('settings-modal');
+                if (settingsModal) settingsModal.remove();
+
+                const modal = document.createElement('div');
+                modal.id = 'delete-account-modal';
+                modal.className = 'fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center';
+                modal.innerHTML = `
+                    <div class="relative p-8 w-full max-w-md m-auto rounded-lg shadow-lg" style="background-color: var(--bg-primary);">
+                        <h3 class="heading-2" style="color:#dc2626;margin-bottom:1rem;">
+                            <i class="fas fa-exclamation-triangle mr-2"></i>Eliminar cuenta
+                        </h3>
+                        <p style="color: var(--text-primary); margin-bottom:1rem; line-height:1.5;">
+                            Esta acción es <strong>permanente e irreversible</strong>. Se borrarán tu cuenta,
+                            tus cuentas, movimientos, reglas y todos tus datos. No podrás recuperarlos.
+                        </p>
+                        <p style="color: var(--text-secondary); margin-bottom:.5rem; font-size:.9rem;">
+                            Para confirmar, escribe <strong>ELIMINAR</strong> en el campo:
+                        </p>
+                        <input type="text" id="delete-confirm-input" autocomplete="off"
+                            class="w-full rounded-md form-input" 
+                            style="padding: var(--space-3); background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); margin-bottom:1.5rem;"
+                            placeholder="Escribe ELIMINAR">
+                        <div class="flex flex-col sm:flex-row justify-end gap-3">
+                            <button onclick="document.getElementById('delete-account-modal').remove()" class="btn-responsive" style="background-color: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);">
+                                Cancelar
+                            </button>
+                            <button id="confirm-delete-btn" class="btn-responsive" style="background-color:#dc2626; color:white;" disabled>
+                                <i class="fas fa-trash-alt mr-2"></i>Eliminar definitivamente
+                            </button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                const input = document.getElementById('delete-confirm-input');
+                const confirmBtn = document.getElementById('confirm-delete-btn');
+                input.addEventListener('input', () => {
+                    const ok = input.value.trim().toUpperCase() === 'ELIMINAR';
+                    confirmBtn.disabled = !ok;
+                    confirmBtn.style.opacity = ok ? '1' : '0.5';
+                });
+                confirmBtn.style.opacity = '0.5';
+                confirmBtn.addEventListener('click', () => this.processAccountDeletion());
             }
-            
+
+            async processAccountDeletion() {
+                const confirmBtn = document.getElementById('confirm-delete-btn');
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Eliminando...';
+                try {
+                    const API = window.API_URL || 'https://financeflow.victor-a97.workers.dev/api';
+                    const token = localStorage.getItem('financeflow_token');
+                    const userId = this.currentUser?.id;
+                    const r = await fetch(`${API}/users/${userId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    if (!r.ok) throw new Error('No se pudo eliminar la cuenta');
+                    // Limpiar sesión local y salir
+                    localStorage.removeItem('financeflow_token');
+                    localStorage.removeItem('currentUser');
+                    document.getElementById('delete-account-modal')?.remove();
+                    this.showNotification('Tu cuenta ha sido eliminada. Hasta pronto.', 'info');
+                    setTimeout(() => { window.location.href = './index.html'; }, 1500);
+                } catch (e) {
+                    console.error('Error al eliminar cuenta:', e);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = '<i class="fas fa-trash-alt mr-2"></i>Eliminar definitivamente';
+                    this.showNotification('Error al eliminar la cuenta. Inténtalo de nuevo.', 'error');
+                }
+            }
             showChangePasswordModal() {
                 // Remover modal de configuración
                 const settingsModal = document.getElementById('settings-modal');
