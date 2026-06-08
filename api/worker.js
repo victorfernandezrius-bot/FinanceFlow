@@ -32,7 +32,7 @@ function corsHeaders(request, env) {
         ? origin : allowed;
     return {
         'Access-Control-Allow-Origin': allowOrigin,
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, , OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Credentials': 'true'
     };
@@ -154,7 +154,7 @@ export default {
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
 
                 const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
+                 user.password_hash;
                 return json({ success: true, token, currentUser: user }, 200, cors);
             }
 
@@ -221,9 +221,23 @@ export default {
                               u.plan_expires_at ?? authUser.plan_expires_at, now, authUser.id).run();
                     return json({ ...authUser, ...u }, 200, cors);
                 }
-                if (method === 'DELETE') {
-                    await env.DB.prepare('DELETE FROM users WHERE id=?').bind(authUser.id).run();
-                    return json({ success: true }, 200, cors);
+                if (method === "DELETE") {
+          const u = authUser.id;
+          await env.DB.batch([
+            env.DB.prepare("DELETE FROM movements WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM accounts WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM categorization_rules WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM autocontrol_plan WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM autocontrol_associations WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM scenarios WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM notifications WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM bank_connections WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM import_info WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(u),
+            env.DB.prepare("DELETE FROM users WHERE id=?").bind(u)
+          ]);
+          return json({ success: true }, 200, cors);
+        }
                 }
             }
 
