@@ -595,7 +595,7 @@
                     
                     <a href="#" id="nav-categorization" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-tags mr-3"></i>
-                        Reglas de Categorización
+                        Reglas de Registro Automático
                         <span class="premium-badge ml-2 px-2 py-1 text-xs text-white rounded">PREMIUM</span>
                     </a>
                     
@@ -834,75 +834,66 @@
                         </div>
                     </div>
                     
-                    <!-- Conexión Bancaria Premium -->
-                    <div id="bank-connection-section" class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 shadow-sm border border-blue-200 mb-6 hidden">
-                        <div class="flex items-start justify-between">
-                            <div class="flex-1">
-                                <div class="flex items-center mb-3">
-                                    <div class="bg-blue-100 rounded-full p-2 mr-3">
-                                        <i class="fas fa-university text-blue-600"></i>
-                                    </div>
-                                    <div>
-                                        <h3 class="text-lg font-semibold text-gray-900">Conexión Bancaria Automática</h3>
-                                        <span class="premium-badge px-2 py-1 text-xs text-white rounded-full">PREMIUM</span>
-                                    </div>
-                                </div>
-                                <p class="text-gray-600 text-sm mb-4">Conecta tu cuenta bancaria para importar movimientos automáticamente.</p>
-                                
-                                <!-- Estado: Sin conexión -->
-                                <div id="no-bank-connection" class="">
-                                    <div class="flex items-center text-gray-500 mb-4">
-                                        <i class="fas fa-plug mr-2"></i>
-                                        <span class="text-sm">No hay cuentas bancarias conectadas</span>
-                                    </div>
-                                    <button id="connect-bank-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm w-full sm:w-auto">
-                                        <i class="fas fa-link mr-2"></i>
-                                        Conectar Cuenta Bancaria
-                                    </button>
-                                </div>
-                                
-                                <!-- Estado: Conectado -->
-                                <div id="bank-connected" class="hidden">
-                                    <div class="flex items-center justify-between bg-white rounded-lg p-4 border border-green-200">
-                                        <div class="flex items-center">
-                                            <div class="bg-green-100 rounded-full p-2 mr-3">
-                                                <i class="fas fa-check-circle text-green-600"></i>
-                                            </div>
-                                            <div>
-                                                <h4 class="font-medium text-gray-900" id="connected-bank-name">Banco Conectado</h4>
-                                                <p class="text-sm text-gray-500" id="connected-account-info">Cuenta: ****1234</p>
-                                                <p class="text-xs text-green-600" id="last-sync">Última sincronización: Ahora</p>
-                                                <p class="text-xs text-blue-600" id="import-info">Movimientos importados: 0</p>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center space-x-2">
-                                            <button id="sync-bank-btn" class="text-blue-600 hover:text-blue-800 text-sm">
-                                                <i class="fas fa-sync-alt mr-1"></i>
-                                                Sincronizar
-                                            </button>
-                                            <button id="disconnect-bank-btn" class="text-red-600 hover:text-red-800 text-sm">
-                                                <i class="fas fa-unlink mr-1"></i>
-                                                Desconectar
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Información de Automatización -->
-                                    <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                        <div class="flex items-center justify-between">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-robot text-blue-600 mr-2"></i>
-                                                <span class="text-sm text-blue-800 font-medium">Importación Automática</span>
-                                            </div>
-                                            <span class="text-xs text-blue-700 bg-blue-100 px-2 py-1 rounded">
-                                                <i class="fas fa-check mr-1"></i>ACTIVA
-                                            </span>
-                                        </div>
-                                        <p class="text-xs text-blue-700 mt-1">
-                                            Los movimientos se importan automáticamente al sincronizar
-                                        </p>
-                                    </div>
-                                </div>
+                    <!-- Importar Extracto Bancario (Premium) -->
+                    <div id="import-statement-section" class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 shadow-sm border border-blue-200 mb-6 hidden">
+                        <div class="flex items-center mb-3">
+                            <div class="bg-blue-100 rounded-full p-2 mr-3">
+                                <i class="fas fa-file-import text-blue-600"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">Importar Extracto Bancario</h3>
+                                <span class="premium-badge px-2 py-1 text-xs text-white rounded-full">PREMIUM</span>
+                            </div>
+                        </div>
+                        <p class="text-gray-600 text-sm mb-4">Sube el extracto de tu banco (CSV, Excel o PDF). Detectaremos los movimientos y aplicaremos tus reglas de registro automático antes de confirmar.</p>
+
+                        <!-- Paso 1: configuración -->
+                        <div id="import-config" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta bancaria del extracto</label>
+                                <select id="import-bank-account" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="">Selecciona la cuenta (activo) a la que pertenece el extracto</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Cada ingreso/gasto del extracto se registrará contra esta cuenta.</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Archivo del extracto</label>
+                                <input type="file" id="import-file-input" accept=".csv,.xls,.xlsx,.pdf" class="w-full text-sm text-gray-700 border border-gray-300 rounded-md p-2 bg-white">
+                                <p class="text-xs text-gray-500 mt-1">Formatos: CSV, Excel (.xls/.xlsx) y PDF (experimental).</p>
+                            </div>
+                            <div id="import-pdf-warning" class="hidden bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                                <i class="fas fa-triangle-exclamation mr-1"></i><strong>PDF experimental:</strong> los extractos en PDF varían mucho entre bancos; la detección puede fallar o ser parcial. Si los movimientos no se detectan bien, exporta el extracto a CSV/Excel desde tu banca online.
+                            </div>
+                            <button id="import-parse-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm w-full sm:w-auto">
+                                <i class="fas fa-magnifying-glass-chart mr-2"></i>Analizar extracto
+                            </button>
+                        </div>
+
+                        <!-- Paso 2: previsualización -->
+                        <div id="import-preview" class="hidden mt-5">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="font-medium text-gray-900">Movimientos detectados</h4>
+                                <span id="import-preview-summary" class="text-xs text-gray-500"></span>
+                            </div>
+                            <div class="overflow-x-auto bg-white border border-gray-200 rounded-lg">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-gray-50 text-gray-600">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left font-medium">Fecha</th>
+                                            <th class="px-3 py-2 text-left font-medium">Descripción</th>
+                                            <th class="px-3 py-2 text-right font-medium">Importe</th>
+                                            <th class="px-3 py-2 text-left font-medium">Tipo</th>
+                                            <th class="px-3 py-2 text-left font-medium">Categoría asignada</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="import-preview-body"></tbody>
+                                </table>
+                            </div>
+                            <div class="flex justify-end space-x-3 mt-4">
+                                <button id="import-cancel-btn" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 text-sm">Cancelar</button>
+                                <button id="import-confirm-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm">
+                                    <i class="fas fa-check mr-2"></i>Confirmar e importar
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1423,7 +1414,7 @@
                 <div class="section-container">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
                         <div>
-                            <h2 class="text-2xl font-bold text-gray-900">Reglas de Categorización</h2>
+                            <h2 class="text-2xl font-bold text-gray-900">Reglas de Registro Automático</h2>
                             <p class="text-gray-600">Automatiza la asignación de categorías para movimientos</p>
                             <span class="premium-badge px-2 py-1 text-xs text-white rounded-full mt-2">PREMIUM</span>
                         </div>
@@ -1818,77 +1809,6 @@
         </div>
     </div>
 
-    <!-- Modal para Conexión Bancaria -->
-    <div id="bank-connection-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
-        <div class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-                <form id="bank-connection-form">
-                    <div class="bg-white px-6 pt-6 pb-4">
-                        <div class="flex items-center mb-4">
-                            <div class="bg-blue-100 rounded-full p-3 mr-4">
-                                <i class="fas fa-university text-blue-600 text-xl"></i>
-                            </div>
-                            <div>
-                                <h3 class="text-lg font-medium text-gray-900">Conectar Cuenta Bancaria</h3>
-                                <p class="text-sm text-gray-500">Selecciona tu banco para conectar</p>
-                            </div>
-                        </div>
-                        
-                        <!-- Selector de Banco -->
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Banco</label>
-                            <select id="bank-select" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                                <option value="">Selecciona tu banco</option>
-                                <option value="santander">Banco Santander</option>
-                                <option value="bbva">BBVA</option>
-                                <option value="caixabank">CaixaBank</option>
-                                <option value="bankia">Bankia</option>
-                                <option value="sabadell">Banco Sabadell</option>
-                                <option value="unicaja">Unicaja Banco</option>
-                                <option value="kutxabank">Kutxabank</option>
-                                <option value="otros">Otros</option>
-                            </select>
-                        </div>
-                        
-                        <!-- Tipo de Cuenta -->
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Tipo de Cuenta</label>
-                            <select id="account-type-select" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                                <option value="">Selecciona el tipo</option>
-                                <option value="corriente">Cuenta Corriente</option>
-                                <option value="ahorro">Cuenta de Ahorro</option>
-                                <option value="nomina">Cuenta Nómina</option>
-                                <option value="empresarial">Cuenta Empresarial</option>
-                            </select>
-                        </div>
-                        
-                        <!-- Simulación de Autenticación -->
-                        <div class="mb-4">
-                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                <div class="flex items-center">
-                                    <i class="fas fa-info-circle text-blue-600 mr-2"></i>
-                                    <div class="text-sm text-blue-800">
-                                        <strong>Modo Simulación:</strong> Esta es una demostración de la funcionalidad. No se realizará una conexión real con tu banco.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="bg-gray-50 px-6 py-4 flex justify-end space-x-3">
-                        <button type="button" id="cancel-bank-connection-btn" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400">
-                            Cancelar
-                        </button>
-                        <button type="submit" id="save-bank-connection-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
-                            <i class="fas fa-link mr-2"></i>
-                            Conectar
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <!-- Modal para Reglas de Categorización -->
     <div id="rule-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
         <div class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
@@ -1900,7 +1820,7 @@
                                 <i class="fas fa-tags text-blue-600 text-xl"></i>
                             </div>
                             <div>
-                                <h3 class="text-lg font-medium text-gray-900" id="rule-modal-title">Nueva Regla de Categorización</h3>
+                                <h3 class="text-lg font-medium text-gray-900" id="rule-modal-title">Nueva Regla de Registro Automático</h3>
                                 <p class="text-sm text-gray-500">Define cómo categorizar automáticamente los movimientos</p>
                             </div>
                         </div>
@@ -2099,7 +2019,7 @@
                 setTimeout(() => {
                     this.renderPlanBadge();
                     this.renderUpgradeSection();
-                    this.renderBankConnectionSection();
+                    this.renderImportStatementSection();
                 }, 1000);
             }
 
@@ -2120,7 +2040,7 @@
                 safe(this.renderUserInfo, 'renderUserInfo');
                 safe(this.renderPlanBadge, 'renderPlanBadge');
                 safe(this.renderUpgradeSection, 'renderUpgradeSection');
-                safe(this.renderBankConnectionSection, 'renderBankConnectionSection');
+                safe(this.renderImportStatementSection, 'renderImportStatementSection');
                 safe(this.showNotificationsContainer, 'showNotificationsContainer');
 
                 this.showSection('dashboard');
@@ -2264,12 +2184,22 @@
                     }
                 });
                 
-                // Conexión Bancaria Premium
-                const connectBankBtn = document.getElementById('connect-bank-btn');
-                if (connectBankBtn) {
-                    connectBankBtn.addEventListener('click', () => {
-                        this.openBankConnectionModal();
-                    });
+                // Importar Extracto Bancario (Premium)
+                const importParseBtn = document.getElementById('import-parse-btn');
+                if (importParseBtn) {
+                    importParseBtn.addEventListener('click', () => this.handleStatementParse());
+                }
+                const importFileInput = document.getElementById('import-file-input');
+                if (importFileInput) {
+                    importFileInput.addEventListener('change', (e) => this.handleStatementFileChange(e));
+                }
+                const importConfirmBtn = document.getElementById('import-confirm-btn');
+                if (importConfirmBtn) {
+                    importConfirmBtn.addEventListener('click', () => this.confirmStatementImport());
+                }
+                const importCancelBtn = document.getElementById('import-cancel-btn');
+                if (importCancelBtn) {
+                    importCancelBtn.addEventListener('click', () => this.resetStatementImport());
                 }
                 
                 // Event Listeners para Exportación (Premium)
@@ -2312,35 +2242,6 @@
                 document.getElementById('export-end-date').addEventListener('change', () => {
                     this.updateExportPreview();
                 });
-                
-                const syncBankBtn = document.getElementById('sync-bank-btn');
-                if (syncBankBtn) {
-                    syncBankBtn.addEventListener('click', () => {
-                        this.syncBankAccount();
-                    });
-                }
-                
-                const disconnectBankBtn = document.getElementById('disconnect-bank-btn');
-                if (disconnectBankBtn) {
-                    disconnectBankBtn.addEventListener('click', () => {
-                        this.disconnectBankAccount();
-                    });
-                }
-                
-                // Modal de conexión bancaria
-                const bankConnectionForm = document.getElementById('bank-connection-form');
-                if (bankConnectionForm) {
-                    bankConnectionForm.addEventListener('submit', (e) => {
-                        this.handleBankConnectionSubmit(e);
-                    });
-                }
-                
-                const cancelBankConnectionBtn = document.getElementById('cancel-bank-connection-btn');
-                if (cancelBankConnectionBtn) {
-                    cancelBankConnectionBtn.addEventListener('click', () => {
-                        this.closeBankConnectionModal();
-                    });
-                }
                 
                 // Reglas de Categorización Premium
                 const createRuleBtn = document.getElementById('create-rule-btn');
@@ -2591,58 +2492,42 @@
                 }
             }
             
-            // === CONEXIÓN BANCARIA PREMIUM ===
-            
-            renderBankConnectionSection() {
-                const bankSection = document.getElementById('bank-connection-section');
-                if (!bankSection) return;
-                
-                // Solo mostrar para usuarios Premium
+            // === IMPORTAR EXTRACTO BANCARIO (PREMIUM) ===
+
+            renderImportStatementSection() {
+                const section = document.getElementById('import-statement-section');
+                if (!section) return;
                 if (Auth.isPremium()) {
-                    bankSection.classList.remove('hidden');
-                    this.updateBankConnectionStatus();
+                    section.classList.remove('hidden');
+                    this._populateImportAccountSelector();
                 } else {
-                    bankSection.classList.add('hidden');
+                    section.classList.add('hidden');
                 }
             }
-            
-            async updateBankConnectionStatus() {
-                const bankConnection = this.getBankConnection();
-                const noBankConnection = document.getElementById('no-bank-connection');
-                const bankConnected = document.getElementById('bank-connected');
-                
-                if (bankConnection) {
-                    noBankConnection.classList.add('hidden');
-                    bankConnected.classList.remove('hidden');
-                    
-                    // Actualizar información mostrada
-                    document.getElementById('connected-bank-name').textContent = bankConnection.bankName;
-                    document.getElementById('connected-account-info').textContent = 
-                        `Cuenta ${bankConnection.accountType}: ****${bankConnection.lastFourDigits}`;
-                    document.getElementById('last-sync').textContent = 
-                        `Última sincronización: ${bankConnection.lastSync}`;
-                        
-                    // Mostrar información de importación
-                    const importInfo = await this.getImportInfo(bankConnection);
-                    const importInfoElement = document.getElementById('import-info');
-                    if (importInfo) {
-                        const lastImportDate = new Date(importInfo.lastImportDate).toLocaleDateString('es-ES');
-                        importInfoElement.textContent = 
-                            `Última importación: ${lastImportDate} (${importInfo.totalImported} movimientos)`;
-                    } else {
-                        importInfoElement.textContent = 'Sin importaciones realizadas';
-                    }
-                } else {
-                    noBankConnection.classList.remove('hidden');
-                    bankConnected.classList.add('hidden');
-                }
+
+            _populateImportAccountSelector() {
+                const select = document.getElementById('import-bank-account');
+                if (!select) return;
+                const current = select.value;
+                const activos = this.accountingManager.getAccounts().filter(acc => acc.tipo === 'activo');
+                select.innerHTML = '<option value="">Selecciona la cuenta (activo) a la que pertenece el extracto</option>' +
+                    activos.map(acc => `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`).join('');
+                if (current) select.value = current;
             }
-            
-            getBankConnection() {
-                // Lee de caché (cargada en loadDashboardData desde DataClient)
-                return this._bankConnection || null;
+
+            _escapeHtml(str) {
+                return String(str == null ? '' : str)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             }
-            
+
+            handleStatementFileChange(e) {
+                const file = e.target.files && e.target.files[0];
+                const warning = document.getElementById('import-pdf-warning');
+                if (warning) warning.classList.toggle('hidden', !(file && /\.pdf$/i.test(file.name)));
+                this.resetStatementImport(false);
+            }
+
             renderExportSection() {
                 const exportContainer = document.getElementById('export-section-container');
                 if (!exportContainer) return;
@@ -2698,178 +2583,330 @@
                 }
             }
             
-            async saveBankConnection(connectionData) {
-                if (!connectionData.id) connectionData.id = connectionData.bankCode || crypto.randomUUID();
-                this._bankConnection = connectionData;
-                await DataClient.saveBankConnection(this.currentUser.id, connectionData);
-            }
-            
-            async getImportInfo(bankConnection) {
-                return await DataClient.getImportInfo(this.currentUser.id, bankConnection.bankCode);
-            }
-            
-            async removeBankConnection() {
-                if (this._bankConnection?.id) {
-                    await DataClient.deleteBankConnection(this.currentUser.id, this._bankConnection.id);
-                }
-                this._bankConnection = null;
-            }
-            
-            openBankConnectionModal() {
-                const modal = document.getElementById('bank-connection-modal');
-                modal.classList.remove('hidden');
-                
-                // Reset form
-                document.getElementById('bank-connection-form').reset();
-            }
-            
-            closeBankConnectionModal() {
-                const modal = document.getElementById('bank-connection-modal');
-                modal.classList.add('hidden');
-            }
-            
-            handleBankConnectionSubmit(e) {
-                e.preventDefault();
-                
-                const bankSelect = document.getElementById('bank-select').value;
-                const accountType = document.getElementById('account-type-select').value;
-                
-                if (!bankSelect || !accountType) {
-                    this.showToast('Por favor selecciona el banco y tipo de cuenta', 'error');
-                    return;
-                }
-                
-                // Simular conexión bancaria
-                this.simulateBankConnection(bankSelect, accountType);
-            }
-            
-            async simulateBankConnection(bankCode, accountType) {
-                // Simulación de proceso de conexión
-                this.showToast('Conectando con el banco...', 'info');
-                
-                setTimeout(async () => {
-                    // Generar datos simulados
-                    const bankNames = {
-                        'santander': 'Banco Santander',
-                        'bbva': 'BBVA',
-                        'caixabank': 'CaixaBank',
-                        'bankia': 'Bankia',
-                        'sabadell': 'Banco Sabadell',
-                        'unicaja': 'Unicaja Banco',
-                        'kutxabank': 'Kutxabank',
-                        'otros': 'Otros Bancos'
-                    };
-                    
-                    const accountTypes = {
-                        'corriente': 'Corriente',
-                        'ahorro': 'Ahorro',
-                        'nomina': 'Nómina',
-                        'empresarial': 'Empresarial'
-                    };
-                    
-                    const connectionData = {
-                        bankCode: bankCode,
-                        bankName: bankNames[bankCode] || 'Banco Desconocido',
-                        accountType: accountTypes[accountType] || 'Desconocido',
-                        lastFourDigits: Math.floor(Math.random() * 9000) + 1000,
-                        connectedAt: new Date().toISOString(),
-                        lastSync: 'Hace unos segundos',
-                        isActive: true
-                    };
-                    
-                    // Guardar conexión
-                    await this.saveBankConnection(connectionData);
-                    
-                    // Actualizar UI
-                    await this.updateBankConnectionStatus();
-                    this.closeBankConnectionModal();
-                    
-                    this.showToast('¡Cuenta bancaria conectada exitosamente!', 'success');
-                    
-                    // Realizar primera importación automática
-                    setTimeout(() => {
-                        this.performInitialImport(connectionData);
-                    }, 1000);
-                }, 2000);
-            }
-            
-            async performInitialImport(bankConnection) {
-                this.showToast('Importando movimientos iniciales...', 'info');
-                
+            // --- Análisis del extracto y previsualización ---
+
+            async handleStatementParse() {
+                if (!Auth.isPremium()) { this.showToast('La importación de extractos requiere Premium', 'error'); return; }
+                const accountId = document.getElementById('import-bank-account').value;
+                if (!accountId) { this.showToast('Selecciona la cuenta bancaria del extracto', 'error'); return; }
+                const fileInput = document.getElementById('import-file-input');
+                const file = fileInput.files && fileInput.files[0];
+                if (!file) { this.showToast('Selecciona un archivo de extracto', 'error'); return; }
+
+                const parseBtn = document.getElementById('import-parse-btn');
+                const original = parseBtn.innerHTML;
+                parseBtn.disabled = true;
+                parseBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Analizando...';
                 try {
-                    const result = await this.accountingManager.importBankMovements(bankConnection);
-                    
-                    if (result.success) {
-                        // Actualizar UI
-                        await this.updateBankConnectionStatus();
-                        this.updateDashboardMetrics();
-                        this.renderRecentMovements();
-                        this.renderInsights();
-                        this.renderIncomeExpensesChart();
-                        
-                        const message = result.importedCount > 0 ? 
-                            `¡Se importaron ${result.importedCount} movimientos históricos!` :
-                            'Conexión completada - Sin movimientos para importar';
-                            
-                        this.showToast(message, 'success');
-                    }
-                } catch (error) {
-                    console.error('Error en importación inicial:', error);
-                    this.showToast('Conexión exitosa - Importación se realizará en la próxima sincronización', 'info');
-                }
-            }
-            
-            async syncBankAccount() {
-                const bankConnection = this.getBankConnection();
-                if (!bankConnection) return;
-                
-                this.showToast('Sincronizando movimientos...', 'info');
-                
-                try {
-                    // Usar la nueva importación automática
-                    const result = await this.accountingManager.importBankMovements(bankConnection);
-                    
-                    if (result.success) {
-                        // Actualizar timestamp de sincronización
-                        bankConnection.lastSync = 'Hace unos segundos';
-                        await this.saveBankConnection(bankConnection);
-                        
-                        // Actualizar UI
-                        await this.updateBankConnectionStatus();
-                        
-                        // Actualizar datos del dashboard
-                        this.updateDashboardMetrics();
-                        this.renderRecentMovements();
-                        this.renderInsights();
-                        this.renderIncomeExpensesChart();
-                        
-                        // Mostrar resultado
-                        const message = result.importedCount > 0 ? 
-                            `¡${result.importedCount} movimientos nuevos importados!` :
-                            'Sincronización completada - No hay movimientos nuevos';
-                            
-                        this.showToast(message, 'success');
-                        
-                        // Log para debugging
-                        console.log('✅ Importación automática completada:', result);
+                    let rows;
+                    if (/\.pdf$/i.test(file.name)) {
+                        rows = await this.parseStatementPDF(file);
                     } else {
-                        this.showToast(result.error || 'Error en la sincronización', 'error');
+                        rows = await this.parseStatementSpreadsheet(file);
                     }
-                    
-                } catch (error) {
-                    console.error('Error en sincronización bancaria:', error);
-                    this.showToast('Error al sincronizar movimientos', 'error');
+                    rows = (rows || []).filter(r => r && r.descripcion && !isNaN(r.importe) && r.importe !== 0);
+                    if (!rows.length) {
+                        this.showToast('No se detectaron movimientos en el archivo. Revisa el formato.', 'error');
+                        return;
+                    }
+                    this._importRows = rows;
+                    this.renderImportPreview();
+                } catch (err) {
+                    console.error('Error analizando extracto:', err);
+                    this.showToast('Error al analizar el extracto: ' + err.message, 'error');
+                } finally {
+                    parseBtn.disabled = false;
+                    parseBtn.innerHTML = original;
                 }
             }
-            
-            async disconnectBankAccount() {
-                if (confirm('¿Estás seguro de que deseas desconectar tu cuenta bancaria?')) {
-                    await this.removeBankConnection();
-                    await this.updateBankConnectionStatus();
-                    this.showToast('Cuenta bancaria desconectada', 'success');
+
+            renderImportPreview() {
+                const rows = this._importRows || [];
+                const tbody = document.getElementById('import-preview-body');
+                const gastoAccounts = this.accountingManager.getAccounts().filter(a => a.tipo === 'gasto');
+                const ingresoAccounts = this.accountingManager.getAccounts().filter(a => a.tipo === 'ingreso');
+
+                tbody.innerHTML = rows.map((row, idx) => {
+                    const tipo = row.importe < 0 ? 'gasto' : 'ingreso';
+                    const opciones = tipo === 'gasto' ? gastoAccounts : ingresoAccounts;
+                    const rule = this.accountingManager.findMatchingRule(row.descripcion);
+                    let preselectValue = '';
+                    let createOption = '';
+                    if (rule && rule.accountType === tipo) {
+                        const existing = opciones.find(a => (a.nombre || '').toLowerCase() === (rule.accountName || '').toLowerCase());
+                        if (existing) {
+                            preselectValue = existing.id;
+                        } else if (rule.accountName) {
+                            preselectValue = '__create__';
+                            createOption = `<option value="__create__" selected>➕ Crear: ${this._escapeHtml(rule.accountName)}</option>`;
+                        }
+                    }
+                    const opts = opciones.map(a =>
+                        `<option value="${a.id}"${a.id === preselectValue ? ' selected' : ''}>${this._escapeHtml(a.nombre)}</option>`).join('');
+                    const sinAsignar = `<option value=""${preselectValue === '' ? ' selected' : ''}>— Sin asignar —</option>`;
+                    const importeFmt = (row.importe < 0 ? '-' : '+') + Math.abs(row.importe).toFixed(2) + ' €';
+                    const tipoBadge = tipo === 'gasto'
+                        ? '<span class="text-red-600">Gasto</span>'
+                        : '<span class="text-green-600">Ingreso</span>';
+                    return `
+                        <tr class="border-t border-gray-100" data-rule-name="${this._escapeHtml((rule && rule.accountName) || '')}">
+                            <td class="px-3 py-2 whitespace-nowrap">${this._escapeHtml(row.fecha)}</td>
+                            <td class="px-3 py-2">${this._escapeHtml(row.descripcion)}</td>
+                            <td class="px-3 py-2 text-right whitespace-nowrap ${row.importe < 0 ? 'text-red-600' : 'text-green-600'}">${importeFmt}</td>
+                            <td class="px-3 py-2">${tipoBadge}</td>
+                            <td class="px-3 py-2">
+                                <select class="import-row-account w-full px-2 py-1 border border-gray-300 rounded text-xs" data-idx="${idx}">
+                                    ${sinAsignar}${createOption}${opts}
+                                </select>
+                            </td>
+                        </tr>`;
+                }).join('');
+
+                const matched = rows.filter(r => this.accountingManager.findMatchingRule(r.descripcion)).length;
+                document.getElementById('import-preview-summary').textContent =
+                    `${rows.length} movimientos · ${matched} con regla`;
+                document.getElementById('import-preview').classList.remove('hidden');
+            }
+
+            async confirmStatementImport() {
+                const rows = this._importRows || [];
+                if (!rows.length) return;
+                const accountId = document.getElementById('import-bank-account').value;
+                if (!accountId) { this.showToast('Selecciona la cuenta bancaria del extracto', 'error'); return; }
+
+                const selects = Array.from(document.querySelectorAll('.import-row-account'));
+                const confirmBtn = document.getElementById('import-confirm-btn');
+                const original = confirmBtn.innerHTML;
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Importando...';
+
+                let imported = 0, skipped = 0, failed = 0;
+                try {
+                    for (const select of selects) {
+                        const idx = parseInt(select.dataset.idx, 10);
+                        const row = rows[idx];
+                        if (!row) continue;
+                        const tipo = row.importe < 0 ? 'gasto' : 'ingreso';
+                        let categoryId = select.value;
+                        if (!categoryId) { skipped++; continue; }
+
+                        if (categoryId === '__create__') {
+                            const tr = select.closest('tr');
+                            const name = tr ? tr.getAttribute('data-rule-name') : '';
+                            if (!name) { skipped++; continue; }
+                            const res = await this.accountingManager.createAccount({ nombre: name, tipo, saldo_inicial: 0 });
+                            if (!res || !res.success) { failed++; continue; }
+                            categoryId = res.account.id;
+                        }
+
+                        const movementData = {
+                            tipo,
+                            cantidad: Math.abs(row.importe),
+                            descripcion: row.descripcion,
+                            fecha: row.fecha,
+                            cuenta_id: tipo === 'gasto' ? accountId : categoryId,
+                            cuenta_destino_id: tipo === 'gasto' ? categoryId : accountId,
+                            manually_categorized: true,
+                            auto_imported: true
+                        };
+                        const result = await this.accountingManager.createMovement(movementData);
+                        if (result && result.success) imported++; else failed++;
+                    }
+
+                    let msg = `Importados ${imported} movimientos`;
+                    if (skipped) msg += `, ${skipped} omitidos (sin categoría)`;
+                    if (failed) msg += `, ${failed} con error`;
+                    this.showToast(msg, imported > 0 ? 'success' : 'error');
+
+                    this.resetStatementImport(true);
+                    if (this.renderMovementsList) this.renderMovementsList();
+                    if (this.updateDashboardMetrics) this.updateDashboardMetrics();
+                    if (this.renderRecentMovements) this.renderRecentMovements();
+                    if (this.renderInsights) this.renderInsights();
+                    this._populateImportAccountSelector();
+                } catch (err) {
+                    console.error('Error importando movimientos:', err);
+                    this.showToast('Error al importar: ' + err.message, 'error');
+                } finally {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = original;
                 }
             }
-            
+
+            resetStatementImport(clearFile = true) {
+                this._importRows = [];
+                const preview = document.getElementById('import-preview');
+                if (preview) preview.classList.add('hidden');
+                const body = document.getElementById('import-preview-body');
+                if (body) body.innerHTML = '';
+                if (clearFile) {
+                    const fileInput = document.getElementById('import-file-input');
+                    if (fileInput) fileInput.value = '';
+                    const warning = document.getElementById('import-pdf-warning');
+                    if (warning) warning.classList.add('hidden');
+                }
+            }
+
+            // --- Parsers de extracto ---
+
+            async parseStatementSpreadsheet(file) {
+                const data = new Uint8Array(await file.arrayBuffer());
+                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+                return this._rowsFromMatrix(matrix);
+            }
+
+            _rowsFromMatrix(matrix) {
+                if (!matrix || !matrix.length) return [];
+                const norm = v => (v == null ? '' : String(v)).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+                const dateKeys = ['fecha valor', 'fecha operacion', 'f. operacion', 'f.valor', 'fecha', 'date'];
+                const descKeys = ['concepto', 'descripcion', 'description', 'detalle', 'movimiento', 'concept'];
+                const amountKeys = ['importe', 'amount', 'cantidad', 'monto'];
+                const debitKeys = ['cargo', 'debe', 'debito', 'debit'];
+                const creditKeys = ['abono', 'haber', 'credito', 'credit'];
+
+                let headerIdx = -1, cols = null;
+                for (let i = 0; i < Math.min(matrix.length, 25); i++) {
+                    const cells = (matrix[i] || []).map(norm);
+                    const find = keys => cells.findIndex(c => keys.some(k => c === k || c.includes(k)));
+                    const dateCol = find(dateKeys);
+                    const descCol = find(descKeys);
+                    const amountCol = find(amountKeys);
+                    const debitCol = find(debitKeys);
+                    const creditCol = find(creditKeys);
+                    if (dateCol !== -1 && descCol !== -1 && (amountCol !== -1 || debitCol !== -1 || creditCol !== -1)) {
+                        headerIdx = i;
+                        cols = { dateCol, descCol, amountCol, debitCol, creditCol };
+                        break;
+                    }
+                }
+                if (headerIdx === -1) {
+                    cols = { dateCol: 0, descCol: 1, amountCol: 2, debitCol: -1, creditCol: -1 };
+                }
+
+                const out = [];
+                for (let i = headerIdx + 1; i < matrix.length; i++) {
+                    const r = matrix[i];
+                    if (!r || !r.length) continue;
+                    const fecha = this._parseDate(r[cols.dateCol]);
+                    const descripcion = String(r[cols.descCol] == null ? '' : r[cols.descCol]).trim();
+                    if (!fecha || !descripcion) continue;
+                    let importe = NaN;
+                    if (cols.amountCol !== -1 && r[cols.amountCol] !== '' && r[cols.amountCol] != null) {
+                        importe = this._parseAmount(r[cols.amountCol]);
+                    } else {
+                        const debit = cols.debitCol !== -1 ? this._parseAmount(r[cols.debitCol]) : NaN;
+                        const credit = cols.creditCol !== -1 ? this._parseAmount(r[cols.creditCol]) : NaN;
+                        importe = (isNaN(credit) ? 0 : Math.abs(credit)) - (isNaN(debit) ? 0 : Math.abs(debit));
+                    }
+                    if (isNaN(importe) || importe === 0) continue;
+                    out.push({ fecha, descripcion, importe });
+                }
+                return out;
+            }
+
+            _parseAmount(value) {
+                if (value == null) return NaN;
+                if (typeof value === 'number') return value;
+                let s = String(value).trim().replace(/[€$£\s]/g, '').replace(/[A-Za-z]/g, '');
+                if (!s) return NaN;
+                const neg = /^\(.*\)$/.test(s) || s.indexOf('-') !== -1;
+                s = s.replace(/[()]/g, '').replace(/-/g, '');
+                const hasComma = s.indexOf(',') !== -1, hasDot = s.indexOf('.') !== -1;
+                if (hasComma && hasDot) {
+                    // El último separador es el decimal
+                    if (s.lastIndexOf(',') > s.lastIndexOf('.')) { s = s.replace(/\./g, '').replace(',', '.'); }
+                    else { s = s.replace(/,/g, ''); }
+                } else if (hasComma || hasDot) {
+                    // Un solo tipo de separador: 3 decimales o repetido = separador de miles
+                    const sep = hasComma ? ',' : '.';
+                    const parts = s.split(sep);
+                    const decimals = parts[parts.length - 1];
+                    if (parts.length > 2 || decimals.length === 3) { s = parts.join(''); }
+                    else { s = parts.slice(0, -1).join('') + '.' + decimals; }
+                }
+                const n = parseFloat(s);
+                if (isNaN(n)) return NaN;
+                return neg ? -n : n;
+            }
+
+            _parseDate(value) {
+                if (value == null || value === '') return '';
+                if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+                const s = String(value).trim();
+                let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+                if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+                m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);
+                if (m) {
+                    let d = m[1], mo = m[2], y = m[3];
+                    if (y.length === 2) y = '20' + y;
+                    return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+                }
+                return '';
+            }
+
+            async parseStatementPDF(file) {
+                const pdfjsLib = await this._loadPdfJs();
+                const data = new Uint8Array(await file.arrayBuffer());
+                const pdf = await pdfjsLib.getDocument({ data }).promise;
+                const lines = [];
+                for (let pg = 1; pg <= pdf.numPages; pg++) {
+                    const page = await pdf.getPage(pg);
+                    const content = await page.getTextContent();
+                    const byLine = {};
+                    content.items.forEach(it => {
+                        const y = Math.round(it.transform[5]);
+                        (byLine[y] = byLine[y] || []).push(it.str);
+                    });
+                    Object.keys(byLine).map(Number).sort((a, b) => b - a)
+                        .forEach(y => lines.push(byLine[y].join(' ').replace(/\s+/g, ' ').trim()));
+                }
+                return this._rowsFromTextLines(lines);
+            }
+
+            _rowsFromTextLines(lines) {
+                const out = [];
+                const dateRe = /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})/;
+                const amountReSrc = '-?\\(?\\d{1,3}(?:[.,]\\d{3})*[.,]\\d{2}\\)?-?';
+                for (const line of lines) {
+                    const dm = line.match(dateRe);
+                    if (!dm) continue;
+                    const amounts = line.match(new RegExp(amountReSrc, 'g'));
+                    if (!amounts || !amounts.length) continue;
+                    const importe = this._parseAmount(amounts[amounts.length - 1]);
+                    if (isNaN(importe) || importe === 0) continue;
+                    const fecha = this._parseDate(dm[0]);
+                    if (!fecha) continue;
+                    let descripcion = line
+                        .replace(dm[0], ' ')
+                        .replace(new RegExp(amountReSrc, 'g'), ' ')
+                        .replace(/\s+/g, ' ').trim();
+                    if (!descripcion) descripcion = 'Movimiento';
+                    out.push({ fecha, descripcion, importe });
+                }
+                return out;
+            }
+
+            _loadPdfJs() {
+                if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+                if (this._pdfjsPromise) return this._pdfjsPromise;
+                this._pdfjsPromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                    script.onload = () => {
+                        try {
+                            window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+                                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                            resolve(window.pdfjsLib);
+                        } catch (e) { reject(e); }
+                    };
+                    script.onerror = () => reject(new Error('No se pudo cargar el lector de PDF'));
+                    document.head.appendChild(script);
+                });
+                return this._pdfjsPromise;
+            }
+
             // === EXPORTACIÓN DE DATOS PREMIUM ===
             
             openExportModal() {
@@ -3084,7 +3121,7 @@
                         <div class="bg-orange-100 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6">
                             <i class="fas fa-tags text-orange-600 text-3xl"></i>
                         </div>
-                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Reglas de Categorización Automática</h3>
+                        <h3 class="text-xl font-semibold text-gray-900 mb-3">Reglas de Registro Automático</h3>
                         <p class="text-gray-600 mb-6 max-w-md mx-auto">
                             Automatiza la asignación de categorías con reglas personalizadas.
                             Solo disponible en el Plan Premium.
@@ -3346,7 +3383,7 @@
                     }
                 } else {
                     // Create mode
-                    document.getElementById('rule-modal-title').textContent = 'Nueva Regla de Categorización';
+                    document.getElementById('rule-modal-title').textContent = 'Nueva Regla de Registro Automático';
                     delete form.dataset.editId;
                     
                     // Limpiar selector de cuentas al abrir en modo creación
@@ -4132,7 +4169,6 @@
                 if (uid) {
                     try { this._autocontrolPlan = await DataClient.getAutocontrolPlan(uid); } catch (e) { console.error('autocontrolPlan:', e); }
                     try { const assoc = await DataClient.getAutocontrolAssociations(uid); if (assoc) this.accountAssociations = assoc; } catch (e) { console.error('assoc:', e); }
-                    try { const conns = await DataClient.listBankConnections(uid); this._bankConnection = (conns && conns.length) ? conns[0] : null; } catch (e) { console.error('bankConns:', e); }
                     try { this._scenariosCache = await DataClient.getScenarios(uid); } catch (e) { console.error('scenarios:', e); }
                 }
                 try { this.updateDashboardMetrics(); } catch (e) { console.error('updateDashboardMetrics:', e); }
@@ -4630,6 +4666,7 @@
                 switch(section) {
                     case 'accounts':
                         this.renderAccountsList();
+                        this.renderImportStatementSection();
                         break;
                     case 'movements':
                         this.renderMovementsList();
@@ -5806,7 +5843,7 @@
                             <h3 style="font-size:1.25rem;font-weight:700;color:#111827;">Elige tu plan Premium</h3>
                             <button onclick="document.getElementById('plan-selector-modal').remove()" style="background:none;border:none;font-size:1.5rem;color:#9ca3af;cursor:pointer;line-height:1;">&times;</button>
                         </div>
-                        <p style="color:#4b5563;font-size:0.9rem;margin-bottom:1.25rem;">Desbloquea todas las funciones: conexión bancaria, plan de autocontrol, reglas de categorización y notificaciones.</p>
+                        <p style="color:#4b5563;font-size:0.9rem;margin-bottom:1.25rem;">Desbloquea todas las funciones: conexión bancaria, plan de autocontrol, reglas de registro automático y notificaciones.</p>
 
                         <button onclick="dashboard.goToCheckout('monthly')" style="width:100%;border:2px solid #e5e7eb;border-radius:0.75rem;padding:1rem;margin-bottom:0.75rem;text-align:left;cursor:pointer;background:#ffffff;transition:all .15s;" onmouseover="this.style.borderColor='#0158C9'" onmouseout="this.style.borderColor='#e5e7eb'">
                             <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -6664,7 +6701,7 @@
                         // Recargar la interfaz para mostrar funciones premium
                         this.renderPlanBadge();
                         this.renderUpgradeSection();
-                        this.renderBankConnectionSection();
+                        this.renderImportStatementSection();
                         this.showNotificationsContainer();
                         // Recargar la página para aplicar todos los cambios
                         setTimeout(() => {
@@ -8703,7 +8740,7 @@
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>15 cuentas de gastos</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Conecta tu banco con autorización segura (PSD2) e importa movimientos automáticamente</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Plan Autocontrol 50/30/20</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Reglas de categorización</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Reglas de registro automático</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Notificaciones push</li>
                                     <li><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Exportación CSV/Excel</li>
                                 </ul>
