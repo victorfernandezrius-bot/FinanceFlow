@@ -161,7 +161,7 @@ export default {
             if (path === '/api/auth/session' && method === 'GET') {
                 const user = await getAuthUser(request, env);
                 if (!user) return json({ token: null, currentUser: null }, 200, cors);
-                delete user.password_hash;
+                 user.password_hash;
                 return json({ token: 'valid', currentUser: user }, 200, cors);
             }
 
@@ -193,7 +193,7 @@ export default {
         const rpHash = await hashPassword(rp.password);
         await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
           .bind(rpHash, new Date().toISOString(), rpUserId).run();
-        await env.CACHE.delete("reset:" + rp.token);
+        await env.CACHE.("reset:" + rp.token);
         return json({ success: true }, 200, cors);
       }
             // A partir de aquí, todo requiere autenticación
@@ -204,14 +204,14 @@ export default {
             if (path === '/api/users' && method === 'GET') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
                 // Solo devuelve el propio usuario (privacidad)
-                delete authUser.password_hash;
+                 authUser.password_hash;
                 return json([authUser], 200, cors);
             }
 
             const userMatch = path.match(/^\/api\/users\/(.+)$/);
             if (userMatch) {
                 if (!authUser || authUser.id !== userMatch[1]) return json({ error: 'No autorizado' }, 403, cors);
-                if (method === 'GET') { delete authUser.password_hash; return json(authUser, 200, cors); }
+                if (method === 'GET') {  authUser.password_hash; return json(authUser, 200, cors); }
                 if (method === 'PUT') {
                     const u = await request.json();
                     const now = new Date().toISOString();
@@ -238,9 +238,6 @@ export default {
           ]);
           return json({ success: true }, 200, cors);
         }
-                }
-            }
-
             // ---------- ACCOUNTS ----------
             if (path === '/api/accounts') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
