@@ -32,7 +32,7 @@ function corsHeaders(request, env) {
         ? origin : allowed;
     return {
         'Access-Control-Allow-Origin': allowOrigin,
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, , OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Credentials': 'true'
     };
@@ -154,14 +154,14 @@ export default {
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
 
                 const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                 user.password_hash;
+                delete user.password_hash;
                 return json({ success: true, token, currentUser: user }, 200, cors);
             }
 
             if (path === '/api/auth/session' && method === 'GET') {
                 const user = await getAuthUser(request, env);
                 if (!user) return json({ token: null, currentUser: null }, 200, cors);
-                 user.password_hash;
+                delete user.password_hash;
                 return json({ token: 'valid', currentUser: user }, 200, cors);
             }
 
@@ -204,14 +204,14 @@ export default {
             if (path === '/api/users' && method === 'GET') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
                 // Solo devuelve el propio usuario (privacidad)
-                 authUser.password_hash;
+                delete authUser.password_hash;
                 return json([authUser], 200, cors);
             }
 
             const userMatch = path.match(/^\/api\/users\/(.+)$/);
             if (userMatch) {
                 if (!authUser || authUser.id !== userMatch[1]) return json({ error: 'No autorizado' }, 403, cors);
-                if (method === 'GET') {  authUser.password_hash; return json(authUser, 200, cors); }
+                if (method === 'GET') {  delete authUser.password_hash; return json(authUser, 200, cors); }
                 if (method === 'PUT') {
                     const u = await request.json();
                     const now = new Date().toISOString();
