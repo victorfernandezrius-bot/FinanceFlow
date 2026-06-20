@@ -193,7 +193,7 @@ export default {
         const rpHash = await hashPassword(rp.password);
         await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
           .bind(rpHash, new Date().toISOString(), rpUserId).run();
-        await env.CACHE.("reset:" + rp.token);
+        await env.CACHE.delete("reset:" + rp.token);
         return json({ success: true }, 200, cors);
       }
             // A partir de aquí, todo requiere autenticación
