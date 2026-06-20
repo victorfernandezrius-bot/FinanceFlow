@@ -237,6 +237,8 @@ export default {
           ]);
           return json({ success: true }, 200, cors);
         }
+      }
+            
             // ---------- ACCOUNTS ----------
             if (path === '/api/accounts') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
@@ -621,7 +623,7 @@ export default {
                 }
             }
 
-            return json({ error: 'Not found', path }, 404, cors);
+                 return json({ error: 'Not found', path }, 404, cors);
 
         } catch (err) {
             return json({ error: 'Server error', detail: err.message }, 500, cors);
