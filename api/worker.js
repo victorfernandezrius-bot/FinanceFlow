@@ -221,20 +221,19 @@ export default {
                               u.plan_expires_at ?? authUser.plan_expires_at, now, authUser.id).run();
                     return json({ ...authUser, ...u }, 200, cors);
                 }
-                if (method === "DELETE") {
-          const u = authUser.id;
+               if (method === "DELETE") {
+          const delId = authUser.id;
           await env.DB.batch([
-            env.DB.prepare("DELETE FROM movements WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM accounts WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM categorization_rules WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM autocontrol_plan WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM autocontrol_associations WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM scenarios WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM notifications WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM bank_connections WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM import_info WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(u),
-            env.DB.prepare("DELETE FROM users WHERE id=?").bind(u)
+            env.DB.prepare("DELETE FROM movements WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM accounts WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM categorization_rules WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM autocontrol_plan WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM autocontrol_associations WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM scenarios WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM notifications WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM bank_connections WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM import_info WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM users WHERE id=?").bind(delId)
           ]);
           return json({ success: true }, 200, cors);
         }
