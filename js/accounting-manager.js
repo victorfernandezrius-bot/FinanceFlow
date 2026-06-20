@@ -1219,7 +1219,8 @@ class AccountingManager {
         
         // Permitir editar reglas por defecto (especialmente la cuenta destino)
         // Solo restringir cambio de keywords y nombre en reglas por defecto
-        if (rules[ruleIndex].isDefault && (updates.name !== undefined || updates.keywords !== undefined)) {
+        const isDefaultRule = rules[ruleIndex].isDefault === true || rules[ruleIndex].isDefault === 1;
+        if (isDefaultRule && (updates.name !== undefined || updates.keywords !== undefined)) {
             // Permitir solo cambiar cuenta destino y estado activo/inactivo
             const allowedUpdates = {};
             if (updates.enabled !== undefined) allowedUpdates.enabled = updates.enabled;
@@ -1248,7 +1249,7 @@ class AccountingManager {
         }
         
         // No permitir eliminar reglas por defecto
-        if (rules[ruleIndex].isDefault) {
+        if (rules[ruleIndex].isDefault === true || rules[ruleIndex].isDefault === 1) {
             throw new Error('No se pueden eliminar reglas por defecto');
         }
         
@@ -1258,24 +1259,36 @@ class AccountingManager {
         return { success: true };
     }
     
+    // Normaliza texto para el match de reglas: minúsculas y sin acentos/diacríticos.
+    // Así "NÓMINA JUNIO" matchea la keyword "nomina" y viceversa.
+    _normalizeText(text) {
+        return (text || '')
+            .toString()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+    }
+
     applyCategorizationRules(movementData) {
         // Solo aplicar a usuarios Premium
         if (!Auth.isPremium()) {
             return movementData;
         }
-        
+
         // No aplicar si el movimiento ya tiene categoría manual
         if (movementData.manually_categorized) {
             return movementData;
         }
-        
-        const rules = this.getCategorizeRules().filter(rule => rule.enabled);
-        const description = movementData.descripcion.toLowerCase();
-        
+
+        // Blindar enabled: en remoto (D1) puede llegar como entero 1/0; en local como booleano.
+        const rules = this.getCategorizeRules().filter(rule => rule.enabled === true || rule.enabled === 1);
+        // Normalizar la descripción (minúsculas + sin acentos) para un match robusto.
+        const description = this._normalizeText(movementData.descripcion);
+
         // Buscar primera regla que coincida
         for (const rule of rules) {
-            const matchesKeyword = rule.keywords.some(keyword => 
-                description.includes(keyword.toLowerCase())
+            const matchesKeyword = rule.keywords.some(keyword =>
+                description.includes(this._normalizeText(keyword))
             );
             
             if (matchesKeyword) {

@@ -311,7 +311,19 @@ export default {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
                     const { results } = await env.DB.prepare('SELECT * FROM categorization_rules WHERE user_id=?').bind(uid).all();
-                    return json(results.map(r => ({ ...r, keywords: JSON.parse(r.keywords || '[]') })), 200, cors);
+                    // Mapear snake_case (D1) -> camelCase (frontend) y enteros (1/0) -> booleanos,
+                    // para que el motor de reglas (accounting-manager.js) lea los campos correctamente.
+                    return json(results.map(r => ({
+                        id: r.id,
+                        name: r.name,
+                        keywords: JSON.parse(r.keywords || '[]'),
+                        accountType: r.account_type,
+                        accountId: r.account_id,
+                        accountName: r.account_name,
+                        enabled: r.enabled === 1 || r.enabled === true,
+                        isDefault: r.is_default === 1 || r.is_default === true,
+                        createdAt: r.created_at
+                    })), 200, cors);
                 }
                 if (method === 'POST') {
                     const r = await request.json();
