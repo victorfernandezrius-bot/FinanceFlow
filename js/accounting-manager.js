@@ -1269,6 +1269,17 @@ class AccountingManager {
             .replace(/[\u0300-\u036f]/g, '');
     }
 
+    // Devuelve la primera regla activa cuya keyword aparece en la descripción,
+    // SIN efectos secundarios (no crea cuentas). Útil para previsualizar importaciones.
+    findMatchingRule(descripcion) {
+        if (!Auth.isPremium()) return null;
+        const rules = this.getCategorizeRules().filter(rule => rule.enabled === true || rule.enabled === 1);
+        const description = this._normalizeText(descripcion);
+        return rules.find(rule =>
+            rule.keywords.some(keyword => description.includes(this._normalizeText(keyword)))
+        ) || null;
+    }
+
     applyCategorizationRules(movementData) {
         // Solo aplicar a usuarios Premium
         if (!Auth.isPremium()) {
