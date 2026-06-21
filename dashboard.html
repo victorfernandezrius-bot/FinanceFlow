@@ -3105,12 +3105,15 @@
             
             // === REGLAS DE CATEGORIZACIÓN PREMIUM ===
             
-            initCategorizationSection() {
+            async initCategorizationSection() {
                 if (!Auth.isPremium()) {
                     this.showCategorizationUpgrade();
                     return;
                 }
-                
+
+                // Auto-reparar reglas antiguas que tienen accountName pero no accountId.
+                try { await this.accountingManager.repairRuleAccountIds(); } catch (e) { console.error('repairRuleAccountIds:', e); }
+
                 this.renderRulesList();
             }
             
@@ -3169,7 +3172,7 @@
                                 </div>
                                 <div class="text-sm text-gray-600">
                                     <strong>Asigna a:</strong> ${rule.accountName} (${rule.accountType})
-                                    ${rule.accountId ? '<span class="text-green-600">✓ Conectada</span>' : '<span class="text-red-600">⚠ Sin cuenta</span>'}
+                                    ${this.accountingManager.getRuleAccount(rule) ? '<span class="text-green-600">✓ Conectada</span>' : '<span class="text-red-600">⚠ Sin cuenta</span>'}
                                 </div>
                             </div>
                             <div class="flex items-center space-x-2 ml-4">

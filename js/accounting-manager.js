@@ -284,7 +284,7 @@ class AccountingManager {
             
             // Solo aplicar reglas si no es un movimiento editado manualmente
             if (!movementData.manually_categorized) {
-                processedMovementData = this.applyCategorizationRules(processedMovementData);
+                processedMovementData = await this.applyCategorizationRules(processedMovementData);
             }
 
             // Crear movimiento
@@ -1194,6 +1194,7 @@ class AccountingManager {
             keywords: rule.keywords.map(k => k.toLowerCase().trim()).filter(k => k.length > 0),
             accountType: rule.accountType,
             accountName: rule.accountName,
+            accountId: rule.accountId ?? null,
             enabled: true,
             isDefault: false,
             createdAt: new Date().toISOString()
@@ -1269,7 +1270,7 @@ class AccountingManager {
         ) || null;
     }
 
-    applyCategorizationRules(movementData) {
+    async applyCategorizationRules(movementData) {
         // Solo aplicar a usuarios Premium
         if (!Auth.isPremium()) {
             return movementData;
@@ -1293,7 +1294,7 @@ class AccountingManager {
             
             if (matchesKeyword) {
                 // Buscar o crear la cuenta de la regla
-                const targetAccount = this.findOrCreateRuleAccount(rule);
+                const targetAccount = await this.findOrCreateRuleAccount(rule);
                 
                 if (targetAccount) {
                     // Aplicar categorización automática
@@ -1318,37 +1319,72 @@ class AccountingManager {
         return movementData;
     }
     
-    findOrCreateRuleAccount(rule) {
+    // Resuelve la cuenta asociada a una regla SIN efectos secundarios:
+    // primero por accountId, y si no, por nombre+tipo (case-insensitive y sin acentos).
+    getRuleAccount(rule) {
+        if (!rule) return null;
         const accounts = this.getAccounts();
-        
-        // Buscar cuenta existente
-        let account = accounts.find(acc => 
-            acc.tipo === rule.accountType && 
-            acc.nombre.toLowerCase() === rule.accountName.toLowerCase()
-        );
-        
-        // Si no existe, crear automáticamente
-        if (!account) {
-            try {
-                const accountData = {
-                    nombre: rule.accountName,
-                    tipo: rule.accountType,
-                    saldo_inicial: 0,
-                    descripcion: `Cuenta creada automáticamente por regla: ${rule.name}`,
-                    auto_created_by_rule: rule.id
-                };
-                
-                const result = this.createAccount(accountData);
-                if (result.success) {
-                    account = result.account;
-                }
-            } catch (error) {
-                console.error('Error creando cuenta para regla:', error);
-                return null;
+        if (rule.accountId) {
+            const byId = accounts.find(acc => acc.id === rule.accountId);
+            if (byId) return byId;
+        }
+        if (rule.accountName) {
+            const name = this._normalizeText(rule.accountName);
+            return accounts.find(acc =>
+                acc.tipo === rule.accountType && this._normalizeText(acc.nombre) === name
+            ) || null;
+        }
+        return null;
+    }
+
+    // Auto-repara reglas antiguas: rellena accountId resolviendo por nombre+tipo.
+    // Persiste una sola vez si hubo cambios. Devuelve cuántas reglas reparó.
+    async repairRuleAccountIds() {
+        if (!Auth.isPremium()) return 0;
+        const rules = this.getCategorizeRules();
+        let repaired = 0;
+        for (const rule of rules) {
+            if (!rule.accountId && rule.accountName) {
+                const account = this.getRuleAccount(rule);
+                if (account) { rule.accountId = account.id; repaired++; }
             }
         }
-        
-        return account;
+        if (repaired > 0) await this.saveCategorizeRules(rules);
+        return repaired;
+    }
+
+    async findOrCreateRuleAccount(rule) {
+        // 1) Reutilizar una cuenta existente (por accountId o por nombre+tipo). NO crear.
+        const existing = this.getRuleAccount(rule);
+        if (existing) {
+            // Persistir el accountId en la regla para no repetir la búsqueda en cada movimiento.
+            if (rule.accountId !== existing.id) {
+                rule.accountId = existing.id;
+                try { await this.updateCategorizeRule(rule.id, { accountId: existing.id }); } catch (e) { /* no bloquear */ }
+            }
+            return existing;
+        }
+
+        // 2) No existe: crear UNA sola vez y persistir su accountId en la regla.
+        try {
+            const accountData = {
+                nombre: rule.accountName,
+                tipo: rule.accountType,
+                saldo_inicial: 0,
+                descripcion: `Cuenta creada automáticamente por regla: ${rule.name}`,
+                auto_created_by_rule: rule.id
+            };
+
+            const result = await this.createAccount(accountData);
+            if (result && result.success) {
+                rule.accountId = result.account.id;
+                try { await this.updateCategorizeRule(rule.id, { accountId: result.account.id }); } catch (e) { /* no bloquear */ }
+                return result.account;
+            }
+        } catch (error) {
+            console.error('Error creando cuenta para regla:', error);
+        }
+        return null;
     }
     
     // ===== SISTEMA DE NOTIFICACIONES INTERNAS =====
