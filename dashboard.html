@@ -2265,12 +2265,12 @@
                 
                 document.getElementById('rule-account-selector')?.addEventListener('change', (e) => {
                     const accountNameInput = document.getElementById('rule-account-name');
+                    accountNameInput.classList.add('hidden');
+                    accountNameInput.required = false;
                     if (e.target.value === '_new_') {
-                        accountNameInput.classList.remove('hidden');
-                        accountNameInput.required = true;
-                    } else {
-                        accountNameInput.classList.add('hidden');
-                        accountNameInput.required = false;
+                        // Crear la cuenta con el flujo estándar (modal de Cuentas), para que
+                        // se cree de verdad con su id y la regla quede apuntando a ese accountId.
+                        dashboard.openAccountModalForRule();
                     }
                 });
                 
@@ -3374,12 +3374,13 @@
                             });
                         }
                         
-                        // Si no se encontró la cuenta, mostrar input para crear nueva
-                        if (!accountFound && rule.accountName) {
-                            accountSelector.value = '_new_';
-                            accountNameInput.value = rule.accountName;
-                            accountNameInput.classList.remove('hidden');
-                            accountNameInput.required = true;
+                        // Si la cuenta de la regla no existe aún, dejar el selector sin
+                        // preseleccionar: el usuario elige una cuenta real o crea una nueva
+                        // con el flujo estándar (nunca se guarda accountId null con nombre suelto).
+                        if (!accountFound) {
+                            accountSelector.value = '';
+                            accountNameInput.classList.add('hidden');
+                            accountNameInput.required = false;
                         }
                         
                         form.dataset.editId = ruleId;
@@ -3402,7 +3403,57 @@
                 const modal = document.getElementById('rule-modal');
                 modal.classList.add('hidden');
             }
-            
+
+            // Crear cuenta nueva desde el modal de regla usando el flujo estándar de Cuentas.
+            // Guarda el estado de la regla para restaurarlo al volver con la cuenta ya creada.
+            openAccountModalForRule() {
+                const form = document.getElementById('rule-form');
+                this._ruleAccountReturn = {
+                    name: document.getElementById('rule-name').value,
+                    keywords: document.getElementById('rule-keywords').value,
+                    accountType: document.getElementById('rule-account-type').value,
+                    editId: form.dataset.editId || null
+                };
+                this.closeRuleModal();
+                this.openAccountModal(); // modo crear
+                const accountType = this._ruleAccountReturn.accountType;
+                if (accountType) {
+                    const typeSelect = document.getElementById('account-type');
+                    if (typeSelect) {
+                        typeSelect.value = accountType;
+                        typeSelect.dispatchEvent(new Event('change'));
+                    }
+                }
+            }
+
+            // Reabre el modal de regla restaurando su estado. Si se pasa un accountId,
+            // selecciona esa cuenta recién creada en el selector.
+            _restoreRuleModal(selectedAccountId) {
+                const ret = this._ruleAccountReturn;
+                this._ruleAccountReturn = null;
+                if (!ret) return;
+
+                const form = document.getElementById('rule-form');
+                document.getElementById('rule-modal-title').textContent = ret.editId ? 'Editar Regla' : 'Nueva Regla de Registro Automático';
+                document.getElementById('rule-name').value = ret.name || '';
+                document.getElementById('rule-keywords').value = ret.keywords || '';
+                const typeSelect = document.getElementById('rule-account-type');
+                typeSelect.value = ret.accountType || '';
+
+                // Repoblar el selector (ya incluye la cuenta nueva) y seleccionarla por id.
+                this._populateRuleAccountSelector(typeSelect.value);
+                const accountSelector = document.getElementById('rule-account-selector');
+                if (selectedAccountId && accountSelector.querySelector(`option[value="${selectedAccountId}"]`)) {
+                    accountSelector.value = selectedAccountId;
+                }
+
+                const accountNameInput = document.getElementById('rule-account-name');
+                if (accountNameInput) { accountNameInput.classList.add('hidden'); accountNameInput.required = false; }
+
+                if (ret.editId) form.dataset.editId = ret.editId; else delete form.dataset.editId;
+                document.getElementById('rule-modal').classList.remove('hidden');
+            }
+
             handleRuleSubmit(e) {
                 e.preventDefault();
                 
@@ -6236,6 +6287,11 @@
                 if (bankCheckbox) bankCheckbox.checked = false;
                 const fixedCheckbox = document.getElementById('is-fixed-cost');
                 if (fixedCheckbox) fixedCheckbox.checked = false;
+
+                // Si veníamos del modal de regla y se canceló la creación, volver a la regla.
+                if (this._ruleAccountReturn) {
+                    this._restoreRuleModal(null);
+                }
             }
 
             openMovementModal(movement = null) {
@@ -6487,12 +6543,19 @@
                             return;
                         }
                         
-                        await this.accountingManager.createAccount(accountData);
+                        const createResult = await this.accountingManager.createAccount(accountData);
                         this.accountBeingEdited = null; // ✅ Reset después de crear
                         this.showToast('Cuenta creada correctamente', 'success');
-                        this.closeAccountModal();
                         this.renderAccountsList();
                         this.loadDashboardData();
+
+                        if (this._ruleAccountReturn && createResult && createResult.success) {
+                            // Volvíamos del modal de regla: cerrar cuenta y volver con la cuenta seleccionada.
+                            document.getElementById('account-modal').classList.add('hidden');
+                            this._restoreRuleModal(createResult.account.id);
+                        } else {
+                            this.closeAccountModal();
+                        }
                     }
                     
                 } catch (error) {
