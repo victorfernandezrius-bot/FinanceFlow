@@ -3180,12 +3180,12 @@
                                     ${rule.enabled ? 'Desactivar' : 'Activar'}
                                 </button>
                                 ${rule.isDefault ? `
-                                    <button onclick="dashboard.editDefaultRule('${rule.id}')" class="text-sm text-blue-600 hover:text-blue-800">
+                                    <button onclick="dashboard.openRuleModal('${rule.id}')" class="text-sm text-blue-600 hover:text-blue-800">
                                         <i class="fas fa-edit mr-1"></i>
-                                        Cambiar Cuenta
+                                        Editar
                                     </button>
                                 ` : `
-                                    <button onclick="dashboard.editRule('${rule.id}')" class="text-sm text-blue-600 hover:text-blue-800">
+                                    <button onclick="dashboard.openRuleModal('${rule.id}')" class="text-sm text-blue-600 hover:text-blue-800">
                                         <i class="fas fa-edit mr-1"></i>
                                         Editar
                                     </button>
@@ -3417,16 +3417,23 @@
                 const accountType = document.getElementById('rule-account-type').value;
                 
                 // Manejar cuenta seleccionada o nueva
-                const accountSelector = document.getElementById('rule-account-selector').value;
+                const accountSelectorEl = document.getElementById('rule-account-selector');
+                const accountSelectorValue = accountSelectorEl.value;
                 let accountName = '';
                 let accountId = null;
-                
-                if (accountSelector && accountSelector !== '_new_') {
+
+                if (accountSelectorValue && accountSelectorValue !== '_new_') {
                     // Cuenta existente seleccionada
-                    const account = this.accountingManager.getAccount(accountSelector);
+                    const account = this.accountingManager.getAccount(accountSelectorValue);
                     if (account) {
                         accountName = account.nombre;
                         accountId = account.id;
+                    } else {
+                        // Respaldo fiable: si getAccount() no la encuentra (p. ej. desajuste de id),
+                        // usar el texto de la opción seleccionada como nombre y el value como id.
+                        const selectedOption = accountSelectorEl.options[accountSelectorEl.selectedIndex];
+                        accountName = selectedOption ? selectedOption.textContent.trim() : '';
+                        accountId = accountSelectorValue;
                     }
                 } else {
                     // Nueva cuenta (escribir nombre)

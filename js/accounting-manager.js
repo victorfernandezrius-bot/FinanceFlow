@@ -1217,19 +1217,8 @@ class AccountingManager {
             throw new Error('Regla no encontrada');
         }
         
-        // Permitir editar reglas por defecto (especialmente la cuenta destino)
-        // Solo restringir cambio de keywords y nombre en reglas por defecto
-        const isDefaultRule = rules[ruleIndex].isDefault === true || rules[ruleIndex].isDefault === 1;
-        if (isDefaultRule && (updates.name !== undefined || updates.keywords !== undefined)) {
-            // Permitir solo cambiar cuenta destino y estado activo/inactivo
-            const allowedUpdates = {};
-            if (updates.enabled !== undefined) allowedUpdates.enabled = updates.enabled;
-            if (updates.accountId !== undefined) allowedUpdates.accountId = updates.accountId;
-            if (updates.accountName !== undefined) allowedUpdates.accountName = updates.accountName;
-            
-            updates = allowedUpdates;
-        }
-        
+        // Todas las reglas (por defecto y de usuario) se pueden editar por completo:
+        // nombre, palabras clave y cuenta asignada.
         rules[ruleIndex] = { ...rules[ruleIndex], ...updates };
         await this.saveCategorizeRules(rules);
         
