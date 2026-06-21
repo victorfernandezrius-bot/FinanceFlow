@@ -2681,6 +2681,7 @@
                 confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Importando...';
 
                 let imported = 0, skipped = 0, failed = 0;
+                const createdAccounts = new Map(); // tipo|nombre(lower) -> id, para no duplicar en el lote
                 try {
                     for (const select of selects) {
                         const idx = parseInt(select.dataset.idx, 10);
@@ -2694,9 +2695,19 @@
                             const tr = select.closest('tr');
                             const name = tr ? tr.getAttribute('data-rule-name') : '';
                             if (!name) { skipped++; continue; }
-                            const res = await this.accountingManager.createAccount({ nombre: name, tipo, saldo_inicial: 0 });
-                            if (!res || !res.success) { failed++; continue; }
-                            categoryId = res.account.id;
+                            const key = tipo + '|' + name.trim().toLowerCase();
+                            // Reutilizar una cuenta válida ya existente (o creada antes en este lote);
+                            // solo crear UNA vez por nombre+tipo. Nunca duplicar.
+                            let acc = this.accountingManager.getAccounts().find(a =>
+                                a.tipo === tipo && (a.nombre || '').trim().toLowerCase() === name.trim().toLowerCase());
+                            if (!acc && createdAccounts.has(key)) acc = { id: createdAccounts.get(key) };
+                            if (!acc) {
+                                const res = await this.accountingManager.createAccount({ nombre: name, tipo, saldo_inicial: 0 });
+                                if (!res || !res.success) { failed++; continue; }
+                                acc = res.account;
+                                createdAccounts.set(key, acc.id);
+                            }
+                            categoryId = acc.id;
                         }
 
                         const movementData = {
