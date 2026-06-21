@@ -838,6 +838,27 @@
                         </div>
                     </div>
                     
+                    <!-- Lista de cuentas -->
+                    <div id="accounts-list" class="space-y-4">
+                        <!-- Se llenará dinámicamente -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Movements Section -->
+            <div id="section-movements" class="section-content hidden">
+                <div class="section-container">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900">Movimientos</h2>
+                            <p class="text-gray-600">Registra y gestiona tus ingresos, gastos y transferencias</p>
+                        </div>
+                        <button id="create-movement-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+                            <i class="fas fa-plus mr-2"></i>
+                            Nuevo Movimiento
+                        </button>
+                    </div>
+                    
                     <!-- Importar Extracto Bancario (Premium) -->
                     <div id="import-statement-section" class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 shadow-sm border border-blue-200 mb-6 hidden">
                         <div class="flex items-center mb-3">
@@ -901,28 +922,7 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Lista de cuentas -->
-                    <div id="accounts-list" class="space-y-4">
-                        <!-- Se llenará dinámicamente -->
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Movements Section -->
-            <div id="section-movements" class="section-content hidden">
-                <div class="section-container">
-                    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-                        <div>
-                            <h2 class="text-2xl font-bold text-gray-900">Movimientos</h2>
-                            <p class="text-gray-600">Registra y gestiona tus ingresos, gastos y transferencias</p>
-                        </div>
-                        <button id="create-movement-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
-                            <i class="fas fa-plus mr-2"></i>
-                            Nuevo Movimiento
-                        </button>
-                    </div>
-                    
+
                     <!-- Filtros -->
                     <div class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
                         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
@@ -4774,10 +4774,10 @@
                 switch(section) {
                     case 'accounts':
                         this.renderAccountsList();
-                        this.renderImportStatementSection();
                         break;
                     case 'movements':
                         this.renderMovementsList();
+                        this.renderImportStatementSection();
                         break;
                     case 'reports':
                         this.renderReports();
