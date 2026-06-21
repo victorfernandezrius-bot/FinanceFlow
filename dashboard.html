@@ -767,11 +767,15 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
                         <!-- Gráfico de ingresos vs gastos -->
                         <div class="xl:col-span-2 bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-lg font-semibold text-gray-900">Análisis Mensual</h3>
-                                <div class="flex items-center space-x-2 text-sm text-gray-500">
-                                    <i class="fas fa-calendar-alt"></i>
-                                    <span>Este mes</span>
+                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                                <h3 class="text-lg font-semibold text-gray-900">Ingresos vs Gastos</h3>
+                                <div class="flex flex-wrap items-center gap-2 text-sm">
+                                    <select id="chart-period" class="border border-gray-300 rounded-md px-2 py-1 text-sm text-gray-700">
+                                        <option value="month">Este mes</option>
+                                        <option value="custom">Personalizado</option>
+                                    </select>
+                                    <input type="date" id="chart-date-from" class="hidden border border-gray-300 rounded-md px-2 py-1 text-sm">
+                                    <input type="date" id="chart-date-to" class="hidden border border-gray-300 rounded-md px-2 py-1 text-sm">
                                 </div>
                             </div>
                             <div style="position: relative; height: clamp(180px, 40vw, 300px);">
@@ -2201,6 +2205,25 @@
                 if (importCancelBtn) {
                     importCancelBtn.addEventListener('click', () => this.resetStatementImport());
                 }
+
+                // Gráfico Ingresos vs Gastos: selector de periodo + rango personalizado
+                document.getElementById('chart-period')?.addEventListener('change', (e) => {
+                    const custom = e.target.value === 'custom';
+                    const fromEl = document.getElementById('chart-date-from');
+                    const toEl = document.getElementById('chart-date-to');
+                    fromEl.classList.toggle('hidden', !custom);
+                    toEl.classList.toggle('hidden', !custom);
+                    if (custom && !fromEl.value && !toEl.value) {
+                        // Prefijar el mes actual como punto de partida
+                        const now = new Date();
+                        const first = new Date(now.getFullYear(), now.getMonth(), 1);
+                        fromEl.value = first.toISOString().slice(0, 10);
+                        toEl.value = now.toISOString().slice(0, 10);
+                    }
+                    this.renderIncomeExpensesChart();
+                });
+                document.getElementById('chart-date-from')?.addEventListener('change', () => this.renderIncomeExpensesChart());
+                document.getElementById('chart-date-to')?.addEventListener('change', () => this.renderIncomeExpensesChart());
                 
                 // Event Listeners para Exportación (Premium)
                 const exportBtn = document.getElementById('export-data-btn');
@@ -4607,8 +4630,21 @@
                 const ctx = document.getElementById('income-expenses-chart');
                 if (!ctx) return;
 
-                const stats = this.accountingManager.calculateFinancialStats();
-                
+                // Datos según el periodo elegido: "Este mes" (rápido) o rango personalizado.
+                const period = document.getElementById('chart-period')?.value || 'month';
+                let ingresos, gastos;
+                if (period === 'custom') {
+                    const from = document.getElementById('chart-date-from')?.value || null;
+                    const to = document.getElementById('chart-date-to')?.value || null;
+                    const totals = this.accountingManager.getIncomeExpenseTotals(from, to);
+                    ingresos = totals.ingresos;
+                    gastos = totals.gastos;
+                } else {
+                    const stats = this.accountingManager.calculateFinancialStats();
+                    ingresos = stats.ingresos_mes;
+                    gastos = stats.gastos_mes;
+                }
+
                 if (this.chartIncomeExpenses) {
                     this.chartIncomeExpenses.destroy();
                 }
@@ -4618,7 +4654,7 @@
                     data: {
                         labels: ['Ingresos', 'Gastos'],
                         datasets: [{
-                            data: [stats.ingresos_mes, stats.gastos_mes],
+                            data: [ingresos, gastos],
                             backgroundColor: ['#10B981', '#EF4444'],
                             borderWidth: 0
                         }]

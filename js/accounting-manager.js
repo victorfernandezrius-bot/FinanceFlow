@@ -550,6 +550,25 @@ class AccountingManager {
         };
     }
 
+    // Totales de ingresos y gastos (suma de movimientos por tipo) en un rango [from, to] inclusive.
+    // from/to en formato 'YYYY-MM-DD'; si falta uno, ese extremo no acota.
+    getIncomeExpenseTotals(from = null, to = null) {
+        const movements = this.getMovements();
+        const inRange = (fecha) => {
+            const d = (fecha || '').substring(0, 10);
+            if (from && d < from) return false;
+            if (to && d > to) return false;
+            return true;
+        };
+        let ingresos = 0, gastos = 0;
+        for (const mov of movements) {
+            if (!inRange(mov.fecha)) continue;
+            if (mov.tipo === 'ingreso') ingresos += mov.cantidad;
+            else if (mov.tipo === 'gasto') gastos += mov.cantidad;
+        }
+        return { ingresos, gastos };
+    }
+
     /**
      * Calcula estadísticas detalladas para un mes/año específico.
      * Devuelve totales globales + desglose por cuenta.
