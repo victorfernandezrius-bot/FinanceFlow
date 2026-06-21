@@ -8128,8 +8128,11 @@
             init() {
                 this.setupEventListeners();
                 
-                // Mostrar tutorial automáticamente si es primera vez
+                // Mostrar tutorial automáticamente SOLO la primera vez (al crear la cuenta).
                 if (!this.hasSeenTutorial()) {
+                    // Marcar como visto inmediatamente: así no reaparece aunque se cierre
+                    // con la X, Escape o clic fuera (no solo al "saltar"/"finalizar").
+                    this.markTutorialAsSeen();
                     setTimeout(() => {
                         this.showTutorial();
                     }, 1000); // Pequeño delay para que cargue la interfaz
@@ -8187,12 +8190,20 @@
                 });
             }
 
+            _tutorialKey() {
+                const user = (window.Auth && Auth.getCurrentUser) ? Auth.getCurrentUser() : null;
+                return user && user.id ? `tutorial_seen_${user.id}` : 'hasSeenTutorial';
+            }
+
             hasSeenTutorial() {
-                return localStorage.getItem('hasSeenTutorial') === 'true';
+                // Por usuario; con fallback al flag global legacy para no re-mostrarlo
+                // a quienes ya lo habían visto antes de este cambio.
+                return localStorage.getItem(this._tutorialKey()) === 'true'
+                    || localStorage.getItem('hasSeenTutorial') === 'true';
             }
 
             markTutorialAsSeen() {
-                localStorage.setItem('hasSeenTutorial', 'true');
+                localStorage.setItem(this._tutorialKey(), 'true');
             }
 
             showTutorial() {
