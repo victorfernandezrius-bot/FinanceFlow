@@ -4,362 +4,1231 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#0158C9">
+    <meta name="description" content="FinanceFlow: pon orden en tus finanzas personales en menos de 5 minutos. Contabilidad real, no solo categorizar gastos. Gratis para siempre.">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FinanceFlow">
     <link rel="manifest" href="./public/manifest.json">
     <link rel="apple-touch-icon" href="./public/logo.png">
-    <title>FinanceFlow - Contabilidad Personal Inteligente</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>FinanceFlow — Contabilidad personal real, gratis para siempre</title>
     <script src="https://js.stripe.com/v3/"></script>
     <script src="./public/config.js"></script>
     <script src="./js/stripe-checkout.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style id="blindado">
+/* ════════════════════════════════════════════════════════════════
+   tailwind-blindado.css
+   Reimplementa SOLO las utilidades Tailwind usadas en index.html.
+   Elimina la dependencia de cdn.tailwindcss.com.
+   Generado a medida — no tocar a mano salvo que cambie el HTML.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Reset mínimo equivalente al preflight de Tailwind (lo esencial) */
+*, *::before, *::after { box-sizing: border-box; }
+h1,h2,h3,h4,p,ul,figure { margin: 0; }
+ul { list-style: none; padding: 0; }
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; font-size: 100%; cursor: pointer; background: none; border: none; }
+img { display: block; max-width: 100%; }
+table { border-collapse: collapse; }
+
+/* ── Display ── */
+.block { display: block; }
+.inline-flex { display: inline-flex; }
+.flex { display: flex; }
+.grid { display: grid; }
+.hidden { display: none; }
+
+/* ── Flex / grid helpers ── */
+.flex-1 { flex: 1 1 0%; }
+.flex-col { flex-direction: column; }
+.flex-shrink-0 { flex-shrink: 0; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+
+/* ── Gap ── */
+.gap-1 { gap: 0.25rem; }
+.gap-2 { gap: 0.5rem; }
+.gap-2\.5 { gap: 0.625rem; }
+.gap-3 { gap: 0.75rem; }
+.gap-4 { gap: 1rem; }
+.gap-5 { gap: 1.25rem; }
+.gap-6 { gap: 1.5rem; }
+.gap-8 { gap: 2rem; }
+.gap-10 { gap: 2.5rem; }
+.gap-12 { gap: 3rem; }
+
+/* ── Position ── */
+.relative { position: relative; }
+.absolute { position: absolute; }
+.fixed { position: fixed; }
+.sticky { position: sticky; }
+.inset-0 { top:0; right:0; bottom:0; left:0; }
+.top-0 { top: 0; }
+.z-30 { z-index: 30; }
+.z-50 { z-index: 50; }
+
+/* ── Width / height ── */
+.w-6 { width: 1.5rem; }
+.w-11 { width: 2.75rem; }
+.w-12 { width: 3rem; }
+.w-full { width: 100%; }
+.h-6 { height: 1.5rem; }
+.h-11 { height: 2.75rem; }
+.h-12 { height: 3rem; }
+
+/* ── Max width ── */
+.max-w-md { max-width: 28rem; }
+.max-w-xl { max-width: 36rem; }
+.max-w-2xl { max-width: 42rem; }
+.max-w-3xl { max-width: 48rem; }
+.max-w-5xl { max-width: 64rem; }
+.max-w-6xl { max-width: 72rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+
+/* ── Margin ── */
+.mb-0\.5 { margin-bottom: 0.125rem; }
+.mb-1 { margin-bottom: 0.25rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-3 { margin-bottom: 0.75rem; }
+.mb-4 { margin-bottom: 1rem; }
+.mb-5 { margin-bottom: 1.25rem; }
+.mb-6 { margin-bottom: 1.5rem; }
+.mb-8 { margin-bottom: 2rem; }
+.mb-12 { margin-bottom: 3rem; }
+.mb-14 { margin-bottom: 3.5rem; }
+.mt-0\.5 { margin-top: 0.125rem; }
+.mt-1 { margin-top: 0.25rem; }
+.mt-3 { margin-top: 0.75rem; }
+.mt-4 { margin-top: 1rem; }
+.mt-5 { margin-top: 1.25rem; }
+.mt-6 { margin-top: 1.5rem; }
+.mt-8 { margin-top: 2rem; }
+.ml-1 { margin-left: 0.25rem; }
+.ml-2 { margin-left: 0.5rem; }
+.mr-1 { margin-right: 0.25rem; }
+.mx-1 { margin-left: 0.25rem; margin-right: 0.25rem; }
+
+/* ── Padding ── */
+.p-1 { padding: 0.25rem; }
+.p-2\.5 { padding: 0.625rem; }
+.p-4 { padding: 1rem; }
+.p-6 { padding: 1.5rem; }
+.p-7 { padding: 1.75rem; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.px-4 { padding-left: 1rem; padding-right: 1rem; }
+.px-7 { padding-left: 1.75rem; padding-right: 1.75rem; }
+.py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+.py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.py-3\.5 { padding-top: 0.875rem; padding-bottom: 0.875rem; }
+.py-12 { padding-top: 3rem; padding-bottom: 3rem; }
+.py-16 { padding-top: 4rem; padding-bottom: 4rem; }
+.py-20 { padding-top: 5rem; padding-bottom: 5rem; }
+.pt-4 { padding-top: 1rem; }
+.pt-6 { padding-top: 1.5rem; }
+
+/* ── Borders ── */
+.border { border-width: 1px; border-style: solid; }
+.border-2 { border-width: 2px; border-style: solid; }
+.border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+.border-t { border-top-width: 1px; border-top-style: solid; }
+.border-gray-100 { border-color: #F3F4F6; }
+.border-gray-300 { border-color: #D1D5DB; }
+.border-gray-800 { border-color: #1F2937; }
+.rounded-md { border-radius: 0.375rem; }
+.rounded-lg { border-radius: 0.5rem; }
+.rounded-xl { border-radius: 0.75rem; }
+.rounded-2xl { border-radius: 1rem; }
+.rounded-full { border-radius: 9999px; }
+
+/* ── Background colors ── */
+.bg-white { background-color: #FFFFFF; }
+.bg-black { background-color: #000000; }
+.bg-gray-100 { background-color: #F3F4F6; }
+.bg-gray-900 { background-color: #111827; }
+.bg-opacity-50 { background-color: rgba(0,0,0,0.5); }
+
+/* ── Text colors ── */
+.text-white { color: #FFFFFF; }
+.text-gray-400 { color: #9CA3AF; }
+.text-gray-500 { color: #6B7280; }
+.text-gray-600 { color: #4B5563; }
+.text-gray-700 { color: #374151; }
+.text-green-600 { color: #16A34A; }
+.text-red-500 { color: #EF4444; }
+.text-yellow-500 { color: #EAB308; }
+
+/* ── Font size ── */
+.text-\[10px\] { font-size: 10px; }
+.text-\[11px\] { font-size: 11px; }
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+.text-base { font-size: 1rem; line-height: 1.5rem; }
+.text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+.text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+.text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+
+/* ── Font weight ── */
+.font-normal { font-weight: 400; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+
+/* ── Misc text ── */
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.leading-relaxed { line-height: 1.625; }
+.tracking-wider { letter-spacing: 0.05em; }
+.uppercase { text-transform: uppercase; }
+.underline { text-decoration: underline; }
+.opacity-80 { opacity: 0.8; }
+
+/* ── Overflow ── */
+.overflow-hidden { overflow: hidden; }
+.overflow-x-auto { overflow-x: auto; }
+
+/* ── Spacing entre hijos (space-y) ── */
+.space-y-1\.5 > * + * { margin-top: 0.375rem; }
+.space-y-2 > * + * { margin-top: 0.5rem; }
+.space-y-2\.5 > * + * { margin-top: 0.625rem; }
+.space-y-3 > * + * { margin-top: 0.75rem; }
+
+/* ── Transitions ── */
+.transition-colors { transition: color 0.15s, background-color 0.15s, border-color 0.15s; }
+
+/* ── Hover ── */
+.hover\:bg-gray-200:hover { background-color: #E5E7EB; }
+.hover\:border-blue-500:hover { border-color: #3B82F6; }
+.hover\:text-gray-700:hover { color: #374151; }
+.hover\:text-gray-900:hover { color: #111827; }
+.hover\:text-white:hover { color: #FFFFFF; }
+
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE — breakpoints idénticos a Tailwind
+   sm: ≥640px   md: ≥768px   lg: ≥1024px
+   ════════════════════════════════════════════════════════════════ */
+
+/* Grids base (mobile-first: 1 columna) */
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+
+@media (min-width: 640px) {
+  .sm\:inline { display: inline; }
+  .sm\:hidden { display: none; }
+  .sm\:flex-row { flex-direction: row; }
+  .sm\:gap-4 { gap: 1rem; }
+  .sm\:gap-5 { gap: 1.25rem; }
+  .sm\:p-5 { padding: 1.25rem; }
+  .sm\:px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+  .sm\:py-20 { padding-top: 5rem; padding-bottom: 5rem; }
+  .sm\:text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+  .sm\:text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+  .sm\:text-5xl { font-size: 3rem; line-height: 1; }
+}
+
+@media (min-width: 768px) {
+  .md\:inline { display: inline; }
+  .md\:hidden { display: none; }
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .lg\:grid-cols-12 { grid-template-columns: repeat(12, minmax(0,1fr)); }
+  .lg\:col-span-5 { grid-column: span 5 / span 5; }
+  .lg\:col-span-7 { grid-column: span 7 / span 7; }
+  .lg\:gap-12 { gap: 3rem; }
+  .lg\:py-24 { padding-top: 6rem; padding-bottom: 6rem; }
+  .lg\:text-6xl { font-size: 3.75rem; line-height: 1; }
+}
+
+    </style>
     <style>
         /* Paleta de marca Contabilidad Personal */
         :root {
             --verde-principal: #61CE70;
+            --verde-oscuro: #3FA350;
             --negro: #000000;
+            --gris-tinta: #1F2937;
+            --gris-suave: #6B7280;
+            --gris-papel: #F8FAFC;
             --blanco: #FFFFFF;
             --azul-oscuro: #0158C9;
+            --azul-medio: #2B7BE4;
             --azul-claro: #5EC6FF;
         }
-        
+
+        * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
         body {
             font-family: 'Inter', sans-serif;
+            color: var(--gris-tinta);
         }
-        
-        .gradient-bg {
-            background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul-claro) 100%);
+
+        /* Tipografía display: Inter en peso fuerte con tracking justo */
+        .display {
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            line-height: 1.05;
         }
-        
-        .feature-card {
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        .display-2 {
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            line-height: 1.15;
         }
-        
-        .feature-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+
+        /* Hero gradient + textura sutil */
+        .hero-gradient {
+            background:
+                radial-gradient(circle at 15% 20%, rgba(97, 206, 112, 0.18) 0%, transparent 45%),
+                radial-gradient(circle at 85% 80%, rgba(94, 198, 255, 0.25) 0%, transparent 50%),
+                linear-gradient(135deg, var(--azul-oscuro) 0%, #0844A8 100%);
         }
-        
-        /* Botones con colores de marca */
-        .btn-primary {
-            background-color: var(--blanco);
-            color: var(--azul-oscuro);
+
+        /* Grid de fondo sutil */
+        .grid-bg {
+            background-image:
+                linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+            background-size: 56px 56px;
         }
-        
-        .btn-primary:hover {
+
+        /* Cards con borde sutil */
+        .card-sharp {
+            background: var(--blanco);
+            border: 1px solid #E5E7EB;
+            border-radius: 16px;
+            transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+        }
+        .card-sharp:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 18px 40px -12px rgba(1, 88, 201, 0.18);
+            border-color: rgba(1, 88, 201, 0.25);
+        }
+
+        /* Tag de credibilidad */
+        .credibility-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.85rem;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.22);
+            font-size: 0.825rem;
+            font-weight: 500;
+            color: rgba(255,255,255,0.95);
+            backdrop-filter: blur(4px);
+        }
+
+        /* Botones */
+        .btn-primary-hero {
             background-color: var(--verde-principal);
+            color: var(--negro);
+            font-weight: 600;
+            transition: all 0.2s ease;
+            box-shadow: 0 8px 24px rgba(97, 206, 112, 0.35);
+        }
+        .btn-primary-hero:hover {
+            background-color: var(--verde-oscuro);
+            color: var(--blanco);
+            transform: translateY(-1px);
+            box-shadow: 0 12px 28px rgba(97, 206, 112, 0.45);
+        }
+        .btn-ghost-hero {
+            background: transparent;
+            color: var(--blanco);
+            border: 1.5px solid rgba(255,255,255,0.4);
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .btn-ghost-hero:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.7);
+        }
+        .btn-azul {
+            background-color: var(--azul-oscuro);
+            color: var(--blanco);
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .btn-azul:hover {
+            background-color: var(--azul-medio);
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px rgba(1, 88, 201, 0.3);
+        }
+
+        /* Mockup del dashboard (ilustración pura CSS/HTML) */
+        .mockup-frame {
+            background: var(--blanco);
+            border-radius: 20px;
+            box-shadow:
+                0 30px 60px -15px rgba(0,0,0,0.35),
+                0 0 0 1px rgba(255,255,255,0.1);
+            overflow: hidden;
+        }
+        .mockup-header {
+            background: #F9FAFB;
+            padding: 0.7rem 1rem;
+            border-bottom: 1px solid #E5E7EB;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .mockup-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+        }
+        .mockup-stat-card {
+            padding: 0.85rem 1rem;
+            border-radius: 12px;
+            background: var(--gris-papel);
+            border: 1px solid #E5E7EB;
+        }
+        .mockup-bar {
+            background: linear-gradient(180deg, var(--azul-claro), var(--azul-oscuro));
+            border-radius: 6px 6px 0 0;
+        }
+
+        /* Comparativa */
+        .compare-table {
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #E5E7EB;
+        }
+        .compare-table th,
+        .compare-table td {
+            padding: 0.9rem 1rem;
+            text-align: left;
+        }
+        .compare-table th {
+            background: var(--gris-papel);
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--gris-tinta);
+            border-bottom: 1px solid #E5E7EB;
+        }
+        .compare-table td {
+            border-bottom: 1px solid #F1F5F9;
+            font-size: 0.925rem;
+        }
+        .compare-table tbody tr:last-child td { border-bottom: none; }
+        .compare-table .col-finance {
+            background: rgba(1, 88, 201, 0.04);
+            font-weight: 500;
+        }
+        .compare-table thead .col-finance {
+            background: var(--azul-oscuro);
             color: var(--blanco);
         }
-        
-        .btn-secondary {
-            border: 2px solid var(--blanco);
+
+        /* Step number */
+        .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 999px;
+            background: var(--azul-oscuro);
+            color: var(--blanco);
+            font-weight: 700;
+            font-size: 0.95rem;
+            letter-spacing: -0.01em;
+        }
+
+        /* Sticky CTA móvil */
+        .sticky-cta {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--blanco);
+            padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+            border-top: 1px solid #E5E7EB;
+            z-index: 40;
+            box-shadow: 0 -8px 24px rgba(0,0,0,0.06);
+        }
+        @media (min-width: 768px) {
+            .sticky-cta { display: none; }
+            body { padding-bottom: 0 !important; }
+        }
+        @media (max-width: 767px) {
+            body { padding-bottom: 80px; }
+        }
+
+        /* Anclas suaves */
+        html { scroll-behavior: smooth; }
+
+        /* Detalle decorativo: línea diagonal */
+        .accent-line {
+            display: inline-block;
+            width: 48px;
+            height: 3px;
+            background: var(--verde-principal);
+            border-radius: 999px;
+            margin-bottom: 1rem;
+        }
+
+        /* Pricing card destacada */
+        .pricing-highlight {
+            border: 2px solid var(--azul-oscuro);
+            position: relative;
+        }
+        .pricing-highlight::before {
+            content: 'Recomendado';
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--azul-oscuro);
+            color: var(--blanco);
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        /* Modal PWA install */
+        .pwa-modal-tab {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            color: var(--gris-suave);
+        }
+        .pwa-modal-tab.active {
+            background: var(--azul-oscuro);
             color: var(--blanco);
         }
-        
-        .btn-secondary:hover {
-            background-color: var(--blanco);
-            color: var(--azul-oscuro);
+
+        /* Animación de entrada */
+        @keyframes fade-up {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
         }
+        .fade-up { animation: fade-up 0.6s ease forwards; }
+
+        /* Iconos SVG inline (reemplazan a Font Awesome, sin dependencias) */
+        .ficon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1em;          /* hereda del contexto por defecto */
+            line-height: 0;
+        }
+        .ficon svg { width: 1em; height: 1em; }
+        /* Iconos grandes dentro de las tarjetas de features (contenedor 2.75rem) */
+        .feature-icon-box .ficon { font-size: 1.15rem; }
+        /* Icono grande de la card destacada Patrimonio (mockup) */
+        .ficon-lg { font-size: 1.25rem; }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-white">
 
     <!-- Navbar -->
-    <nav class="bg-white shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <nav class="bg-white border-b border-gray-100 sticky top-0 z-30">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6">
             <div class="flex justify-between items-center" style="min-height: 4rem;">
-                <a href="index.html" class="flex items-center flex-shrink-0" style="text-decoration: none;">
-                    <img src="./public/logo.png" alt="FinanceFlow Logo" style="height: 2rem; margin-right: 0.5rem;">
-                    <span class="font-bold hidden xs:inline sm:inline" style="color: var(--azul-oscuro); font-size: 1.1rem;">FinanceFlow</span>
+                <a href="index.html" class="flex items-center gap-2.5" style="text-decoration: none;">
+                    <img src="https://app.contabilidadpersonal.com/public/logo.png" alt="FinanceFlow" style="height: 1.85rem;">
+                    <span class="font-bold" style="color: var(--negro); font-size: 1.05rem; letter-spacing: -0.01em;">FinanceFlow</span>
                 </a>
-                <div class="flex items-center gap-2 sm:gap-4">
-                    <a href="login.html" class="hidden sm:inline text-gray-600 hover:text-gray-900 font-medium text-sm whitespace-nowrap">Iniciar Sesión</a>
-                    <a href="login.html" class="sm:hidden text-gray-600 hover:text-gray-900 font-medium text-sm whitespace-nowrap">Entrar</a>
-                    <a href="register.html" class="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg font-medium transition-colors text-sm whitespace-nowrap">
-                        <span class="hidden sm:inline">Crear Cuenta</span>
-                        <span class="sm:hidden">Registro</span>
+                <div class="flex items-center gap-3 sm:gap-5">
+                    <a href="#features" class="hidden md:inline text-sm text-gray-600 hover:text-gray-900">Funciones</a>
+                    <a href="#pricing" class="hidden md:inline text-sm text-gray-600 hover:text-gray-900">Precios</a>
+                    <a href="login.html" class="text-sm text-gray-600 hover:text-gray-900 font-medium">Iniciar sesión</a>
+                    <a href="register.html" class="btn-azul px-4 py-2 rounded-lg text-sm">
+                        <span class="hidden sm:inline">Empezar gratis</span>
+                        <span class="sm:hidden">Empezar</span>
                     </a>
                 </div>
             </div>
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <section class="gradient-bg text-white">
-        <div class="container mx-auto px-4 py-16">
-            <div class="text-center mb-12">
-                <div class="flex justify-center mb-6">
-                    <img src="./public/logo.png" alt="FinanceFlow Logo" style="height: 5rem; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));">
+    <!-- ════════════════════════════════════════════════════
+         HERO
+         ════════════════════════════════════════════════════ -->
+    <section class="hero-gradient relative overflow-hidden">
+        <div class="grid-bg absolute inset-0"></div>
+        <div class="relative max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20 lg:py-24">
+            <div class="grid lg:grid-cols-12 gap-10 lg:gap-12 items-center">
+
+                <!-- Copy -->
+                <div class="lg:col-span-7 text-white fade-up">
+                    <span class="credibility-tag mb-6">
+                        <span class="ficon" style="color: var(--verde-principal);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 2v20"/></svg></span>
+                        Pagos seguros con Stripe · GDPR · 100% en español
+                    </span>
+
+                    <h1 class="display text-4xl sm:text-5xl lg:text-6xl mb-5">
+                        Pon orden en tus finanzas <span style="color: var(--verde-principal);">en menos de 5 minutos.</span>
+                    </h1>
+                    <p class="text-lg sm:text-xl mb-8 max-w-xl" style="color: rgba(255,255,255,0.88); line-height: 1.55;">
+                        FinanceFlow es contabilidad personal de verdad: ingresos, gastos, deudas y patrimonio en una sola app. Sin hojas de Excel rotas, sin pegarte con apps que solo te enseñan en qué gastaste.
+                    </p>
+
+                    <div class="flex flex-col sm:flex-row gap-3 sm:gap-4 max-w-md">
+                        <button id="crear-cuenta-btn" class="btn-primary-hero px-7 py-3.5 rounded-lg flex items-center justify-center gap-2 text-base">
+                            <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+                            Empezar gratis
+                        </button>
+                        <button id="iniciar-sesion-btn" class="btn-ghost-hero px-7 py-3.5 rounded-lg text-base">
+                            Ya tengo cuenta
+                        </button>
+                    </div>
+
+                    <p class="mt-5 text-sm" style="color: rgba(255,255,255,0.7);">
+                        Sin tarjeta · Sin anuncios · Plan gratis para siempre
+                    </p>
                 </div>
-                <h1 class="text-5xl font-bold mb-4">FinanceFlow</h1>
-                <p class="text-xl opacity-90 mb-8">Tu contabilidad personal bajo control</p>
-                
-                <!-- CTA Buttons - SOLO ESTOS DOS BOTONES -->
-                <div class="flex flex-col sm:flex-row gap-4 justify-center max-w-md mx-auto">
-                    <button id="crear-cuenta-btn" class="btn-primary px-8 py-4 rounded-lg font-semibold transition-colors flex items-center justify-center">
-                        <i class="fas fa-user-plus mr-2"></i>
-                        Crear Cuenta
-                    </button>
-                    <button id="iniciar-sesion-btn" class="btn-secondary px-8 py-4 rounded-lg font-semibold transition-colors">
-                        <i class="fas fa-sign-in-alt mr-2"></i>
-                        Iniciar Sesión
-                    </button>
+
+                <!-- Mockup ilustrado FIEL al dashboard real de la app -->
+                <div class="lg:col-span-5 fade-up" style="animation-delay: 0.15s;">
+                    <div class="mockup-frame max-w-md mx-auto">
+                        <div class="mockup-header">
+                            <span class="mockup-dot" style="background: #FF5F57;"></span>
+                            <span class="mockup-dot" style="background: #FEBC2E;"></span>
+                            <span class="mockup-dot" style="background: #28C840;"></span>
+                            <span class="text-xs text-gray-500 ml-2">FinanceFlow · Dashboard</span>
+                        </div>
+                        <div class="p-4 sm:p-5">
+                            <!-- Title de sección (igual que el dashboard real) -->
+                            <h3 class="font-bold text-base mb-0.5" style="color: var(--negro);">Dashboard</h3>
+                            <p class="text-xs text-gray-500 mb-4">Resumen de tu situación financiera</p>
+
+                            <!-- Card destacada Patrimonio Total (gradiente azul, copia exacta del UI) -->
+                            <div class="rounded-xl p-4 mb-4 text-white" style="background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul-claro) 100%);">
+                                <div class="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-xs opacity-80 font-medium">Patrimonio Total</p>
+                                        <p class="text-2xl font-bold">12.480 €</p>
+                                        <p class="text-[11px] opacity-80 mt-0.5">Balance general de tu economía</p>
+                                    </div>
+                                    <div class="p-2.5 rounded-lg" style="background: rgba(255,255,255,0.2);">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #fff;"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Métricas secundarias 2×2 (igual que la app) -->
+                            <div class="grid grid-cols-2 gap-2 mb-4">
+                                <div class="mockup-stat-card" style="padding: 0.65rem 0.8rem;">
+                                    <p class="text-[10px] text-gray-500 mb-0.5">Activos</p>
+                                    <p class="text-sm font-bold" style="color: var(--verde-oscuro);">18.450 €</p>
+                                </div>
+                                <div class="mockup-stat-card" style="padding: 0.65rem 0.8rem;">
+                                    <p class="text-[10px] text-gray-500 mb-0.5">Pasivos</p>
+                                    <p class="text-sm font-bold text-red-500">5.970 €</p>
+                                </div>
+                                <div class="mockup-stat-card" style="padding: 0.65rem 0.8rem;">
+                                    <p class="text-[10px] text-gray-500 mb-0.5">Ingresos del mes</p>
+                                    <p class="text-sm font-bold" style="color: var(--verde-oscuro);">2.180 €</p>
+                                </div>
+                                <div class="mockup-stat-card" style="padding: 0.65rem 0.8rem;">
+                                    <p class="text-[10px] text-gray-500 mb-0.5">Gastos del mes</p>
+                                    <p class="text-sm font-bold text-red-500">1.640 €</p>
+                                </div>
+                            </div>
+
+                            <!-- Movimientos recientes -->
+                            <div>
+                                <p class="text-[10px] text-gray-500 uppercase tracking-wider mb-2" style="letter-spacing: 0.08em;">Movimientos recientes</p>
+                                <div class="space-y-1.5">
+                                    <div class="flex justify-between items-center text-xs py-1">
+                                        <span class="flex items-center gap-2">
+                                            <span class="w-6 h-6 rounded-md flex items-center justify-center" style="background: rgba(97,206,112,0.15);">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: var(--verde-oscuro);"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                                            </span>
+                                            <span class="text-gray-700">Nómina</span>
+                                        </span>
+                                        <span class="font-semibold" style="color: var(--verde-oscuro);">+2.180 €</span>
+                                    </div>
+                                    <div class="flex justify-between items-center text-xs py-1">
+                                        <span class="flex items-center gap-2">
+                                            <span class="w-6 h-6 rounded-md flex items-center justify-center" style="background: rgba(239,68,68,0.12);">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: #ef4444;"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                                            </span>
+                                            <span class="text-gray-700">Alquiler</span>
+                                        </span>
+                                        <span class="font-semibold text-red-500">−780 €</span>
+                                    </div>
+                                    <div class="flex justify-between items-center text-xs py-1">
+                                        <span class="flex items-center gap-2">
+                                            <span class="w-6 h-6 rounded-md flex items-center justify-center" style="background: rgba(239,68,68,0.12);">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="color: #ef4444;"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                                            </span>
+                                            <span class="text-gray-700">Supermercado</span>
+                                        </span>
+                                        <span class="font-semibold text-red-500">−142 €</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                
-                <p class="text-sm opacity-75 mt-4">💡 Plan FREE para siempre - Empieza ahora</p>
+
             </div>
         </div>
     </section>
 
-    <!-- Features Section -->
-    <section class="py-16">
-        <div class="container mx-auto px-4">
-            <div class="text-center mb-12">
-                <h2 class="text-3xl font-bold mb-4" style="color: var(--negro);">¿Por qué elegir FinanceFlow?</h2>
-                <p class="text-gray-600 text-lg">La solución completa para tu contabilidad personal</p>
+    <!-- ════════════════════════════════════════════════════
+         PROBLEMA (PAS)
+         ════════════════════════════════════════════════════ -->
+    <section class="py-20 bg-white">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6">
+            <div class="text-center max-w-2xl mx-auto mb-14">
+                <span class="accent-line"></span>
+                <h2 class="display-2 text-3xl sm:text-4xl mb-4" style="color: var(--negro);">
+                    ¿Te suena alguno de estos?
+                </h2>
+                <p class="text-lg text-gray-600">
+                    Tres formas de perder el control que vemos una y otra vez.
+                </p>
             </div>
-            
-            <div class="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-                <!-- Feature 1 -->
-                <div class="feature-card bg-white rounded-xl p-6 text-center shadow-lg">
-                    <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style="background-color: rgba(1, 88, 201, 0.1);">
-                        <i class="fas fa-university text-2xl" style="color: var(--azul-oscuro);"></i>
+
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="p-6">
+                    <div class="feature-icon-box w-12 h-12 rounded-xl flex items-center justify-center mb-4" style="background: rgba(239,68,68,0.1);">
+                        <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
                     </div>
-                    <h3 class="text-xl font-semibold mb-3" style="color: var(--negro);">Modelo Contable Profesional</h3>
-                    <p class="text-gray-600">Activos, Pasivos, Ingresos, Gastos y Patrimonio. Todo organizado como debe ser.</p>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Llega fin de mes y no sabes dónde se fue el dinero</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        La cuenta está más vacía de lo que esperabas y no consigues señalar exactamente qué pasó. Otra vez.
+                    </p>
                 </div>
-                
-                <!-- Feature 2 -->
-                <div class="feature-card bg-white rounded-xl p-6 text-center shadow-lg">
-                    <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style="background-color: rgba(97, 206, 112, 0.1);">
-                        <i class="fas fa-chart-pie text-2xl" style="color: var(--verde-principal);"></i>
+
+                <div class="p-6">
+                    <div class="feature-icon-box w-12 h-12 rounded-xl flex items-center justify-center mb-4" style="background: rgba(239,68,68,0.1);">
+                        <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9.5" y1="12.5" x2="14.5" y2="17.5"/><line x1="14.5" y1="12.5" x2="9.5" y2="17.5"/></svg></span>
                     </div>
-                    <h3 class="text-xl font-semibold mb-3" style="color: var(--negro);">Dashboard Funcional</h3>
-                    <p class="text-gray-600">Visualiza tu situación financiera real con datos que realmente importan.</p>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Tienes un Excel que ya no entiendes</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Lo empezaste con buena intención. Hoy tiene fórmulas rotas, columnas duplicadas y lo abres una vez al trimestre con culpa.
+                    </p>
                 </div>
-                
-                <!-- Feature 3 -->
-                <div class="feature-card bg-white rounded-xl p-6 text-center shadow-lg">
-                    <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style="background-color: rgba(94, 198, 255, 0.1);">
-                        <i class="fas fa-coins text-2xl" style="color: var(--azul-claro);"></i>
+
+                <div class="p-6">
+                    <div class="feature-icon-box w-12 h-12 rounded-xl flex items-center justify-center mb-4" style="background: rgba(239,68,68,0.1);">
+                        <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M3 3v18h18"/><polyline points="19 9 13 15 9 11 5 15"/></svg></span>
                     </div>
-                    <h3 class="text-xl font-semibold mb-3" style="color: var(--negro);">Control Real de Gastos</h3>
-                    <p class="text-gray-600">Registra y controla cada movimiento para tomar decisiones informadas.</p>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Las apps que probaste solo te enseñan tus gastos</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Categorías bonitas, sí. Pero ninguna te dice si tu patrimonio sube o baja, si tu deuda mejora o si vas camino del cero.
+                    </p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Pricing Plans -->
-    <section class="py-16 bg-gray-100">
-        <div class="container mx-auto px-4">
-            <div class="text-center mb-12">
-                <h2 class="text-3xl font-bold text-gray-900 mb-4">Planes transparentes</h2>
-                <p class="text-gray-600">Empieza gratis, escala cuando necesites más</p>
-            </div>
-            
-            <div class="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-                <!-- Plan Free -->
-                <div class="bg-white rounded-xl p-8 shadow-lg border-2 border-gray-200">
-                    <div class="text-center mb-6">
-                        <h3 class="text-2xl font-bold text-gray-900 mb-2">Plan FREE</h3>
-                        <div class="text-4xl font-bold text-gray-900 mb-1">€0</div>
-                        <p class="text-gray-500">Siempre gratis</p>
-                    </div>
-                    
-                    <ul class="space-y-3 mb-8">
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>1 cuenta bancaria</span>
+    <!-- ════════════════════════════════════════════════════
+         SOLUCIÓN
+         ════════════════════════════════════════════════════ -->
+    <section class="py-20" style="background: var(--gris-papel);">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6">
+            <div class="grid lg:grid-cols-2 gap-12 items-center">
+                <div>
+                    <span class="accent-line"></span>
+                    <h2 class="display-2 text-3xl sm:text-4xl mb-5" style="color: var(--negro);">
+                        Contabilidad real, no solo categorizar gastos.
+                    </h2>
+                    <p class="text-lg text-gray-700 mb-6 leading-relaxed">
+                        FinanceFlow trata tus finanzas personales como lo que son: una pequeña empresa. Activos, pasivos, ingresos, gastos y patrimonio. La imagen completa, no solo las fugas.
+                    </p>
+                    <ul class="space-y-3 text-gray-700">
+                        <li class="flex gap-3">
+                            <span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span>
+                            <span>Sabes <strong>cuánto vales</strong> hoy y cómo evoluciona mes a mes.</span>
                         </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>2 cuentas de ingresos</span>
+                        <li class="flex gap-3">
+                            <span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span>
+                            <span>Detectas <strong>qué cuesta de verdad</strong> y dónde sangra el dinero.</span>
                         </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>8 cuentas de gastos</span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>Registro manual</span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>Dashboard básico</span>
+                        <li class="flex gap-3">
+                            <span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span>
+                            <span>Decides sobre <strong>datos</strong>, no sobre la sensación de fin de mes.</span>
                         </li>
                     </ul>
-                    
-                    <button id="empezar-free-btn" class="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors">
-                        Empezar Gratis
+                </div>
+                <div>
+                    <div class="card-sharp p-6">
+                        <h4 class="font-semibold mb-3" style="color: var(--negro);">Tu balance, en tiempo real</h4>
+                        <div class="space-y-2.5 text-sm">
+                            <div class="flex justify-between py-2 border-b border-gray-100">
+                                <span class="text-gray-600">Activos (lo que tienes)</span>
+                                <span class="font-bold" style="color: var(--verde-oscuro);">+18.450 €</span>
+                            </div>
+                            <div class="flex justify-between py-2 border-b border-gray-100">
+                                <span class="text-gray-600">Pasivos (lo que debes)</span>
+                                <span class="font-bold text-red-500">−5.970 €</span>
+                            </div>
+                            <div class="flex justify-between py-3 mt-1">
+                                <span class="font-semibold" style="color: var(--negro);">Patrimonio Total</span>
+                                <span class="font-bold text-lg" style="color: var(--azul-oscuro);">+12.480 €</span>
+                            </div>
+                        </div>
+                        <div class="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
+                            <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
+                            La cifra real que importa, no solo "cuánto gasté en restaurantes".
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════
+         CÓMO FUNCIONA
+         ════════════════════════════════════════════════════ -->
+    <section class="py-20 bg-white">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6">
+            <div class="text-center max-w-2xl mx-auto mb-14">
+                <span class="accent-line"></span>
+                <h2 class="display-2 text-3xl sm:text-4xl mb-4" style="color: var(--negro);">
+                    Tres pasos. Sin curva de aprendizaje.
+                </h2>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <div>
+                    <span class="step-num mb-4">1</span>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Regístrate gratis</h3>
+                    <p class="text-gray-600 leading-relaxed">
+                        30 segundos. Email y contraseña. Sin tarjeta, sin anuncios, sin letra pequeña.
+                    </p>
+                </div>
+                <div>
+                    <span class="step-num mb-4">2</span>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Registra o importa tus movimientos</h3>
+                    <p class="text-gray-600 leading-relaxed">
+                        Apunta movimientos a mano si prefieres control total, o importa el extracto de tu banco en CSV/Excel y deja que se registren automáticamente (en Premium).
+                    </p>
+                </div>
+                <div>
+                    <span class="step-num mb-4">3</span>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Ve tu situación real</h3>
+                    <p class="text-gray-600 leading-relaxed">
+                        Balance, libro mayor, plan 50/30/20 y patrimonio neto actualizados en tiempo real.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════
+         FEATURES (Bento)
+         ════════════════════════════════════════════════════ -->
+    <section id="features" class="py-20" style="background: var(--gris-papel);">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6">
+            <div class="text-center max-w-2xl mx-auto mb-14">
+                <span class="accent-line"></span>
+                <h2 class="display-2 text-3xl sm:text-4xl mb-4" style="color: var(--negro);">
+                    Todo lo que necesitas, nada de lo que sobra.
+                </h2>
+                <p class="text-lg text-gray-600">
+                    Funciones diseñadas para que entiendas tu dinero, no para vender humo.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <!-- Feature card -->
+                <div class="card-sharp p-6">
+                    <div class="feature-icon-box w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background: rgba(1,88,201,0.1);">
+                        <span class="ficon" style="color: var(--azul-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polygon points="12 2 20 7 4 7"/><line x1="6" y1="10" x2="6" y2="21"/><line x1="10" y1="10" x2="10" y2="21"/><line x1="14" y1="10" x2="14" y2="21"/><line x1="18" y1="10" x2="18" y2="21"/></svg></span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Modelo contable profesional</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Activos, pasivos, ingresos, gastos y patrimonio. La estructura que usan los negocios, aplicada a tu vida.</p>
+                </div>
+
+                <div class="card-sharp p-6">
+                    <div class="feature-icon-box w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background: rgba(94,198,255,0.18);">
+                        <span class="ficon" style="color: var(--azul-claro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Dashboard funcional</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Patrimonio Total, ingresos vs gastos y resumen inteligente del mes. Lo importante, sin saturación visual.</p>
+                </div>
+
+                <div class="card-sharp p-6">
+                    <div class="feature-icon-box w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background: rgba(97,206,112,0.18);">
+                        <span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Libro mayor</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Cada cuenta con su historial completo: debe, haber y saldo. Trazabilidad total cuando la necesitas.</p>
+                </div>
+
+                <div class="card-sharp p-6">
+                    <div class="feature-icon-box w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background: rgba(1,88,201,0.1);">
+                        <span class="ficon" style="color: var(--azul-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="12" y1="3" x2="12" y2="21"/><path d="M5 7h14"/><path d="M5 7l-3 7a3 3 0 0 0 6 0z"/><path d="M19 7l-3 7a3 3 0 0 0 6 0z"/><line x1="7" y1="21" x2="17" y2="21"/></svg></span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Plan 50/30/20</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Necesidades, deseos y ahorro. La regla clásica, calculada automáticamente sobre tus números reales.</p>
+                </div>
+
+                <div class="card-sharp p-6">
+                    <div class="feature-icon-box w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background: rgba(97,206,112,0.18);">
+                        <span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:-0.125em;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Registro automático de movimientos</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">Importa el extracto de tu banco en CSV o Excel y deja que tus reglas lo registren y clasifiquen solo. Menos clicks, más tiempo libre.</p>
+                </div>
+
+                <div class="card-sharp p-6">
+                    <div class="feature-icon-box w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background: rgba(94,198,255,0.18);">
+                        <span class="ficon" style="color: var(--azul-claro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Instálala en tu móvil</h3>
+                    <p class="text-gray-600 text-sm leading-relaxed">PWA: funciona como una app nativa en iOS y Android, sin pasar por App Store ni Google Play.</p>
+                    <button id="abrir-pwa-modal" class="text-xs font-semibold mt-3 inline-flex items-center gap-1" style="color: var(--azul-oscuro);">
+                        Cómo instalar <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
                     </button>
                 </div>
-                
-                <!-- Plan Premium -->
-                <div class="bg-white rounded-xl p-8 shadow-lg border-2 border-blue-500 relative">
-                    <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                        <span class="bg-blue-500 text-white px-4 py-1 rounded-full text-sm font-semibold">Recomendado</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════
+         COMPARATIVA HONESTA
+         ════════════════════════════════════════════════════ -->
+    <section class="py-20 bg-white">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6">
+            <div class="text-center max-w-2xl mx-auto mb-12">
+                <span class="accent-line"></span>
+                <h2 class="display-2 text-3xl sm:text-4xl mb-4" style="color: var(--negro);">
+                    ¿Por qué no Excel? ¿Por qué no otra app de gastos?
+                </h2>
+                <p class="text-lg text-gray-600">Comparativa sin filtros.</p>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="compare-table w-full text-left">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Excel/Cuaderno</th>
+                            <th>Apps de gastos</th>
+                            <th class="col-finance">FinanceFlow</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="font-semibold">Categoriza tus gastos</td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" style="display:inline-block;vertical-align:-3px;"><circle cx="12" cy="12" r="9" fill="none" stroke="#EAB308" stroke-width="2.5"/><path d="M12 3 A9 9 0 0 1 12 21 Z" fill="#EAB308"/></svg> A mano</td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg></td>
+                            <td class="col-finance"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg></td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold">Calcula tu patrimonio neto</td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                            <td class="col-finance"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg></td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold">Trata deudas como pasivos reales</td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                            <td class="col-finance"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg></td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold">Registro automático desde tu extracto</td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" style="display:inline-block;vertical-align:-3px;"><circle cx="12" cy="12" r="9" fill="none" stroke="#EAB308" stroke-width="2.5"/><path d="M12 3 A9 9 0 0 1 12 21 Z" fill="#EAB308"/></svg> A veces</td>
+                            <td class="col-finance"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg> Premium</td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold">Funciona offline (instalable)</td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg></td>
+                            <td><svg width="18" height="18" viewBox="0 0 24 24" style="display:inline-block;vertical-align:-3px;"><circle cx="12" cy="12" r="9" fill="none" stroke="#EAB308" stroke-width="2.5"/><path d="M12 3 A9 9 0 0 1 12 21 Z" fill="#EAB308"/></svg></td>
+                            <td class="col-finance"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px;"><polyline points="20 6 9 17 4 12"/></svg></td>
+                        </tr>
+                        <tr>
+                            <td class="font-semibold">Precio</td>
+                            <td>Gratis</td>
+                            <td>5–15 €/mes</td>
+                            <td class="col-finance">Gratis · Premium 2 €/mes</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════
+         PRICING
+         ════════════════════════════════════════════════════ -->
+    <section id="pricing" class="py-20" style="background: var(--gris-papel);">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6">
+            <div class="text-center max-w-2xl mx-auto mb-14">
+                <span class="accent-line"></span>
+                <h2 class="display-2 text-3xl sm:text-4xl mb-4" style="color: var(--negro);">
+                    Gratis para siempre. Premium opcional.
+                </h2>
+                <p class="text-lg text-gray-600">
+                    El plan gratis es realmente gratis. Premium solo si quieres registro automático de movimientos y más cuentas.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+                <!-- Free -->
+                <div class="card-sharp p-7 flex flex-col">
+                    <h3 class="font-bold text-xl mb-1" style="color: var(--negro);">Gratis</h3>
+                    <p class="text-gray-500 text-sm mb-4">Para siempre</p>
+                    <div class="mb-5">
+                        <span class="text-4xl font-bold" style="color: var(--negro);">0 €</span>
+                        <span class="text-gray-500 ml-1">/ mes</span>
                     </div>
-                    
-                    <div class="text-center mb-6">
-                        <h3 class="text-2xl font-bold text-gray-900 mb-2">Plan PREMIUM</h3>
-                        <div class="text-4xl font-bold text-gray-900 mb-1">€2<span class="text-lg">/mes</span></div>
-                        <p class="text-gray-500">o €20/año (ahorra €4)</p>
-                    </div>
-                    
-                    <ul class="space-y-3 mb-8">
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span><strong>Todo de FREE +</strong></span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>Hasta 10 cuentas bancarias</span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>Hasta 8 cuentas de ingresos</span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>Hasta 15 cuentas de gastos</span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span><strong>Conexión bancaria automática</strong></span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span><strong>Reglas de registro automático</strong></span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span><strong>Plan de Autocontrol</strong></span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span><strong>Notificaciones push</strong></span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span>Libro mayor anual</span>
-                        </li>
-                        <li class="flex items-center">
-                            <i class="fas fa-check text-green-500 mr-3"></i>
-                            <span><strong>Exportación de datos (CSV / Excel)</strong></span>
-                        </li>
+                    <ul class="space-y-2.5 mb-6 text-sm text-gray-700 flex-1">
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Registro contable manual</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Dashboard funcional</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Libro diario y libro mensual</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Hasta 1 cuenta bancaria, 2 ingresos y 8 gastos</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Instalable como app (PWA)</li>
                     </ul>
-                    
-                    <button id="empezar-premium-btn" class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+                    <button id="empezar-free-btn" class="btn-azul w-full py-3 rounded-lg text-sm">
+                        Crear cuenta gratis
+                    </button>
+                </div>
+
+                <!-- Premium -->
+                <div class="card-sharp pricing-highlight p-7 flex flex-col">
+                    <h3 class="font-bold text-xl mb-1" style="color: var(--azul-oscuro);">Premium</h3>
+                    <p class="text-gray-500 text-sm mb-4">Automatiza el registro de tus movimientos</p>
+                    <div class="mb-5">
+                        <span class="text-4xl font-bold" style="color: var(--negro);">2 €</span>
+                        <span class="text-gray-500 ml-1">/ mes</span>
+                        <p class="text-xs text-gray-500 mt-1">o 20 €/año (ahorra 17%)</p>
+                    </div>
+                    <ul class="space-y-2.5 mb-6 text-sm text-gray-700 flex-1">
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> <strong>Todo lo del plan gratis</strong></li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Registro automático de movimientos (CSV/Excel)</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Reglas de Registro Automático</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Plan de Autocontrol</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Notificaciones inteligentes</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Libro Mayor anual</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Exportación CSV / Excel</li>
+                        <li class="flex gap-2"><span class="ficon" style="color: var(--verde-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="20 6 9 17 4 12"/></svg></span> Hasta 10 cuentas, 8 ingresos y 15 gastos</li>
+                    </ul>
+                    <button id="empezar-premium-btn" class="btn-azul w-full py-3 rounded-lg text-sm">
                         Empezar con Premium
                     </button>
                 </div>
             </div>
+
+            <p class="text-center text-sm text-gray-500 mt-8">
+                <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+                Pagos seguros con Stripe · Cancela cuando quieras · Sin permanencia
+            </p>
         </div>
     </section>
 
-    <!-- CTA Final -->
-    <section class="gradient-bg text-white py-16">
-        <div class="container mx-auto px-4 text-center">
-            <h2 class="text-3xl font-bold mb-4">¿Listo para controlar tus finanzas?</h2>
-            <p class="text-xl opacity-90 mb-8">Empieza ahora y toma el control de tus finanzas personales</p>
-            
-            <div class="flex flex-col sm:flex-row gap-4 justify-center max-w-md mx-auto">
-                <button id="crear-cuenta-final-btn" class="bg-white text-blue-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition-colors">
-                    <i class="fas fa-rocket mr-2"></i>
-                    Crear Cuenta Gratis
+    <!-- ════════════════════════════════════════════════════
+         CTA FINAL
+         ════════════════════════════════════════════════════ -->
+    <section class="hero-gradient relative overflow-hidden py-20">
+        <div class="grid-bg absolute inset-0"></div>
+        <div class="relative max-w-3xl mx-auto px-4 sm:px-6 text-center">
+            <h2 class="display text-3xl sm:text-5xl mb-5 text-white">
+                ¿Listo para saber <span style="color: var(--verde-principal);">cuánto vales</span> de verdad?
+            </h2>
+            <p class="text-lg mb-8" style="color: rgba(255,255,255,0.85);">
+                Tu primera radiografía financiera está a 5 minutos. Gratis. Para siempre.
+            </p>
+            <div class="flex flex-col sm:flex-row gap-3 justify-center max-w-md mx-auto">
+                <button id="crear-cuenta-final-btn" class="btn-primary-hero px-7 py-3.5 rounded-lg flex items-center justify-center gap-2 text-base">
+                    <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+                    Crear cuenta gratis
                 </button>
-                <button id="iniciar-sesion-final-btn" class="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold hover:bg-white hover:text-blue-600 transition-colors">
+                <button id="iniciar-sesion-final-btn" class="btn-ghost-hero px-7 py-3.5 rounded-lg text-base">
                     Ya tengo cuenta
                 </button>
             </div>
+            <p class="mt-6 text-sm" style="color: rgba(255,255,255,0.7);">
+                Sin tarjeta · Sin anuncios · Sin compromiso
+            </p>
         </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="bg-gray-900 text-white py-10">
-        <div class="max-w-5xl mx-auto px-4">
-            <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                    <img src="./public/logo.png" alt="FinanceFlow" style="height: 1.75rem; opacity: 0.85;">
-                    <span class="font-semibold text-white">FinanceFlow</span>
+    <!-- ════════════════════════════════════════════════════
+         FOOTER
+         ════════════════════════════════════════════════════ -->
+    <footer class="bg-gray-900 text-white py-12">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6">
+            <div class="grid md:grid-cols-3 gap-8 mb-8">
+                <div>
+                    <div class="flex items-center gap-2.5 mb-4">
+                        <img src="https://app.contabilidadpersonal.com/public/logo.png" alt="FinanceFlow" style="height: 1.85rem; opacity: 0.95;">
+                        <span class="font-bold text-white" style="font-size: 1.05rem;">FinanceFlow</span>
+                    </div>
+                    <p class="text-sm text-gray-400 leading-relaxed">
+                        Contabilidad personal real, gratis para siempre.<br>
+                        Un producto de <a href="https://www.contabilidadpersonal.com" target="_blank" class="underline hover:text-white">Contabilidad Personal</a>.
+                    </p>
                 </div>
-                <div class="flex flex-wrap justify-center gap-4 text-sm text-gray-400">
-                    <script>document.write(`<a href="${window.APP_CONFIG?.helpUrl || 'https://www.contabilidadpersonal.com/category/financeflow/'}" target="_blank" class="hover:text-white transition-colors">Centro de Ayuda</a>`)</script>
-                    <script>document.write(`<a href="${window.APP_CONFIG?.privacyUrl || 'https://www.contabilidadpersonal.com/politica-de-privacidad/'}" target="_blank" class="hover:text-white transition-colors">Política de Privacidad</a>`)</script>
-                    <a href="pricing.html" class="hover:text-white transition-colors">Precios</a>
+                <div>
+                    <h4 class="font-semibold text-white mb-3 text-sm">Producto</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><a href="#features" class="hover:text-white">Funciones</a></li>
+                        <li><a href="pricing.html" class="hover:text-white">Precios</a></li>
+                        <li><a href="register.html" class="hover:text-white">Crear cuenta</a></li>
+                        <li><a href="login.html" class="hover:text-white">Iniciar sesión</a></li>
+                    </ul>
                 </div>
-                <p class="text-sm text-gray-500">&copy; 2026 FinanceFlow. Todos los derechos reservados.</p>
+                <div>
+                    <h4 class="font-semibold text-white mb-3 text-sm">Recursos</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><script>document.write(`<a href="${window.APP_CONFIG?.helpUrl || 'https://www.contabilidadpersonal.com/category/financeflow/'}" target="_blank" class="hover:text-white">Centro de ayuda</a>`)</script></li>
+                        <li><script>document.write(`<a href="${window.APP_CONFIG?.privacyUrl || 'https://www.contabilidadpersonal.com/politica-de-privacidad/'}" target="_blank" class="hover:text-white">Política de privacidad</a>`)</script></li>
+                        <li><script>document.write(`<a href="${window.APP_CONFIG?.termsUrl || 'https://www.contabilidadpersonal.com/terminos-y-condiciones/'}" target="_blank" class="hover:text-white">Términos y condiciones</a>`)</script></li>
+                        <li><script>document.write(`<a href="mailto:${window.APP_CONFIG?.supportEmail || 'clientes@contabilidadpersonal.com'}" class="hover:text-white">Contacto</a>`)</script></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-gray-800 pt-6 flex flex-col sm:flex-row justify-between items-center gap-3">
+                <p class="text-xs text-gray-500">&copy; 2026 FinanceFlow · Contabilidad Personal. Todos los derechos reservados.</p>
+                <div class="flex items-center gap-4 text-xs text-gray-500">
+                    <span><span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 2v20"/></svg></span>GDPR</span>
+                    <span><span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></span>Stripe</span>
+                    <span><span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:-0.125em;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>Automatización</span>
+                </div>
             </div>
         </div>
     </footer>
 
-    <!-- Modal de selección de tipo de pago Premium -->
-    <div id="payment-type-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+    <!-- ════════════════════════════════════════════════════
+         STICKY CTA MÓVIL
+         ════════════════════════════════════════════════════ -->
+    <div class="sticky-cta md:hidden">
+        <a href="register.html" class="block w-full text-center btn-azul py-3.5 rounded-lg font-semibold">
+            Empezar gratis <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+        </a>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════
+         MODAL: Selección de plan Premium
+         (mismo ID que el original — JS sigue funcionando)
+         ════════════════════════════════════════════════════ -->
+    <div id="payment-type-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center px-4">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full">
             <div class="text-center mb-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-2">Elige tu plan Premium</h3>
-                <p class="text-sm text-gray-600">Selecciona la modalidad de pago</p>
+                <h3 class="text-xl font-bold mb-1" style="color: var(--negro);">Elige tu plan Premium</h3>
+                <p class="text-sm text-gray-600">Cancela cuando quieras, sin permanencia</p>
             </div>
-            
-            <div class="space-y-4">
-                <button id="monthly-payment" class="w-full p-4 border border-gray-300 rounded-lg hover:border-blue-500 text-left transition-colors">
+            <div class="space-y-3">
+                <button id="monthly-payment" class="w-full p-4 border border-gray-300 rounded-xl hover:border-blue-500 text-left transition-colors">
                     <div class="flex justify-between items-center">
                         <div>
-                            <h4 class="font-medium text-gray-900">Mensual</h4>
-                            <p class="text-sm text-gray-600">€2/mes - Facturado mensualmente</p>
+                            <h4 class="font-semibold" style="color: var(--negro);">Mensual</h4>
+                            <p class="text-sm text-gray-500">Facturado cada mes</p>
                         </div>
-                        <div class="text-lg font-bold text-blue-600">€2</div>
+                        <div class="text-lg font-bold" style="color: var(--azul-oscuro);">2 €<span class="text-sm font-normal text-gray-500">/mes</span></div>
                     </div>
                 </button>
-                
-                <button id="yearly-payment" class="w-full p-4 border border-gray-300 rounded-lg hover:border-blue-500 text-left transition-colors">
+                <button id="yearly-payment" class="w-full p-4 border-2 rounded-xl text-left transition-colors" style="border-color: var(--azul-oscuro); background: rgba(1,88,201,0.04);">
                     <div class="flex justify-between items-center">
                         <div>
-                            <h4 class="font-medium text-gray-900">Anual</h4>
-                            <p class="text-sm text-gray-600">€20/año - Ahorra €4</p>
+                            <h4 class="font-semibold flex items-center gap-2" style="color: var(--negro);">
+                                Anual
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style="background: var(--verde-oscuro);">AHORRA 17%</span>
+                            </h4>
+                            <p class="text-sm text-gray-500">20 €/año · solo 1,67 €/mes</p>
                         </div>
-                        <div>
-                            <div class="text-lg font-bold text-blue-600">€20</div>
-                            <div class="text-xs text-green-600">Ahorra 17%</div>
-                        </div>
+                        <div class="text-lg font-bold" style="color: var(--azul-oscuro);">20 €<span class="text-sm font-normal text-gray-500">/año</span></div>
                     </div>
                 </button>
             </div>
-            
-            <div class="mt-6 flex space-x-4">
-                <button id="cancel-payment" class="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors">
+            <div class="mt-6">
+                <button id="cancel-payment" class="w-full bg-gray-100 text-gray-700 py-2.5 px-4 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium">
                     Cancelar
                 </button>
             </div>
         </div>
     </div>
 
+    <!-- ════════════════════════════════════════════════════
+         MODAL: Instalación PWA (iOS / Android)
+         ════════════════════════════════════════════════════ -->
+    <div id="pwa-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center px-4">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full">
+            <div class="flex justify-between items-center mb-5">
+                <h3 class="text-xl font-bold" style="color: var(--negro);">Instala FinanceFlow</h3>
+                <button id="cerrar-pwa-modal" class="text-gray-400 hover:text-gray-700">
+                    <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+                </button>
+            </div>
+
+            <div class="flex gap-2 mb-5 p-1 bg-gray-100 rounded-lg">
+                <button class="pwa-modal-tab active flex-1 text-center" data-tab="ios">
+                    <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06z"/><path d="M10 2c1 .5 2 2 2 5"/></svg></span> iPhone / iPad
+                </button>
+                <button class="pwa-modal-tab flex-1 text-center" data-tab="android">
+                    <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><path d="M5 16V9a7 7 0 0 1 14 0v7"/><line x1="8" y1="3" x2="6" y2="1"/><line x1="16" y1="3" x2="18" y2="1"/><rect x="3" y="16" width="18" height="5" rx="2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span> Android
+                </button>
+            </div>
+
+            <div id="pwa-ios" class="text-sm text-gray-700 space-y-3">
+                <div class="flex gap-3">
+                    <span class="step-num flex-shrink-0" style="width: 28px; height: 28px; font-size: 0.8rem;">1</span>
+                    <p>Abre <strong>app.contabilidadpersonal.com</strong> en <strong>Safari</strong> (no funciona en Chrome iOS).</p>
+                </div>
+                <div class="flex gap-3">
+                    <span class="step-num flex-shrink-0" style="width: 28px; height: 28px; font-size: 0.8rem;">2</span>
+                    <p>Toca el botón de <strong>compartir</strong> <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><polyline points="9 11 12 8 15 11"/><line x1="12" y1="8" x2="12" y2="18"/><path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2"/></svg></span> en la barra inferior.</p>
+                </div>
+                <div class="flex gap-3">
+                    <span class="step-num flex-shrink-0" style="width: 28px; height: 28px; font-size: 0.8rem;">3</span>
+                    <p>Selecciona <strong>"Añadir a pantalla de inicio"</strong> y confirma.</p>
+                </div>
+            </div>
+
+            <div id="pwa-android" class="hidden text-sm text-gray-700 space-y-3">
+                <div class="flex gap-3">
+                    <span class="step-num flex-shrink-0" style="width: 28px; height: 28px; font-size: 0.8rem;">1</span>
+                    <p>Abre <strong>app.contabilidadpersonal.com</strong> en <strong>Chrome</strong>.</p>
+                </div>
+                <div class="flex gap-3">
+                    <span class="step-num flex-shrink-0" style="width: 28px; height: 28px; font-size: 0.8rem;">2</span>
+                    <p>Toca el menú <strong>⋮</strong> arriba a la derecha.</p>
+                </div>
+                <div class="flex gap-3">
+                    <span class="step-num flex-shrink-0" style="width: 28px; height: 28px; font-size: 0.8rem;">3</span>
+                    <p>Selecciona <strong>"Instalar aplicación"</strong> o <strong>"Añadir a pantalla de inicio"</strong>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════
+         LÓGICA JS (compatible con el resto del producto)
+         ════════════════════════════════════════════════════ -->
     <script>
-        // NAVEGACIÓN SIMPLE Y DIRECTA - SEPARADA FREE Y PREMIUM
-        
-        // Funciones para el modal de pago
+        // ===== Modal de pago Premium =====
         function showPaymentModal() {
             document.getElementById('payment-type-modal').classList.remove('hidden');
         }
-
         function closePaymentModal() {
             document.getElementById('payment-type-modal').classList.add('hidden');
         }
 
         async function startPremiumCheckout(planType) {
             closePaymentModal();
-
             try {
-                // Verificar si el usuario está autenticado
                 const currentUser = localStorage.getItem('currentUser');
                 const token = localStorage.getItem('financeflow_token');
 
                 if (currentUser && token) {
-                    // Usuario autenticado - proceder con Stripe
                     if (window.stripeCheckout && typeof window.stripeCheckout.redirectToCheckout === 'function') {
                         await window.stripeCheckout.redirectToCheckout(planType);
                     } else {
@@ -367,7 +1236,6 @@
                         alert('El sistema de pago no está disponible en este momento. Inténtalo más tarde.');
                     }
                 } else {
-                    // Usuario no autenticado - ir a registro recordando el plan elegido
                     sessionStorage.setItem('selectedPremiumPlan', planType);
                     window.location.href = './register.html';
                 }
@@ -377,57 +1245,52 @@
             }
         }
 
-        // Botones "Crear Cuenta FREE" -> register.html
-        const crearCuentaFreeBtns = [
-            document.getElementById('crear-cuenta-btn'),
-            document.getElementById('empezar-free-btn'),
-            document.getElementById('crear-cuenta-final-btn')
-        ];
-
-        crearCuentaFreeBtns.forEach(btn => {
-            if (btn) {
-                btn.addEventListener('click', () => {
-                    window.location.href = './register.html';
-                });
-            }
-        });
-
-        // Botón "Empezar con Premium" -> Modal de selección
-        const empezarPremiumBtn = document.getElementById('empezar-premium-btn');
-        if (empezarPremiumBtn) {
-            empezarPremiumBtn.addEventListener('click', () => {
-                showPaymentModal();
+        // ===== Botones "Crear Cuenta FREE" =====
+        ['crear-cuenta-btn', 'empezar-free-btn', 'crear-cuenta-final-btn'].forEach(id => {
+            document.getElementById(id)?.addEventListener('click', () => {
+                window.location.href = './register.html';
             });
-        }
-
-        // Event listeners del modal (protegidos)
-        document.getElementById('monthly-payment')?.addEventListener('click', () => {
-            startPremiumCheckout('monthly');
         });
 
-        document.getElementById('yearly-payment')?.addEventListener('click', () => {
-            startPremiumCheckout('yearly');
+        // ===== Botón "Empezar con Premium" =====
+        document.getElementById('empezar-premium-btn')?.addEventListener('click', showPaymentModal);
+
+        // ===== Eventos del modal de pago =====
+        document.getElementById('monthly-payment')?.addEventListener('click', () => startPremiumCheckout('monthly'));
+        document.getElementById('yearly-payment')?.addEventListener('click', () => startPremiumCheckout('yearly'));
+        document.getElementById('cancel-payment')?.addEventListener('click', closePaymentModal);
+
+        // ===== Botones "Iniciar Sesión" =====
+        ['iniciar-sesion-btn', 'iniciar-sesion-final-btn'].forEach(id => {
+            document.getElementById(id)?.addEventListener('click', () => {
+                window.location.href = './login.html';
+            });
         });
 
-        document.getElementById('cancel-payment')?.addEventListener('click', () => {
-            closePaymentModal();
+        // ===== Modal PWA =====
+        const pwaModal = document.getElementById('pwa-modal');
+        document.getElementById('abrir-pwa-modal')?.addEventListener('click', () => {
+            pwaModal.classList.remove('hidden');
+        });
+        document.getElementById('cerrar-pwa-modal')?.addEventListener('click', () => {
+            pwaModal.classList.add('hidden');
+        });
+        pwaModal?.addEventListener('click', (e) => {
+            if (e.target === pwaModal) pwaModal.classList.add('hidden');
         });
 
-        // Botones "Iniciar Sesión" -> login.html
-        const iniciarSesionBtns = [
-            document.getElementById('iniciar-sesion-btn'),
-            document.getElementById('iniciar-sesion-final-btn')
-        ];
-
-        iniciarSesionBtns.forEach(btn => {
-            if (btn) {
-                btn.addEventListener('click', () => {
-                    window.location.href = './login.html';
-                });
-            }
+        // Tabs del modal PWA
+        document.querySelectorAll('.pwa-modal-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.pwa-modal-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const target = tab.dataset.tab;
+                document.getElementById('pwa-ios').classList.toggle('hidden', target !== 'ios');
+                document.getElementById('pwa-android').classList.toggle('hidden', target !== 'android');
+            });
         });
 
-        // Si ya está autenticado, ir al dashboard
+        // ===== Si ya está autenticado, ir al dashboard =====
         const _sessUser = localStorage.getItem('currentUser');
         const _sessToken = localStorage.getItem('financeflow_token');
         if (_sessUser && _sessToken) {
@@ -436,6 +1299,7 @@
     </script>
 
     <script>
+        // Service worker (PWA)
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./public/sw.js')
