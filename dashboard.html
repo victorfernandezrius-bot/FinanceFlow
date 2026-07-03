@@ -760,7 +760,17 @@
                             </h3>
                             <span class="text-xs" style="color: var(--text-secondary);" id="insights-period-label"></span>
                         </div>
+                        <div id="insights-metrics" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                            <!-- Métricas destacadas: se llenará dinámicamente -->
+                        </div>
                         <div id="insights-container" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            <!-- Se llenará dinámicamente -->
+                        </div>
+                    </div>
+
+                    <!-- Salud financiera (Índice Flow) -->
+                    <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200" style="margin-bottom: var(--space-6);">
+                        <div id="financial-health-body">
                             <!-- Se llenará dinámicamente -->
                         </div>
                     </div>
@@ -4296,6 +4306,7 @@
                 try { this.renderIncomeExpensesChart(); } catch (e) { console.error('renderIncomeExpensesChart:', e); }
                 try { this.renderRecentMovements(); } catch (e) { console.error('renderRecentMovements:', e); }
                 try { this.renderInsights(); } catch (e) { console.error('renderInsights:', e); }
+                try { this.renderFinancialHealth(); } catch (e) { console.error('renderFinancialHealth:', e); }
             }
 
             // ====================================================
@@ -4604,6 +4615,215 @@
                             <p class="text-sm leading-snug" style="color:var(--text-primary);">${ins.text}</p>
                         </div>`;
                 }).join('');
+
+                try { this.renderInsightMetrics(); } catch (e) { console.error('renderInsightMetrics:', e); }
+            }
+
+            // ── Métricas destacadas del Resumen inteligente ──────────────────────
+            renderInsightMetrics() {
+                const container = document.getElementById('insights-metrics');
+                if (!container) return;
+
+                const now = new Date();
+                const curYear  = now.getFullYear();
+                const curMonth = now.getMonth();
+                const prevMonth = curMonth === 0 ? 11 : curMonth - 1;
+                const prevYear  = curMonth === 0 ? curYear - 1 : curYear;
+                const cur  = this.accountingManager.calculateMonthStats(curYear,  curMonth);
+                const prev = this.accountingManager.calculateMonthStats(prevYear, prevMonth);
+
+                const pctEs = (n) => n.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
+
+                // 1) Evolución mensual: balance mes actual vs anterior
+                let evoValor, evoColor, evoNota = 'vs mes anterior';
+                if (prev.num_movimientos === 0) {
+                    evoValor = '—'; evoColor = '#6B7280'; evoNota = 'Sin datos del mes anterior';
+                } else if (prev.resultado === 0) {
+                    evoValor = '—'; evoColor = '#6B7280'; evoNota = 'Mes anterior en equilibrio';
+                } else {
+                    const variacion = ((cur.resultado - prev.resultado) / Math.abs(prev.resultado)) * 100;
+                    const mejora = cur.resultado >= prev.resultado;
+                    evoValor = `${mejora ? '▲' : '▼'} ${pctEs(Math.abs(variacion))}`;
+                    evoColor = mejora ? '#16A34A' : '#EF4444';
+                }
+
+                // 2) Tasa de ahorro del mes
+                let tasaValor, tasaColor = '#1F2937', tasaNota = 'del ingreso mensual';
+                if (cur.ingresos_total === 0) {
+                    tasaValor = '—'; tasaColor = '#6B7280'; tasaNota = 'Sin ingresos este mes';
+                } else {
+                    const tasa = ((cur.ingresos_total - cur.gastos_total) / cur.ingresos_total) * 100;
+                    tasaValor = pctEs(tasa);
+                    tasaColor = tasa >= 0 ? '#16A34A' : '#EF4444';
+                }
+
+                // 3) Capacidad de inversión (balance disponible del mes)
+                const capacidad = cur.ingresos_total - cur.gastos_total;
+                const capNegativa = capacidad < 0;
+                const capValor = this.formatCurrency(capacidad);
+                const capColor = capNegativa ? '#EF4444' : '#16A34A';
+                const capNota = capNegativa ? 'Este mes gastas más de lo que ingresas' : 'disponible este mes';
+
+                const card = (titulo, valor, color, nota) => `
+                    <div class="rounded-lg p-4 bg-white border border-gray-200 shadow-sm">
+                        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">${titulo}</p>
+                        <p class="text-xl font-bold" style="color:${color};">${valor}</p>
+                        <p class="text-xs mt-1" style="color:#6B7280;">${nota}</p>
+                    </div>`;
+
+                container.innerHTML =
+                    card('Evolución mensual', evoValor, evoColor, evoNota) +
+                    card('Tasa de ahorro', tasaValor, tasaColor, tasaNota) +
+                    card('Capacidad de inversión', capValor, capColor, capNota);
+            }
+
+            // ── Salud financiera: Índice Flow ────────────────────────────────────
+            calculateFinancialHealth() {
+                const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+                const now = new Date();
+
+                // Últimos 6 meses (orden cronológico); un mes "cuenta" si tiene movimientos
+                const meses = [];
+                for (let i = 5; i >= 0; i--) {
+                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                    meses.push(this.accountingManager.calculateMonthStats(d.getFullYear(), d.getMonth()));
+                }
+                const conDatos = meses.filter(m => m.num_movimientos > 0);
+                const mesesConDatos = conDatos.length;
+
+                // 1) Ahorro: tasa media de meses con datos e ingresos > 0
+                const tasas = conDatos.filter(m => m.ingresos_total > 0)
+                    .map(m => (m.ingresos_total - m.gastos_total) / m.ingresos_total);
+                const ahorro = tasas.length === 0 ? null
+                    : clamp((tasas.reduce((s, t) => s + t, 0) / tasas.length) / 0.40 * 100, 0, 100);
+
+                // 2) Liquidez: meses de cobertura de gastos con los activos
+                const accounts = this.accountingManager.getAccounts();
+                const saldoActivos = accounts.filter(a => a.tipo === 'activo').reduce((s, a) => s + a.saldo_actual, 0);
+                const gastoMedio = mesesConDatos === 0 ? 0
+                    : conDatos.reduce((s, m) => s + m.gastos_total, 0) / mesesConDatos;
+                let liquidez;
+                if (gastoMedio === 0) {
+                    liquidez = saldoActivos > 0 ? 100 : 0;
+                } else {
+                    liquidez = clamp((saldoActivos / gastoMedio) / 6 * 100, 0, 100);
+                }
+
+                // 3) Patrimonio: tendencia del balance acumulado (media últimos 3 vs 3 anteriores)
+                const acumulados = [];
+                let acc = 0;
+                meses.forEach(m => { acc += m.resultado; acumulados.push(acc); });
+                const mediaA = (acumulados[0] + acumulados[1] + acumulados[2]) / 3;
+                const mediaB = (acumulados[3] + acumulados[4] + acumulados[5]) / 3;
+                let patrimonio;
+                if (mediaA === 0) {
+                    patrimonio = mediaB > 0 ? 100 : (mediaB < 0 ? 0 : 50);
+                } else {
+                    const growth = (mediaB - mediaA) / Math.abs(mediaA);
+                    patrimonio = clamp(50 + (growth / 0.10) * 50, 0, 100);
+                }
+
+                // 4) Endeudamiento: ratio pasivos/activos (inverso)
+                const saldoPasivos = Math.abs(accounts.filter(a => a.tipo === 'pasivo').reduce((s, a) => s + a.saldo_actual, 0));
+                let endeudamiento;
+                if (saldoActivos <= 0 && saldoPasivos === 0) {
+                    endeudamiento = 100;
+                } else if (saldoActivos <= 0) {
+                    endeudamiento = 0;
+                } else {
+                    endeudamiento = clamp((1 - saldoPasivos / saldoActivos) * 100, 0, 100);
+                }
+
+                // 5) Estabilidad: coeficiente de variación de los gastos mensuales (inverso)
+                let estabilidad = null;
+                if (mesesConDatos >= 3) {
+                    const gastosMensuales = conDatos.map(m => m.gastos_total);
+                    const media = gastosMensuales.reduce((s, g) => s + g, 0) / gastosMensuales.length;
+                    if (media === 0) {
+                        estabilidad = 100;
+                    } else {
+                        const varianza = gastosMensuales.reduce((s, g) => s + Math.pow(g - media, 2), 0) / gastosMensuales.length;
+                        const cv = Math.sqrt(varianza) / media;
+                        estabilidad = clamp((1 - cv) * 100, 0, 100);
+                    }
+                }
+
+                // Índice Flow: media ponderada renormalizando pesos de los disponibles
+                const pesos = { ahorro: 0.25, liquidez: 0.20, patrimonio: 0.20, endeudamiento: 0.20, estabilidad: 0.15 };
+                const valores = { ahorro, liquidez, patrimonio, endeudamiento, estabilidad };
+                let suma = 0, pesoTotal = 0;
+                for (const [k, v] of Object.entries(valores)) {
+                    if (v !== null) { suma += v * pesos[k]; pesoTotal += pesos[k]; }
+                }
+                const flow = pesoTotal > 0 ? Math.round(suma / pesoTotal) : 0;
+
+                return { ahorro, liquidez, patrimonio, endeudamiento, estabilidad, flow, mesesConDatos };
+            }
+
+            renderFinancialHealth() {
+                const body = document.getElementById('financial-health-body');
+                if (!body) return;
+
+                const h = this.calculateFinancialHealth();
+
+                if (h.mesesConDatos < 2) {
+                    body.innerHTML = `
+                        <h3 class="text-lg font-semibold text-gray-900 mb-3">Salud financiera</h3>
+                        <div class="text-center py-6" style="color:#6B7280;">
+                            <i class="fas fa-seedling text-3xl mb-3" style="color:#5EC6FF;"></i>
+                            <p class="text-sm">Registra al menos 2 meses de movimientos para calcular tu Índice Flow.</p>
+                        </div>`;
+                    return;
+                }
+
+                const colorTramo = (v) => v < 40 ? '#EF4444' : (v < 70 ? '#EAB308' : '#16A34A');
+                const flowColor = colorTramo(h.flow);
+
+                const barra = (emoji, nombre, valor) => {
+                    if (valor === null) {
+                        return `
+                            <div>
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-sm" style="color:#1F2937;">${emoji} ${nombre}</span>
+                                    <span class="text-xs" style="color:#6B7280;">Necesita más historial</span>
+                                </div>
+                                <div class="w-full rounded-full" style="height:8px;background:#E5E7EB;"></div>
+                            </div>`;
+                    }
+                    const v = Math.round(valor);
+                    return `
+                        <div>
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-sm" style="color:#1F2937;">${emoji} ${nombre}</span>
+                                <span class="text-sm font-semibold" style="color:#1F2937;">${v}</span>
+                            </div>
+                            <div class="w-full rounded-full" style="height:8px;background:#E5E7EB;">
+                                <div class="rounded-full" style="height:8px;width:${v}%;background:${colorTramo(v)};"></div>
+                            </div>
+                        </div>`;
+                };
+
+                body.innerHTML = `
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">Salud financiera</h3>
+                            <p class="text-xs mt-1" style="color:#6B7280;"><i class="fas fa-circle-info mr-1"></i>Calculado con tus últimos 6 meses</p>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="flex items-center justify-center rounded-full"
+                                 style="width:72px;height:72px;border:5px solid ${flowColor};background:#F8FAFC;">
+                                <span class="text-2xl font-bold" style="color:${flowColor};">${h.flow}</span>
+                            </div>
+                            <span class="text-xs mt-1 font-medium" style="color:#6B7280;">Índice Flow</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                        ${barra('🟢', 'Ahorro', h.ahorro)}
+                        ${barra('💧', 'Liquidez', h.liquidez)}
+                        ${barra('📈', 'Patrimonio', h.patrimonio)}
+                        ${barra('💳', 'Endeudamiento', h.endeudamiento)}
+                        ${barra('📊', 'Estabilidad', h.estabilidad)}
+                    </div>`;
             }
 
             updateDashboardMetrics() {
