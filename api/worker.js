@@ -158,6 +158,78 @@ export default {
                 return json({ success: true, token, currentUser: user }, 200, cors);
             }
 
+            if (path === '/api/auth/google' && method === 'POST') {
+                const { credential } = await request.json();
+                if (!credential) return json({ error: 'Falta credential' }, 400, cors);
+
+                // Verificación del id_token en servidor (obligatoria): nunca confiar
+                // en un JWT de Google decodificado solo en el navegador.
+                const tokRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+                if (!tokRes.ok) return json({ error: 'Token de Google inválido' }, 401, cors);
+                const payload = await tokRes.json();
+
+                // tokeninfo devuelve los campos como strings
+                if (payload.aud !== env.GOOGLE_CLIENT_ID)
+                    return json({ error: 'Token de Google inválido' }, 401, cors);
+                if (!(payload.email_verified === 'true' || payload.email_verified === true))
+                    return json({ error: 'Token de Google inválido' }, 401, cors);
+                if (!payload.email || !payload.sub)
+                    return json({ error: 'Token de Google inválido' }, 401, cors);
+
+                const gEmail = payload.email.toLowerCase();
+                const now = new Date().toISOString();
+
+                // Buscar por google_sub y, si no, vincular por email
+                let user = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?')
+                    .bind(payload.sub).first();
+                let isNew = false;
+                if (!user) {
+                    user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
+                        .bind(gEmail).first();
+                    if (user) {
+                        // Cuenta existente por email: vincular con Google
+                        await env.DB.prepare(
+                            `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
+                                picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
+                            .bind(payload.sub, payload.picture ?? null, now, user.id).run();
+                        user.google_sub = payload.sub;
+                        user.auth_provider = user.auth_provider || 'google';
+                        user.picture = payload.picture ?? user.picture;
+                    } else {
+                        // Usuario nuevo
+                        isNew = true;
+                        const gName = payload.name || gEmail.split('@')[0];
+                        user = {
+                            id: crypto.randomUUID(),
+                            email: gEmail,
+                            name: gName,
+                            password_hash: null,
+                            auth_provider: 'google',
+                            google_sub: payload.sub,
+                            picture: payload.picture || null,
+                            plan: 'free',
+                            plan_expires_at: null,
+                            created_at: now
+                        };
+                        await env.DB.prepare(
+                            `INSERT INTO users (id,email,name,password_hash,auth_provider,google_sub,picture,plan,plan_expires_at,created_at)
+                             VALUES (?,?,?,?,?,?,?,?,?,?)`)
+                            .bind(user.id, user.email, user.name, null, 'google', user.google_sub,
+                                  user.picture, 'free', null, now).run();
+                        // Email de bienvenida SOLO para usuarios nuevos (mismo patrón que /api/auth/register)
+                        ctx.waitUntil(sendEmail(env, {
+                            to: gEmail,
+                            subject: '¡Bienvenido a Finance Flow!',
+                            html: welcomeEmailHTML(gName)
+                        }));
+                    }
+                }
+
+                const gToken = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
+                delete user.password_hash;
+                return json({ success: true, token: gToken, currentUser: user }, isNew ? 201 : 200, cors);
+            }
+
             if (path === '/api/auth/session' && method === 'GET') {
                 const user = await getAuthUser(request, env);
                 if (!user) return json({ token: null, currentUser: null }, 200, cors);

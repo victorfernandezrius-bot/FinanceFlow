@@ -16,6 +16,8 @@ id = "e85a2416b563411189118400f714b0ab"
 
 [vars]
 APP_URL = "https://app.contabilidadpersonal.com"
+# Client ID de Google OAuth (público, no es secret)
+GOOGLE_CLIENT_ID = "1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleusercontent.com"
 
 # ---------------------------------------------------------
 # SECRETS (NO van aquí). Configúralos con:
