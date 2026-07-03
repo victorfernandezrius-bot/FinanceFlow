@@ -772,8 +772,15 @@
                             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
                                 <h3 class="text-lg font-semibold text-gray-900">Ingresos vs Gastos</h3>
                                 <div class="flex flex-wrap items-center gap-2 text-sm">
+                                    <div class="inline-flex rounded-md border border-gray-300 overflow-hidden" role="group" aria-label="Tipo de gráfico">
+                                        <button type="button" id="chart-type-pie" class="px-3 py-1 text-sm">Pastel</button>
+                                        <button type="button" id="chart-type-bar" class="px-3 py-1 text-sm border-l border-gray-300">Barras</button>
+                                    </div>
                                     <select id="chart-period" class="border border-gray-300 rounded-md px-2 py-1 text-sm text-gray-700">
                                         <option value="month">Este mes</option>
+                                        <option value="3m">3 meses</option>
+                                        <option value="6m">6 meses</option>
+                                        <option value="12m">12 meses</option>
                                         <option value="custom">Personalizado</option>
                                     </select>
                                     <input type="date" id="chart-date-from" class="hidden border border-gray-300 rounded-md px-2 py-1 text-sm">
@@ -2208,24 +2215,41 @@
                     importCancelBtn.addEventListener('click', () => this.resetStatementImport());
                 }
 
-                // Gráfico Ingresos vs Gastos: selector de periodo + rango personalizado
-                document.getElementById('chart-period')?.addEventListener('change', (e) => {
-                    const custom = e.target.value === 'custom';
-                    const fromEl = document.getElementById('chart-date-from');
-                    const toEl = document.getElementById('chart-date-to');
-                    fromEl.classList.toggle('hidden', !custom);
-                    toEl.classList.toggle('hidden', !custom);
-                    if (custom && !fromEl.value && !toEl.value) {
-                        // Prefijar el mes actual como punto de partida
-                        const now = new Date();
-                        const first = new Date(now.getFullYear(), now.getMonth(), 1);
-                        fromEl.value = first.toISOString().slice(0, 10);
-                        toEl.value = now.toISOString().slice(0, 10);
+                // Gráfico Ingresos vs Gastos: toggle pastel/barras + selector de rango
+                const chartPeriodEl = document.getElementById('chart-period');
+                if (chartPeriodEl) {
+                    // Restaurar estado guardado (tipo y rango)
+                    const savedRange = localStorage.getItem('ff_chart_range');
+                    if (savedRange && chartPeriodEl.querySelector(`option[value="${savedRange}"]`)) {
+                        chartPeriodEl.value = savedRange;
+                        if (savedRange === 'custom') {
+                            document.getElementById('chart-date-from')?.classList.remove('hidden');
+                            document.getElementById('chart-date-to')?.classList.remove('hidden');
+                        }
                     }
-                    this.renderIncomeExpensesChart();
-                });
+                    this._updateChartTypeButtons();
+
+                    chartPeriodEl.addEventListener('change', (e) => {
+                        localStorage.setItem('ff_chart_range', e.target.value);
+                        const custom = e.target.value === 'custom';
+                        const fromEl = document.getElementById('chart-date-from');
+                        const toEl = document.getElementById('chart-date-to');
+                        fromEl.classList.toggle('hidden', !custom);
+                        toEl.classList.toggle('hidden', !custom);
+                        if (custom && !fromEl.value && !toEl.value) {
+                            // Prefijar el mes actual como punto de partida
+                            const now = new Date();
+                            const first = new Date(now.getFullYear(), now.getMonth(), 1);
+                            fromEl.value = first.toISOString().slice(0, 10);
+                            toEl.value = now.toISOString().slice(0, 10);
+                        }
+                        this.renderIncomeExpensesChart();
+                    });
+                }
                 document.getElementById('chart-date-from')?.addEventListener('change', () => this.renderIncomeExpensesChart());
                 document.getElementById('chart-date-to')?.addEventListener('change', () => this.renderIncomeExpensesChart());
+                document.getElementById('chart-type-pie')?.addEventListener('click', () => this._setChartType('pie'));
+                document.getElementById('chart-type-bar')?.addEventListener('click', () => this._setChartType('bar'));
                 
                 // Event Listeners para Exportación (Premium)
                 const exportBtn = document.getElementById('export-data-btn');
@@ -4628,27 +4652,115 @@
                 }
             }
 
+            // Tipo de gráfico elegido (pastel/barras), persistido en localStorage
+            _getChartType() {
+                const t = localStorage.getItem('ff_chart_type');
+                return t === 'bar' ? 'bar' : 'pie';
+            }
+
+            _setChartType(type) {
+                localStorage.setItem('ff_chart_type', type);
+                this._updateChartTypeButtons();
+                this.renderIncomeExpensesChart();
+            }
+
+            _updateChartTypeButtons() {
+                const type = this._getChartType();
+                const pieBtn = document.getElementById('chart-type-pie');
+                const barBtn = document.getElementById('chart-type-bar');
+                if (!pieBtn || !barBtn) return;
+                const on  = 'background:#0158C9;color:#FFFFFF;';
+                const off = 'background:transparent;color:#6B7280;';
+                pieBtn.style.cssText = type === 'pie' ? on : off;
+                barBtn.style.cssText = type === 'bar' ? on : off;
+            }
+
+            // Serie mensual de los últimos n meses (incluido el actual), en orden cronológico.
+            // Etiquetas cortas en español; añade el año si la serie cruza de año.
+            _getMonthlySeries(n) {
+                const mesesCortos = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+                const now = new Date();
+                const serie = [];
+                for (let i = n - 1; i >= 0; i--) {
+                    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                    const s = this.accountingManager.calculateMonthStats(d.getFullYear(), d.getMonth());
+                    serie.push({
+                        year: d.getFullYear(),
+                        label: mesesCortos[d.getMonth()],
+                        ingresos: s.ingresos_total,
+                        gastos: s.gastos_total
+                    });
+                }
+                const cruzaAno = serie.length > 0 && serie.some(m => m.year !== serie[serie.length - 1].year);
+                serie.forEach(m => { if (cruzaAno) m.label = `${m.label} ${String(m.year).slice(2)}`; });
+                return serie;
+            }
+
             renderIncomeExpensesChart() {
                 const ctx = document.getElementById('income-expenses-chart');
                 if (!ctx) return;
 
-                // Datos según el periodo elegido: "Este mes" (rápido) o rango personalizado.
+                const type = this._getChartType();
                 const period = document.getElementById('chart-period')?.value || 'month';
+                const rangeMonths = { month: 1, '3m': 3, '6m': 6, '12m': 12 }[period] || null;
+                const fmt = (v) => this.formatCurrency(v);
+
+                if (this.chartIncomeExpenses) {
+                    this.chartIncomeExpenses.destroy();
+                }
+
+                if (type === 'bar') {
+                    // Serie temporal mensual (barras agrupadas Ingresos/Gastos por mes).
+                    // En "Personalizado" se muestran los meses completos que abarca el rango.
+                    let serie;
+                    if (rangeMonths) {
+                        serie = this._getMonthlySeries(rangeMonths);
+                    } else {
+                        const from = document.getElementById('chart-date-from')?.value;
+                        const to = document.getElementById('chart-date-to')?.value;
+                        const end = to ? new Date(to + 'T00:00:00') : new Date();
+                        const start = from ? new Date(from + 'T00:00:00') : end;
+                        let n = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
+                        n = Math.min(Math.max(n, 1), 24);
+                        const offset = (new Date().getFullYear() - end.getFullYear()) * 12 + (new Date().getMonth() - end.getMonth());
+                        serie = this._getMonthlySeries(n + Math.max(offset, 0)).slice(0, n);
+                    }
+                    this.chartIncomeExpenses = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: serie.map(m => m.label),
+                            datasets: [
+                                { label: 'Ingresos', data: serie.map(m => m.ingresos), backgroundColor: '#16A34A', borderRadius: 4 },
+                                { label: 'Gastos',   data: serie.map(m => m.gastos),   backgroundColor: '#EF4444', borderRadius: 4 }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'bottom' },
+                                tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${fmt(c.parsed.y)}` } }
+                            },
+                            scales: {
+                                y: { beginAtZero: true, ticks: { callback: (v) => fmt(v) } }
+                            }
+                        }
+                    });
+                    return;
+                }
+
+                // Modo pastel: totales del rango completo (acumulado de N meses o rango personalizado)
                 let ingresos, gastos;
-                if (period === 'custom') {
+                if (rangeMonths) {
+                    const serie = this._getMonthlySeries(rangeMonths);
+                    ingresos = serie.reduce((s, m) => s + m.ingresos, 0);
+                    gastos = serie.reduce((s, m) => s + m.gastos, 0);
+                } else {
                     const from = document.getElementById('chart-date-from')?.value || null;
                     const to = document.getElementById('chart-date-to')?.value || null;
                     const totals = this.accountingManager.getIncomeExpenseTotals(from, to);
                     ingresos = totals.ingresos;
                     gastos = totals.gastos;
-                } else {
-                    const stats = this.accountingManager.calculateFinancialStats();
-                    ingresos = stats.ingresos_mes;
-                    gastos = stats.gastos_mes;
-                }
-
-                if (this.chartIncomeExpenses) {
-                    this.chartIncomeExpenses.destroy();
                 }
 
                 this.chartIncomeExpenses = new Chart(ctx, {
@@ -4657,7 +4769,7 @@
                         labels: ['Ingresos', 'Gastos'],
                         datasets: [{
                             data: [ingresos, gastos],
-                            backgroundColor: ['#10B981', '#EF4444'],
+                            backgroundColor: ['#16A34A', '#EF4444'],
                             borderWidth: 0
                         }]
                     },
@@ -4665,9 +4777,8 @@
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: {
-                            legend: {
-                                position: 'bottom'
-                            }
+                            legend: { position: 'bottom' },
+                            tooltip: { callbacks: { label: (c) => `${c.label}: ${fmt(c.parsed)}` } }
                         }
                     }
                 });
