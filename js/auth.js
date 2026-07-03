@@ -156,6 +156,16 @@ class AuthSystem {
 
     async loginWithGoogle(googleCredential) {
         try {
+            // --- MODO REMOTO: verificación del id_token en el Worker (find-or-create) ---
+            if (this.isRemote) {
+                const data = await this._apiPost('/auth/google', { credential: googleCredential });
+                this.currentUser = data.currentUser;
+                this.token = data.token;
+                DataClient.setAuthToken(data.token);
+                await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                return { success: true, user: this.currentUser, message: 'Acceso con Google exitoso' };
+            }
+
             const payload = JSON.parse(atob(googleCredential.split('.')[1]));
             const googleEmail = payload.email?.toLowerCase().trim();
             const googleName  = payload.name  || googleEmail.split('@')[0];
@@ -206,6 +216,16 @@ class AuthSystem {
 
     async registerWithGoogle(googleCredential) {
         try {
+            // --- MODO REMOTO: mismo endpoint find-or-create que el login con Google ---
+            if (this.isRemote) {
+                const data = await this._apiPost('/auth/google', { credential: googleCredential });
+                this.currentUser = data.currentUser;
+                this.token = data.token;
+                DataClient.setAuthToken(data.token);
+                await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                return { success: true, user: this.currentUser, message: 'Registro con Google exitoso' };
+            }
+
             const payload = JSON.parse(atob(googleCredential.split('.')[1]));
             const googleEmail = payload.email;
             const googleName = payload.name;
