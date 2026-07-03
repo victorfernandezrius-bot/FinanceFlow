@@ -287,11 +287,14 @@ export default {
                 if (method === 'PUT') {
                     const u = await request.json();
                     const now = new Date().toISOString();
+                    // plan y plan_expires_at NUNCA se aceptan del cliente: solo el webhook
+                    // de Stripe y verify-session pueden cambiarlos.
+                    const newName = u.name ?? authUser.name;
                     await env.DB.prepare(
-                        `UPDATE users SET name=?, plan=?, plan_expires_at=?, updated_at=? WHERE id=?`)
-                        .bind(u.name ?? authUser.name, u.plan ?? authUser.plan,
-                              u.plan_expires_at ?? authUser.plan_expires_at, now, authUser.id).run();
-                    return json({ ...authUser, ...u }, 200, cors);
+                        `UPDATE users SET name=?, updated_at=? WHERE id=?`)
+                        .bind(newName, now, authUser.id).run();
+                    delete authUser.password_hash;
+                    return json({ ...authUser, name: newName, updated_at: now }, 200, cors);
                 }
                if (method === "DELETE") {
           const delId = authUser.id;
