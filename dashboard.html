@@ -2813,6 +2813,14 @@
                     if (failed) msg += `, ${failed} con error`;
                     this.showToast(msg, imported > 0 ? 'success' : 'error');
 
+                    // Notificación in-app de importación completada (todos los planes)
+                    this.accountingManager.notifyImportCompleted({
+                        success: true,
+                        importedCount: imported,
+                        duplicatesSkipped: skipped
+                    });
+                    this.updateNotificationsBadge();
+
                     this.resetStatementImport(true);
                     if (this.renderMovementsList) this.renderMovementsList();
                     if (this.updateDashboardMetrics) this.updateDashboardMetrics();
@@ -4480,6 +4488,23 @@
                 try { this.renderRecentMovements(); } catch (e) { console.error('renderRecentMovements:', e); }
                 try { this.renderInsights(); } catch (e) { console.error('renderInsights:', e); }
                 try { this.renderFinancialHealth(); } catch (e) { console.error('renderFinancialHealth:', e); }
+                try { await this.runNotificationChecks(); } catch (e) { console.error('runNotificationChecks:', e); }
+            }
+
+            // Genera las notificaciones in-app con los datos reales ya cargados
+            // (cuentas, movimientos, plan de autocontrol y asociaciones) y refresca la UI.
+            async runNotificationChecks() {
+                if (!Auth.isPremium()) return;
+                await this.accountingManager.checkAndGenerateNotifications({
+                    plan: this._autocontrolPlan,
+                    associations: this.accountAssociations,
+                    getHealth: () => this.calculateFinancialHealth()
+                });
+                this.updateNotificationsBadge();
+                const section = document.getElementById('section-notifications');
+                if (section && !section.classList.contains('hidden')) {
+                    this.renderNotificationsList();
+                }
             }
 
             // ====================================================
@@ -7526,53 +7551,13 @@
             }
             
             checkAutocontrolLimitsAfterSave(plan) {
-                // Obtener el ingreso mensual de la cuenta seleccionada
-                const incomeMov = this.accountingManager.getMovements()
-                    .filter(m => m.cuenta_id === plan.incomeAccountId && m.tipo === 'ingreso')
-                    .reduce((total, m) => total + m.cantidad, 0);
-                
-                if (incomeMov > 0) {
-                    const autocontrolData = {
-                        ingresoMensual: incomeMov,
-                        savings: plan.percentages.savings,
-                        investment: plan.percentages.investment,
-                        needs: plan.percentages.needs,
-                        leisure: plan.percentages.leisure
-                    };
-                    
-                    // Verificar límites usando la función del AccountingManager
-                    this.accountingManager.checkAutocontrolLimits(autocontrolData);
-                    
-                    // Actualizar badge de notificaciones
-                    this.updateNotificationsBadge();
-                }
+                // Regenerar notificaciones con los datos reales del plan recién guardado
+                this.runNotificationChecks().catch(e => console.error('runNotificationChecks:', e));
             }
-            
+
             checkAutocontrolLimitsAfterMovement() {
-                // Obtener plan de autocontrol guardado (de caché)
-                const plan = this._autocontrolPlan;
-                if (!plan) return;
-                
-                // Obtener ingreso mensual de la cuenta seleccionada
-                const incomeMov = this.accountingManager.getMovements()
-                    .filter(m => m.cuenta_id === plan.incomeAccountId && m.tipo === 'ingreso')
-                    .reduce((total, m) => total + m.cantidad, 0);
-                
-                if (incomeMov > 0) {
-                    const autocontrolData = {
-                        ingresoMensual: incomeMov,
-                        savings: plan.percentages.savings,
-                        investment: plan.percentages.investment,
-                        needs: plan.percentages.needs,
-                        leisure: plan.percentages.leisure
-                    };
-                    
-                    // Verificar límites
-                    this.accountingManager.checkAutocontrolLimits(autocontrolData);
-                    
-                    // Actualizar badge de notificaciones
-                    this.updateNotificationsBadge();
-                }
+                if (!this._autocontrolPlan) return;
+                this.runNotificationChecks().catch(e => console.error('runNotificationChecks:', e));
             }
             
             loadExpenseAccounts() {

@@ -1402,9 +1402,21 @@ class AccountingManager {
         await DataClient.saveNotifications(this.auth.currentUser?.id, this._notifications || []);
     }
 
-    async addNotification(type, title, message, data = {}) {
-        if (!Auth.isPremium()) {
+    // ¿Existe ya una notificación con este notifKey? (deduplicación)
+    hasNotification(notifKey) {
+        if (!notifKey) return false;
+        return (this._notifications || []).some(n => n.data && n.data.notifKey === notifKey);
+    }
+
+    async addNotification(type, title, message, data = {}, opts = {}) {
+        // Premium, salvo excepciones explícitas (p. ej. importación completada)
+        if (!Auth.isPremium() && !opts.allowFree) {
             return { success: false, error: 'Las notificaciones requieren Premium' };
+        }
+
+        // Deduplicación: si ya existe una notificación con el mismo notifKey, no repetir
+        if (data.notifKey && this.hasNotification(data.notifKey)) {
+            return { success: false, duplicated: true };
         }
 
         const newNotification = {
@@ -1464,87 +1476,156 @@ class AccountingManager {
         return { success: true };
     }
     
-    // Notificaciones específicas del Plan de Autocontrol
-    checkAutocontrolLimits(autocontrolData) {
-        if (!Auth.isPremium() || !autocontrolData) {
-            return;
+    // Gasto/aportación real del mes por grupo de autocontrol, usando las asociaciones
+    // cuenta→grupo reales (misma fórmula que la tabla de comprobación del autocontrol).
+    _getMonthlyGroupSpend(associations, monthStr) {
+        const movements = this.getMovements();
+        const spend = { savings: 0, investment: 0, needs: 0, leisure: 0 };
+        Object.keys(spend).forEach(group => {
+            (associations[group] || []).forEach(accountId => {
+                if (group === 'savings' || group === 'investment') {
+                    // Ahorro/Inversión: movimientos ENTRANTES del mes (transferencias o ingresos)
+                    spend[group] += movements
+                        .filter(m => m.cuenta_destino_id === accountId &&
+                                     m.fecha.substring(0, 7) === monthStr &&
+                                     (m.tipo === 'transferencia' || m.tipo === 'ingreso'))
+                        .reduce((s, m) => s + m.cantidad, 0);
+                } else {
+                    // Necesidades/Resto: gastos del mes hacia esa cuenta
+                    spend[group] += movements
+                        .filter(m => m.cuenta_destino_id === accountId &&
+                                     m.tipo === 'gasto' &&
+                                     m.fecha.substring(0, 7) === monthStr)
+                        .reduce((s, m) => s + m.cantidad, 0);
+                }
+            });
+        });
+        return spend;
+    }
+
+    // Motor de notificaciones in-app con datos REALES: plan de autocontrol,
+    // asociaciones cuenta→grupo y movimientos del mes. Deduplicado por notifKey.
+    // context: { plan, associations, getHealth } (getHealth: () => { flow, ... } del dashboard)
+    async checkAndGenerateNotifications(context = {}) {
+        if (!Auth.isPremium()) return;
+
+        const { plan, associations, getHealth } = context;
+        const now = new Date();
+        const monthStr = now.toISOString().substring(0, 7); // YYYY-MM
+        const fmtEur = (v) => v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        // ── Presupuestos de autocontrol (grupos de gasto: Necesidades y Resto) ──
+        if (plan && plan.percentages && associations) {
+            const movements = this.getMovements();
+            const monthlyIncome = movements
+                .filter(m => m.tipo === 'ingreso' && m.fecha.substring(0, 7) === monthStr)
+                .reduce((s, m) => s + m.cantidad, 0);
+
+            if (monthlyIncome > 0) {
+                const spend = this._getMonthlyGroupSpend(associations, monthStr);
+                const grupos = [
+                    { key: 'needs', nombre: 'Necesidades' },
+                    { key: 'leisure', nombre: 'Resto' }
+                ];
+                for (const g of grupos) {
+                    const presupuesto = (monthlyIncome * (plan.percentages[g.key] || 0)) / 100;
+                    if (presupuesto <= 0) continue;
+                    const gastado = spend[g.key];
+                    const pct = Math.round((gastado / presupuesto) * 100);
+
+                    if (gastado > presupuesto) {
+                        const exceso = gastado - presupuesto;
+                        await this.addNotification(
+                            'presupuesto_superado',
+                            `Presupuesto de ${g.nombre} superado`,
+                            `Has superado tu presupuesto de ${g.nombre} en ${fmtEur(exceso)} € este mes (${fmtEur(gastado)} € de ${fmtEur(presupuesto)} €).`,
+                            { notifKey: `presupuesto_superado:${g.nombre}:${monthStr}`, grupo: g.nombre, gastado, presupuesto, exceso }
+                        );
+                    } else if (pct >= 80) {
+                        await this.addNotification(
+                            'presupuesto_80',
+                            `Presupuesto de ${g.nombre} al ${pct} %`,
+                            `Llevas gastado el ${pct} % de tu presupuesto de ${g.nombre} este mes (${fmtEur(gastado)} € de ${fmtEur(presupuesto)} €).`,
+                            { notifKey: `presupuesto_80:${g.nombre}:${monthStr}`, grupo: g.nombre, gastado, presupuesto, pct }
+                        );
+                    }
+                }
+            }
         }
-        
-        const { ingresoMensual, savings, investment, needs, leisure } = autocontrolData;
-        
-        if (!ingresoMensual || ingresoMensual <= 0) {
-            return;
+
+        // ── Costes fijos con vencimiento próximo (≤3 días) ──
+        const hoy = now.getDate();
+        this.getAccounts()
+            .filter(a => (a.is_fixed_cost === true || a.is_fixed_cost === 1) && a.fixed_due_day)
+            .forEach(async (a) => {
+                const diasRestantes = a.fixed_due_day - hoy;
+                if (diasRestantes >= 0 && diasRestantes <= 3) {
+                    await this.addNotification(
+                        'coste_fijo_proximo',
+                        `Próximo vencimiento: ${a.nombre}`,
+                        `El día ${a.fixed_due_day} vence ${a.nombre}: ${fmtEur(a.fixed_monthly_amount || 0)} €.`,
+                        { notifKey: `coste_fijo:${a.id}:${monthStr}`, accountId: a.id, dia: a.fixed_due_day }
+                    );
+                }
+            });
+
+        // ── Resumen mensual (día 1, sobre el mes cerrado) ──
+        if (now.getDate() === 1) {
+            const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const prev = this.calculateMonthStats(prevDate.getFullYear(), prevDate.getMonth());
+            if (prev.num_movimientos > 0) {
+                const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+                const mesNombre = meses[prevDate.getMonth()];
+                const balance = prev.resultado;
+                const tasa = prev.ingresos_total > 0
+                    ? ((prev.ingresos_total - prev.gastos_total) / prev.ingresos_total * 100)
+                    : 0;
+                const tasaFmt = tasa.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+                let flow = null;
+                try { flow = typeof getHealth === 'function' ? getHealth().flow : null; } catch (e) { /* sin flow */ }
+                await this.addNotification(
+                    'resumen_mensual',
+                    `Tu resumen de ${mesNombre}`,
+                    `Balance de ${mesNombre}: ${fmtEur(balance)} € · Tasa de ahorro: ${tasaFmt} % · Índice Flow: ${flow ?? '—'}.`,
+                    { notifKey: `resumen:${prev.monthStr}`, mes: prev.monthStr, balance, tasa, flow }
+                );
+            }
         }
-        
-        // Calcular importes objetivo
-        const savingsTarget = (ingresoMensual * savings) / 100;
-        const investmentTarget = (ingresoMensual * investment) / 100;
-        const needsTarget = (ingresoMensual * needs) / 100;
-        const leisureTarget = (ingresoMensual * leisure) / 100;
-        
-        // Obtener gastos reales del mes actual
-        const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
-        const movements = this.getMovements().filter(m => m.fecha.startsWith(currentMonth));
-        
-        // Calcular gastos por categoría (simulado - en realidad necesitaría asociaciones)
-        const actualExpenses = {
-            needs: this.calculateCategoryExpenses(movements, 'needs'),
-            leisure: this.calculateCategoryExpenses(movements, 'leisure')
-        };
-        
-        // Verificar límites superados
-        if (actualExpenses.needs > needsTarget) {
-            const excess = actualExpenses.needs - needsTarget;
-            this.addNotification(
-                'autocontrol_limit',
-                'Límite de Necesidades Superado',
-                `Has gastado €${actualExpenses.needs.toFixed(2)} en necesidades, superando tu límite de €${needsTarget.toFixed(2)} por €${excess.toFixed(2)}.`,
-                { category: 'needs', target: needsTarget, actual: actualExpenses.needs, excess: excess }
-            );
-        }
-        
-        if (actualExpenses.leisure > leisureTarget) {
-            const excess = actualExpenses.leisure - leisureTarget;
-            this.addNotification(
-                'autocontrol_limit',
-                'Límite de Ocio Superado',
-                `Has gastado €${actualExpenses.leisure.toFixed(2)} en ocio, superando tu límite de €${leisureTarget.toFixed(2)} por €${excess.toFixed(2)}.`,
-                { category: 'leisure', target: leisureTarget, actual: actualExpenses.leisure, excess: excess }
-            );
+
+        // ── Sin actividad (≥7 días sin movimientos) ──
+        const movs = this.getMovements();
+        if (movs.length > 0) {
+            const ultimaFecha = movs.reduce((max, m) => (m.fecha > max ? m.fecha : max), movs[0].fecha);
+            const dias = Math.floor((now - new Date(ultimaFecha + 'T00:00:00')) / 86400000);
+            if (dias >= 7) {
+                // Clave por semana para no repetir el aviso cada día
+                const week = Math.ceil(((now - new Date(now.getFullYear(), 0, 1)) / 86400000 + 1) / 7);
+                await this.addNotification(
+                    'sin_actividad',
+                    'Te echamos de menos',
+                    `Llevas ${dias} días sin registrar movimientos. Mantén tus finanzas al día.`,
+                    { notifKey: `sin_actividad:${now.getFullYear()}-W${week}`, dias }
+                );
+            }
         }
     }
-    
-    calculateCategoryExpenses(movements, category) {
-        // Simulación básica - en implementación real usaría las asociaciones de cuentas
-        const categoryKeywords = {
-            'needs': ['alimentación', 'supermercado', 'farmacia', 'transporte'],
-            'leisure': ['restaurante', 'entretenimiento', 'ocio', 'cine']
-        };
-        
-        const keywords = categoryKeywords[category] || [];
-        
-        return movements
-            .filter(m => m.tipo === 'gasto')
-            .filter(m => keywords.some(keyword => 
-                m.descripcion.toLowerCase().includes(keyword)
-            ))
-            .reduce((total, m) => total + m.cantidad, 0);
-    }
-    
-    // Notificación para importaciones automáticas
+
+    // Notificación de importación completada (flujo real de importar extracto CSV/Excel).
+    // Disponible para TODOS los planes (excepción al gate premium).
     notifyImportCompleted(importResult) {
-        if (!Auth.isPremium() || !importResult.success) {
+        if (!importResult || !importResult.success) {
             return;
         }
-        
-        const { importedCount, duplicatesSkipped } = importResult;
-        
+
+        const { importedCount, duplicatesSkipped = 0 } = importResult;
+
         if (importedCount > 0) {
             this.addNotification(
-                'import_completed',
-                'Importación Completada',
-                `Se importaron ${importedCount} movimientos nuevos. ${duplicatesSkipped > 0 ? `${duplicatesSkipped} duplicados omitidos.` : ''}`,
-                { importedCount, duplicatesSkipped, timestamp: new Date().toISOString() }
+                'import_completada',
+                'Importación completada',
+                `Se importaron ${importedCount} movimientos nuevos.${duplicatesSkipped > 0 ? ` Se omitieron ${duplicatesSkipped} duplicados.` : ''}`,
+                { notifKey: `import:${Date.now()}`, importedCount, duplicatesSkipped },
+                { allowFree: true }
             );
         }
     }
