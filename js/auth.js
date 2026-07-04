@@ -163,6 +163,7 @@ class AuthSystem {
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                try { await this.refreshPremiumTrial(); } catch (e) { /* no bloquear el acceso */ }
                 return { success: true, user: this.currentUser, message: 'Acceso con Google exitoso' };
             }
 
@@ -223,6 +224,7 @@ class AuthSystem {
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                try { await this.refreshPremiumTrial(); } catch (e) { /* no bloquear el registro */ }
                 return { success: true, user: this.currentUser, message: 'Registro con Google exitoso' };
             }
 

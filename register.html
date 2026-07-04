@@ -814,12 +814,12 @@
                     const result = await Auth.registerWithGoogle(response.credential);
                     document.getElementById('loading-overlay').classList.add('hidden');
                     if (result.success) {
-                        document.getElementById('success-text').textContent = '¡Registro con Google exitoso! Redirigiendo...';
-                        document.getElementById('success-message').classList.remove('hidden');
+                        // Usar el patrón de mensajes propio de esta página (success-alert/success-message):
+                        // los ids success-text/error-text no existen aquí y rompían el flujo tras guardar la sesión.
+                        registerPage.showSuccess('¡Registro con Google exitoso! Redirigiendo...');
                         setTimeout(() => { window.location.href = './dashboard.html'; }, 1000);
                     } else {
-                        document.getElementById('error-text').textContent = result.error || 'Error al registrarse con Google';
-                        document.getElementById('error-message').classList.remove('hidden');
+                        registerPage.showError(result.error || 'Error al registrarse con Google');
                     }
                 },
                 ux_mode: 'popup',
@@ -829,8 +829,7 @@
         
         document.getElementById('google-register-btn').addEventListener('click', () => {
             if (typeof google === 'undefined') {
-                document.getElementById('error-text').textContent = 'Servicio de Google no disponible. Comprueba tu conexión.';
-                document.getElementById('error-message').classList.remove('hidden');
+                registerPage.showError('Servicio de Google no disponible. Comprueba tu conexión.');
                 return;
             }
             google.accounts.id.prompt();
