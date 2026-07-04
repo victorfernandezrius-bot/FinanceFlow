@@ -59,12 +59,27 @@ class AccountingManager {
 
     // ===== CACHÉ DE DATOS (sincronización con DataClient) =====
 
+    // D1 devuelve los booleanos como enteros (1/0) y los numéricos pueden llegar
+    // como strings: normalizar al cargar para que los filtros === true funcionen.
+    _normalizeAccount(acc) {
+        if (!acc) return acc;
+        return {
+            ...acc,
+            is_fixed_cost: acc.is_fixed_cost === true || acc.is_fixed_cost === 1,
+            is_bank_account: acc.is_bank_account === true || acc.is_bank_account === 1,
+            fixed_monthly_amount: acc.fixed_monthly_amount != null ? Number(acc.fixed_monthly_amount) : null,
+            fixed_due_day: acc.fixed_due_day != null ? Number(acc.fixed_due_day) : null,
+            saldo_inicial: Number(acc.saldo_inicial) || 0,
+            saldo_actual: Number(acc.saldo_actual) || 0
+        };
+    }
+
     // Carga cuentas y movimientos en memoria. Llamar al iniciar el dashboard
     // y tras cualquier operación de escritura.
     async refresh() {
         const userId = this.auth.currentUser?.id;
         if (!userId) { this._accounts = []; this._movements = []; this._loaded = false; return; }
-        this._accounts  = await DataClient.listAccounts(userId);
+        this._accounts  = (await DataClient.listAccounts(userId) || []).map(a => this._normalizeAccount(a));
         this._movements = await DataClient.listMovements(userId);
         this._rules     = await DataClient.listRules(userId);
         this._notifications = await DataClient.getNotifications(userId);
