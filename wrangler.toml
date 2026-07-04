@@ -18,6 +18,8 @@ id = "e85a2416b563411189118400f714b0ab"
 APP_URL = "https://app.contabilidadpersonal.com"
 # Client ID de Google OAuth (público, no es secret)
 GOOGLE_CLIENT_ID = "1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleusercontent.com"
+# Clave pública VAPID para Web Push (pública; la privada va como secret VAPID_PRIVATE_KEY)
+VAPID_PUBLIC_KEY = "PENDIENTE_VAPID_PUBLIC"
 
 # ---------------------------------------------------------
 # SECRETS (NO van aquí). Configúralos con:

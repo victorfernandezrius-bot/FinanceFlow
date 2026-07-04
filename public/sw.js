@@ -61,3 +61,40 @@ self.addEventListener('fetch', (event) => {
         )
     );
 });
+
+// ── Web Push ──────────────────────────────────────────────────────────────
+// Rutas absolutas: el SW vive en /public/, así que las relativas no apuntarían
+// a la raíz de la app.
+self.addEventListener('push', (event) => {
+    let payload = {};
+    try {
+        payload = event.data ? event.data.json() : {};
+    } catch (e) {
+        payload = { title: 'FinanceFlow', body: event.data ? event.data.text() : '' };
+    }
+    event.waitUntil(
+        self.registration.showNotification(payload.title || 'FinanceFlow', {
+            body: payload.body || '',
+            icon: '/public/logo.png',
+            badge: '/public/logo.png',
+            tag: payload.tag || undefined,
+            data: { url: payload.url || '/dashboard.html' }
+        })
+    );
+});
+
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    const url = (event.notification.data && event.notification.data.url) || '/dashboard.html';
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+            for (const client of list) {
+                if ('focus' in client) {
+                    if (client.navigate) client.navigate(url);
+                    return client.focus();
+                }
+            }
+            return clients.openWindow(url);
+        })
+    );
+});

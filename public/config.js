@@ -5,6 +5,8 @@ window.API_URL = 'https://financeflow.victor-a97.workers.dev/api';
 window.DATA_MODE = 'remote';
 window.APP_ENV = 'production';
 window.BANK_SIMULATOR_ENABLED = false;
+// Clave pública VAPID para Web Push (misma que en wrangler.toml [vars])
+window.VAPID_PUBLIC_KEY = 'PENDIENTE_VAPID_PUBLIC';
 
 window.APP_CONFIG = {
     brandName: 'FinanceFlow',

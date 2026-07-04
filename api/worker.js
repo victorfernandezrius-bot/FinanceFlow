@@ -19,6 +19,8 @@
 //          GOCARDLESS_SECRET_ID, GOCARDLESS_SECRET_KEY
 // ============================================================
 
+import { buildPushPayload } from '@block65/webcrypto-web-push';
+
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
         status,
@@ -96,6 +98,37 @@ async function getAuthUser(request, env) {
     const payload = await verifyJWT(token, env.JWT_SECRET);
     if (!payload) return null;
     return env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
+}
+
+// ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
+// subscription: fila de push_subscriptions ({endpoint, p256dh, auth}).
+// payload: { title, body, url, tag }. Si la suscripción está muerta (404/410), se borra.
+async function sendPush(env, subscription, payload) {
+    try {
+        const vapid = {
+            subject: 'mailto:no-reply@contabilidadpersonal.com',
+            publicKey: env.VAPID_PUBLIC_KEY,
+            privateKey: env.VAPID_PRIVATE_KEY
+        };
+        const sub = {
+            endpoint: subscription.endpoint,
+            expirationTime: null,
+            keys: { p256dh: subscription.p256dh, auth: subscription.auth }
+        };
+        const message = { data: JSON.stringify(payload), options: { ttl: 86400 } };
+        const init = await buildPushPayload(message, sub, vapid);
+        const res = await fetch(subscription.endpoint, init);
+        if (res.status === 404 || res.status === 410) {
+            // Suscripción muerta: eliminarla
+            await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint=?')
+                .bind(subscription.endpoint).run();
+            return false;
+        }
+        return res.ok;
+    } catch (e) {
+        console.error('sendPush:', e);
+        return false;
+    }
 }
 
 // ============================================================
@@ -518,6 +551,32 @@ export default {
                             .bind(n.id, uid, n.type, n.title, n.message, JSON.stringify(n.data || {}),
                                   n.read ? 1 : 0, n.createdAt || new Date().toISOString()).run();
                     }
+                    return json({ success: true }, 200, cors);
+                }
+            }
+
+            // ---------- WEB PUSH: SUSCRIPCIONES ----------
+            if (path === '/api/push/subscribe') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (method === 'POST') {
+                    if (authUser.plan !== 'premium')
+                        return json({ error: 'Las notificaciones push requieren Premium' }, 403, cors);
+                    const sub = await request.json();
+                    if (!sub || !sub.endpoint || !sub.keys?.p256dh || !sub.keys?.auth)
+                        return json({ error: 'Suscripción inválida' }, 400, cors);
+                    await env.DB.prepare(
+                        `INSERT INTO push_subscriptions (id,user_id,endpoint,p256dh,auth,user_agent,created_at)
+                         VALUES (?,?,?,?,?,?,?)
+                         ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,
+                            p256dh=excluded.p256dh, auth=excluded.auth`)
+                        .bind(crypto.randomUUID(), uid, sub.endpoint, sub.keys.p256dh, sub.keys.auth,
+                              request.headers.get('User-Agent') || null, new Date().toISOString()).run();
+                    return json({ success: true }, 200, cors);
+                }
+                if (method === 'DELETE') {
+                    const { endpoint } = await request.json();
+                    await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?')
+                        .bind(uid, endpoint || '').run();
                     return json({ success: true }, 200, cors);
                 }
             }

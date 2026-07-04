@@ -162,3 +162,8 @@ CREATE TABLE IF NOT EXISTS stripe_events (
     processed_at TEXT,
     payload TEXT
 );
+
+-- Web Push (ya creadas en producción; se incluyen como referencia)
+CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
+CREATE TABLE IF NOT EXISTS push_log (user_id TEXT NOT NULL, notif_key TEXT NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY (user_id, notif_key));

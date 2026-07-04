@@ -1521,6 +1521,22 @@
                         </div>
                     </div>
                     
+                    <!-- Notificaciones push en este dispositivo (Premium) -->
+                    <div id="push-optin-block" class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div>
+                                <h3 class="font-semibold text-gray-900">
+                                    <i class="fas fa-mobile-screen mr-2 text-blue-500"></i>
+                                    Notificaciones en este dispositivo
+                                </h3>
+                                <p id="push-status-text" class="text-sm text-gray-500 mt-1">Comprobando estado…</p>
+                            </div>
+                            <button id="push-toggle-btn" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm w-full sm:w-auto">
+                                Activar avisos push
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Filtros de notificaciones -->
                     <div class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
                         <div class="flex flex-wrap gap-2">
@@ -4236,8 +4252,125 @@
                     this.showNotificationsUpgrade();
                     return;
                 }
-                
+
                 this.renderNotificationsList();
+                this.renderPushToggle();
+            }
+
+            // ── Avisos push en este dispositivo (Premium) ────────────────────
+            _urlBase64ToUint8Array(base64String) {
+                const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                const raw = atob(base64);
+                const arr = new Uint8Array(raw.length);
+                for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+                return arr;
+            }
+
+            async _getPushRegistration() {
+                const reg = await navigator.serviceWorker.register('./public/sw.js');
+                if (!reg.active) await new Promise(res => setTimeout(res, 500));
+                return reg;
+            }
+
+            async renderPushToggle() {
+                const block = document.getElementById('push-optin-block');
+                const statusEl = document.getElementById('push-status-text');
+                const btn = document.getElementById('push-toggle-btn');
+                if (!block || !statusEl || !btn) return;
+
+                if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+                    statusEl.textContent = 'Tu navegador no soporta notificaciones push.';
+                    btn.classList.add('hidden');
+                    return;
+                }
+                if (Notification.permission === 'denied') {
+                    statusEl.textContent = 'Bloqueadas por el navegador. Actívalas en los ajustes del sitio (icono del candado junto a la dirección) y recarga.';
+                    btn.classList.add('hidden');
+                    return;
+                }
+
+                let subscribed = false;
+                try {
+                    const reg = await navigator.serviceWorker.getRegistration('./public/sw.js');
+                    const sub = reg ? await reg.pushManager.getSubscription() : null;
+                    subscribed = !!sub;
+                } catch (e) { /* estado desconocido: tratar como desactivado */ }
+
+                btn.classList.remove('hidden');
+                if (subscribed) {
+                    statusEl.textContent = 'Activadas: recibirás avisos aunque la app esté cerrada.';
+                    btn.textContent = 'Desactivar avisos push';
+                    btn.className = 'bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors text-sm w-full sm:w-auto';
+                    btn.onclick = () => this.disablePush();
+                } else {
+                    statusEl.textContent = 'Desactivadas en este dispositivo.';
+                    btn.textContent = 'Activar avisos push';
+                    btn.className = 'bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm w-full sm:w-auto';
+                    btn.onclick = () => this.enablePush();
+                }
+            }
+
+            async enablePush() {
+                try {
+                    if (!window.VAPID_PUBLIC_KEY || window.VAPID_PUBLIC_KEY === 'PENDIENTE_VAPID_PUBLIC') {
+                        this.showToast('Los avisos push aún no están configurados en el servidor', 'error');
+                        return;
+                    }
+                    const permission = await Notification.requestPermission();
+                    if (permission !== 'granted') {
+                        this.renderPushToggle();
+                        return;
+                    }
+                    const reg = await this._getPushRegistration();
+                    const sub = await reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: this._urlBase64ToUint8Array(window.VAPID_PUBLIC_KEY)
+                    });
+                    const r = await fetch(`${window.API_URL}/push/subscribe`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                        },
+                        body: JSON.stringify(sub.toJSON())
+                    });
+                    if (!r.ok) {
+                        const err = await r.json().catch(() => ({}));
+                        throw new Error(err.error || 'No se pudo registrar la suscripción');
+                    }
+                    this.showToast('Avisos push activados en este dispositivo', 'success');
+                } catch (error) {
+                    console.error('enablePush:', error);
+                    this.showToast('Error al activar los avisos: ' + error.message, 'error');
+                } finally {
+                    this.renderPushToggle();
+                }
+            }
+
+            async disablePush() {
+                try {
+                    const reg = await navigator.serviceWorker.getRegistration('./public/sw.js');
+                    const sub = reg ? await reg.pushManager.getSubscription() : null;
+                    if (sub) {
+                        const endpoint = sub.endpoint;
+                        await sub.unsubscribe();
+                        await fetch(`${window.API_URL}/push/subscribe`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                            },
+                            body: JSON.stringify({ endpoint })
+                        });
+                    }
+                    this.showToast('Avisos push desactivados en este dispositivo', 'success');
+                } catch (error) {
+                    console.error('disablePush:', error);
+                    this.showToast('Error al desactivar los avisos: ' + error.message, 'error');
+                } finally {
+                    this.renderPushToggle();
+                }
             }
             
             showNotificationsUpgrade() {
