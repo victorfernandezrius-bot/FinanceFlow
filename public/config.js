@@ -6,7 +6,7 @@ window.DATA_MODE = 'remote';
 window.APP_ENV = 'production';
 window.BANK_SIMULATOR_ENABLED = false;
 // Clave pública VAPID para Web Push (misma que en wrangler.toml [vars])
-window.VAPID_PUBLIC_KEY = 'PENDIENTE_VAPID_PUBLIC';
+window.VAPID_PUBLIC_KEY = 'BP6sAnJPgQWmT4963pl7rWZBLt55TP3NX1m0VKc_jf9rDI8tfOhmYuOT8CmAZsxxJHTO2jHuYh31sS3hVzihFUc';
 
 window.APP_CONFIG = {
     brandName: 'FinanceFlow',
