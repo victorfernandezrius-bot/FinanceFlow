@@ -21,6 +21,10 @@ GOOGLE_CLIENT_ID = "1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleus
 # Clave pública VAPID para Web Push (pública; la privada va como secret VAPID_PRIVATE_KEY)
 VAPID_PUBLIC_KEY = "PENDIENTE_VAPID_PUBLIC"
 
+# Cron diario de avisos push (08:00 UTC ≈ 9-10h en España)
+[triggers]
+crons = ["0 8 * * *"]
+
 # ---------------------------------------------------------
 # SECRETS (NO van aquí). Configúralos con:
 #   wrangler secret put JWT_SECRET

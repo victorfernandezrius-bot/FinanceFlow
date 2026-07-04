@@ -131,6 +131,193 @@ async function sendPush(env, subscription, payload) {
     }
 }
 
+// ---------- Cálculos del cron de avisos (fórmulas portadas del frontend) ----------
+const fmtEur = (v) => v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Réplica de calculateMonthStats (solo los totales que necesita el cron)
+function cronMonthStats(movs, monthStr) {
+    const m = movs.filter(x => x.fecha && x.fecha.startsWith(monthStr));
+    const ingresos = m.filter(x => x.tipo === 'ingreso').reduce((s, x) => s + x.cantidad, 0);
+    const gastos = m.filter(x => x.tipo === 'gasto').reduce((s, x) => s + x.cantidad, 0);
+    return { ingresos_total: ingresos, gastos_total: gastos, resultado: ingresos - gastos, num_movimientos: m.length };
+}
+
+// Réplica del gasto/aportación por grupo de autocontrol (_getMonthlyGroupSpend del frontend)
+function cronGroupSpend(movs, associations, monthStr) {
+    const spend = { savings: 0, investment: 0, needs: 0, leisure: 0 };
+    Object.keys(spend).forEach(group => {
+        (associations[group] || []).forEach(accountId => {
+            if (group === 'savings' || group === 'investment') {
+                spend[group] += movs
+                    .filter(m => m.cuenta_destino_id === accountId &&
+                                 (m.fecha || '').substring(0, 7) === monthStr &&
+                                 (m.tipo === 'transferencia' || m.tipo === 'ingreso'))
+                    .reduce((s, m) => s + m.cantidad, 0);
+            } else {
+                spend[group] += movs
+                    .filter(m => m.cuenta_destino_id === accountId &&
+                                 m.tipo === 'gasto' &&
+                                 (m.fecha || '').substring(0, 7) === monthStr)
+                    .reduce((s, m) => s + m.cantidad, 0);
+            }
+        });
+    });
+    return spend;
+}
+
+// Réplica fiel de calculateFinancialHealth del dashboard (Índice Flow)
+function cronFlowIndex(movs, accounts, now) {
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+    const meses = [];
+    for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const ms = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        meses.push(cronMonthStats(movs, ms));
+    }
+    const conDatos = meses.filter(m => m.num_movimientos > 0);
+    const mesesConDatos = conDatos.length;
+
+    const tasas = conDatos.filter(m => m.ingresos_total > 0)
+        .map(m => (m.ingresos_total - m.gastos_total) / m.ingresos_total);
+    const ahorro = tasas.length === 0 ? null
+        : clamp((tasas.reduce((s, t) => s + t, 0) / tasas.length) / 0.40 * 100, 0, 100);
+
+    const saldoActivos = accounts.filter(a => a.tipo === 'activo').reduce((s, a) => s + a.saldo_actual, 0);
+    const gastoMedio = mesesConDatos === 0 ? 0
+        : conDatos.reduce((s, m) => s + m.gastos_total, 0) / mesesConDatos;
+    let liquidez;
+    if (gastoMedio === 0) liquidez = saldoActivos > 0 ? 100 : 0;
+    else liquidez = clamp((saldoActivos / gastoMedio) / 6 * 100, 0, 100);
+
+    const acumulados = [];
+    let acc = 0;
+    meses.forEach(m => { acc += m.resultado; acumulados.push(acc); });
+    const mediaA = (acumulados[0] + acumulados[1] + acumulados[2]) / 3;
+    const mediaB = (acumulados[3] + acumulados[4] + acumulados[5]) / 3;
+    let patrimonio;
+    if (mediaA === 0) patrimonio = mediaB > 0 ? 100 : (mediaB < 0 ? 0 : 50);
+    else patrimonio = clamp(50 + (((mediaB - mediaA) / Math.abs(mediaA)) / 0.10) * 50, 0, 100);
+
+    const saldoPasivos = Math.abs(accounts.filter(a => a.tipo === 'pasivo').reduce((s, a) => s + a.saldo_actual, 0));
+    let endeudamiento;
+    if (saldoActivos <= 0 && saldoPasivos === 0) endeudamiento = 100;
+    else if (saldoActivos <= 0) endeudamiento = 0;
+    else endeudamiento = clamp((1 - saldoPasivos / saldoActivos) * 100, 0, 100);
+
+    let estabilidad = null;
+    if (mesesConDatos >= 3) {
+        const gastos = conDatos.map(m => m.gastos_total);
+        const media = gastos.reduce((s, g) => s + g, 0) / gastos.length;
+        if (media === 0) estabilidad = 100;
+        else {
+            const varianza = gastos.reduce((s, g) => s + Math.pow(g - media, 2), 0) / gastos.length;
+            estabilidad = clamp((1 - Math.sqrt(varianza) / media) * 100, 0, 100);
+        }
+    }
+
+    const pesos = { ahorro: 0.25, liquidez: 0.20, patrimonio: 0.20, endeudamiento: 0.20, estabilidad: 0.15 };
+    const valores = { ahorro, liquidez, patrimonio, endeudamiento, estabilidad };
+    let suma = 0, pesoTotal = 0;
+    for (const [k, v] of Object.entries(valores)) {
+        if (v !== null) { suma += v * pesos[k]; pesoTotal += pesos[k]; }
+    }
+    const flow = pesoTotal > 0 ? Math.round(suma / pesoTotal) : 0;
+    return { flow, mesesConDatos };
+}
+
+// Calcula los avisos del día para un usuario, ya ordenados por prioridad:
+// superado > 80 % > coste fijo > resumen > inactividad. Mismos notifKey que la app.
+function computeDailyAlerts(now, movs, accounts, plan, associations) {
+    const monthStr = now.toISOString().substring(0, 7);
+    const superados = [], al80 = [], costesFijos = [], resumen = [], inactividad = [];
+
+    // Presupuestos de autocontrol (grupos de gasto: Necesidades y Resto)
+    if (plan && plan.percentages && associations) {
+        const monthlyIncome = movs
+            .filter(m => m.tipo === 'ingreso' && (m.fecha || '').substring(0, 7) === monthStr)
+            .reduce((s, m) => s + m.cantidad, 0);
+        if (monthlyIncome > 0) {
+            const spend = cronGroupSpend(movs, associations, monthStr);
+            for (const g of [{ key: 'needs', nombre: 'Necesidades' }, { key: 'leisure', nombre: 'Resto' }]) {
+                const presupuesto = (monthlyIncome * (plan.percentages[g.key] || 0)) / 100;
+                if (presupuesto <= 0) continue;
+                const gastado = spend[g.key];
+                const pct = Math.round((gastado / presupuesto) * 100);
+                if (gastado > presupuesto) {
+                    const exceso = gastado - presupuesto;
+                    superados.push({
+                        type: 'presupuesto_superado',
+                        notifKey: `presupuesto_superado:${g.nombre}:${monthStr}`,
+                        title: `Presupuesto de ${g.nombre} superado`,
+                        body: `Has superado tu presupuesto de ${g.nombre} en ${fmtEur(exceso)} € este mes (${fmtEur(gastado)} € de ${fmtEur(presupuesto)} €).`
+                    });
+                } else if (pct >= 80) {
+                    al80.push({
+                        type: 'presupuesto_80',
+                        notifKey: `presupuesto_80:${g.nombre}:${monthStr}`,
+                        title: `Presupuesto de ${g.nombre} al ${pct} %`,
+                        body: `Llevas gastado el ${pct} % de tu presupuesto de ${g.nombre} este mes (${fmtEur(gastado)} € de ${fmtEur(presupuesto)} €).`
+                    });
+                }
+            }
+        }
+    }
+
+    // Costes fijos con vencimiento en <=3 días
+    const hoy = now.getDate();
+    accounts
+        .filter(a => (a.is_fixed_cost === 1 || a.is_fixed_cost === true) && a.fixed_due_day)
+        .forEach(a => {
+            const dias = a.fixed_due_day - hoy;
+            if (dias >= 0 && dias <= 3) {
+                costesFijos.push({
+                    type: 'coste_fijo_proximo',
+                    notifKey: `coste_fijo:${a.id}:${monthStr}`,
+                    title: `Próximo vencimiento: ${a.nombre}`,
+                    body: `El día ${a.fixed_due_day} vence ${a.nombre}: ${fmtEur(a.fixed_monthly_amount || 0)} €.`
+                });
+            }
+        });
+
+    // Resumen mensual (solo el día 1, sobre el mes cerrado)
+    if (now.getDate() === 1) {
+        const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevStr = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+        const prev = cronMonthStats(movs, prevStr);
+        if (prev.num_movimientos > 0) {
+            const nombresMes = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+            const mesNombre = nombresMes[prevDate.getMonth()];
+            const tasa = prev.ingresos_total > 0
+                ? ((prev.ingresos_total - prev.gastos_total) / prev.ingresos_total * 100) : 0;
+            const tasaFmt = tasa.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            const { flow } = cronFlowIndex(movs, accounts, now);
+            resumen.push({
+                type: 'resumen_mensual',
+                notifKey: `resumen:${prevStr}`,
+                title: `Tu resumen de ${mesNombre}`,
+                body: `Balance de ${mesNombre}: ${fmtEur(prev.resultado)} € · Tasa de ahorro: ${tasaFmt} % · Índice Flow: ${flow}.`
+            });
+        }
+    }
+
+    // Sin actividad (>=7 días sin movimientos)
+    if (movs.length > 0) {
+        const ultimaFecha = movs.reduce((max, m) => (m.fecha > max ? m.fecha : max), movs[0].fecha);
+        const dias = Math.floor((now - new Date(ultimaFecha + 'T00:00:00')) / 86400000);
+        if (dias >= 7) {
+            const week = Math.ceil(((now - new Date(now.getFullYear(), 0, 1)) / 86400000 + 1) / 7);
+            inactividad.push({
+                type: 'sin_actividad',
+                notifKey: `sin_actividad:${now.getFullYear()}-W${week}`,
+                title: 'Te echamos de menos',
+                body: `Llevas ${dias} días sin registrar movimientos. Mantén tus finanzas al día.`
+            });
+        }
+    }
+
+    return [...superados, ...al80, ...costesFijos, ...resumen, ...inactividad];
+}
+
 // ============================================================
 // ROUTER
 // ============================================================
@@ -773,6 +960,77 @@ export default {
 
         } catch (err) {
             return json({ error: 'Server error', detail: err.message }, 500, cors);
+        }
+    },
+
+    // ---------- CRON DIARIO DE AVISOS PUSH ----------
+    async scheduled(event, env, ctx) {
+        const now = new Date();
+
+        // Usuarios premium con al menos una suscripción push
+        const { results: users } = await env.DB.prepare(
+            `SELECT DISTINCT u.id, u.plan FROM users u
+             JOIN push_subscriptions ps ON ps.user_id = u.id
+             WHERE u.plan = 'premium'`).all();
+
+        for (const user of users) {
+            try {
+                // Datos del usuario: cuentas, movimientos de los últimos 6 meses
+                // (cubre mes actual, anterior y el histórico del Índice Flow),
+                // plan de autocontrol y asociaciones cuenta→grupo.
+                const sinceDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+                const since = `${sinceDate.getFullYear()}-${String(sinceDate.getMonth() + 1).padStart(2, '0')}-01`;
+                const { results: movs } = await env.DB.prepare(
+                    'SELECT tipo, cantidad, fecha, cuenta_id, cuenta_destino_id FROM movements WHERE user_id=? AND fecha>=?')
+                    .bind(user.id, since).all();
+                const { results: accounts } = await env.DB.prepare(
+                    'SELECT id, nombre, tipo, saldo_actual, is_fixed_cost, fixed_monthly_amount, fixed_due_day FROM accounts WHERE user_id=?')
+                    .bind(user.id).all();
+                const planRow = await env.DB.prepare('SELECT plan_data FROM autocontrol_plan WHERE user_id=?').bind(user.id).first();
+                const assocRow = await env.DB.prepare('SELECT associations_data FROM autocontrol_associations WHERE user_id=?').bind(user.id).first();
+                const plan = planRow ? JSON.parse(planRow.plan_data) : null;
+                const associations = assocRow ? JSON.parse(assocRow.associations_data) : null;
+
+                const avisos = computeDailyAlerts(now, movs, accounts, plan, associations);
+                if (!avisos.length) continue;
+
+                const { results: subs } = await env.DB.prepare(
+                    'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').bind(user.id).all();
+
+                // Máximo 3 pushes por usuario y día (los avisos ya vienen priorizados)
+                let sent = 0;
+                for (const aviso of avisos) {
+                    if (sent >= 3) break;
+
+                    // Deduplicación: INSERT en push_log; si falla por PK duplicada, no se envía
+                    try {
+                        await env.DB.prepare('INSERT INTO push_log (user_id, notif_key, sent_at) VALUES (?,?,?)')
+                            .bind(user.id, aviso.notifKey, now.toISOString()).run();
+                    } catch (e) {
+                        continue; // ya enviado anteriormente
+                    }
+
+                    // Insertar también en el centro de notificaciones de la app
+                    // (INSERT directo con el mismo formato que devuelve el GET /api/notifications)
+                    await env.DB.prepare(
+                        'INSERT INTO notifications (id,user_id,type,title,message,data,read,created_at) VALUES (?,?,?,?,?,?,?,?)')
+                        .bind(crypto.randomUUID(), user.id, aviso.type, aviso.title, aviso.body,
+                              JSON.stringify({ notifKey: aviso.notifKey }), 0, now.toISOString()).run();
+
+                    // Enviar a todas las suscripciones del usuario
+                    for (const sub of subs) {
+                        await sendPush(env, sub, {
+                            title: aviso.title,
+                            body: aviso.body,
+                            url: '/dashboard.html',
+                            tag: aviso.notifKey
+                        });
+                    }
+                    sent++;
+                }
+            } catch (e) {
+                console.error('Cron push, usuario', user.id, ':', e);
+            }
         }
     }
 };
