@@ -318,6 +318,7 @@
         html:not(.dark) {
             --bg-primary: #FFFFFF;
             --bg-secondary: #F9FAFB;
+            --bg-elevated: #FFFFFF;   /* modales, dropdowns, tarjetas */
             --text-primary: #000000;
             --text-secondary: #374151;
             --border-color: #E5E7EB;
@@ -325,18 +326,63 @@
             --brand-secondary: #5EC6FF;
             --success-color: #61CE70;
         }
-        
-        /* Modo oscuro */
+
+        /* Modo oscuro (contraste AA sobre superficies) */
         html.dark {
-            --bg-primary: #000000;
-            --bg-secondary: #1a1a1a;
-            --text-primary: #FFFFFF;
-            --text-secondary: #E5E7EB;
+            --bg-primary: #111827;
+            --bg-secondary: #1F2937;
+            --bg-elevated: #1F2937;   /* modales, dropdowns, tarjetas */
+            --text-primary: #F9FAFB;
+            --text-secondary: #9CA3AF;
             --border-color: #374151;
             --brand-primary: #5EC6FF;
             --brand-secondary: #93C5FD;
             --success-color: #61CE70;
         }
+
+        /* ── Overrides de utilidades fijas en modo oscuro ─────────────────────
+           Muchos bloques (incluidos los modales inyectados por js/plan-limits.js)
+           usan clases Tailwind fijas (bg-white, text-gray-900...). Este bloque
+           las mapea a los tokens del tema para que el oscuro sea legible. */
+        html.dark .bg-white { background-color: var(--bg-elevated); }
+        html.dark .bg-gray-50,
+        html.dark .bg-gray-100 { background-color: var(--bg-secondary); }
+        html.dark .text-gray-900,
+        html.dark .text-gray-800,
+        html.dark .text-gray-700 { color: var(--text-primary); }
+        html.dark .text-gray-600,
+        html.dark .text-gray-500,
+        html.dark .text-gray-400 { color: var(--text-secondary); }
+        html.dark .border-gray-200,
+        html.dark .border-gray-300,
+        html.dark .border-gray-100 { border-color: var(--border-color); }
+        html.dark .divide-gray-100 > *,
+        html.dark .divide-gray-200 > * { border-color: var(--border-color); }
+        html.dark .hover\:bg-gray-50:hover,
+        html.dark .hover\:bg-gray-100:hover,
+        html.dark .hover\:bg-gray-200:hover,
+        html.dark .hover\:bg-gray-300:hover { background-color: var(--bg-secondary); }
+        html.dark .bg-gray-200 { background-color: #374151; }
+        html.dark .bg-gray-200.text-gray-700 { color: var(--text-primary); }
+        /* Inputs, selects y textareas legibles en oscuro */
+        html.dark input:not([type='checkbox']):not([type='radio']),
+        html.dark select,
+        html.dark textarea {
+            background-color: var(--bg-elevated);
+            color: var(--text-primary);
+            border-color: var(--border-color);
+        }
+        html.dark input::placeholder,
+        html.dark textarea::placeholder { color: var(--text-secondary); }
+        /* Superficies claras informativas (azul/verde/rojo -50) en oscuro */
+        html.dark .bg-blue-50 { background-color: rgba(94, 198, 255, 0.10); }
+        html.dark .bg-green-50 { background-color: rgba(34, 197, 94, 0.10); }
+        html.dark .bg-red-50 { background-color: rgba(239, 68, 68, 0.10); }
+        html.dark .bg-orange-50 { background-color: rgba(249, 115, 22, 0.10); }
+        html.dark .text-blue-800, html.dark .text-blue-900 { color: #93C5FD; }
+        html.dark .text-green-800 { color: #86EFAC; }
+        html.dark .text-red-700, html.dark .text-red-800 { color: #FCA5A5; }
+        html.dark .text-orange-800 { color: #FDBA74; }
         
         /* Toggle switch para modo oscuro (carril 44x24, bolita 18px) */
         .theme-toggle {
@@ -8732,6 +8778,12 @@
                 localStorage.setItem('theme', this.isDarkMode ? 'dark' : 'light');
                 // Sincronizar estado accesible del switch
                 document.getElementById('theme-toggle')?.setAttribute('aria-checked', String(this.isDarkMode));
+                // Chart.js: leyendas/ejes legibles según tema, y re-render del gráfico visible
+                if (window.Chart) {
+                    Chart.defaults.color = this.isDarkMode ? '#9CA3AF' : '#6B7280';
+                    Chart.defaults.borderColor = this.isDarkMode ? '#374151' : '#E5E7EB';
+                    try { window.dashboard?.renderIncomeExpensesChart?.(); } catch (e) { /* aún no cargado */ }
+                }
             }
 
             setupToggle() {
