@@ -183,7 +183,7 @@ class PlanLimitsManager {
                                 <li>• Hasta 5 cuentas bancarias</li>
                                 <li>• Hasta 8 cuentas de ingreso</li>
                                 <li>• Hasta 15 cuentas de gasto</li>
-                                <li>• Conexión bancaria automática</li>
+                                <li>• Registro automático de movimientos (CSV/Excel)</li>
                                 <li>• Automatización con IA</li>
                                 <li>• Exportar datos</li>
                             </ul>
@@ -255,7 +255,7 @@ class PlanLimitsManager {
         modal.id = 'feature-locked-modal';
         
         const featureNames = {
-            'bank_connection': 'Conexión Bancaria Automática',
+            'bank_connection': 'Registro Automático de Movimientos',
             'automation': 'Automatización con IA', 
             'autocontrol': 'Plan de Autocontrol',
             'annual_ledger': 'Libro Mayor Anual',
@@ -287,7 +287,7 @@ class PlanLimitsManager {
                             </h4>
                             <ul class="text-sm text-gray-700 space-y-1 text-left">
                                 <li>• <strong>Automatización completa</strong> de tus finanzas</li>
-                                <li>• <strong>Conexión directa</strong> con tu banco</li>
+                                <li>• <strong>Registro automático</strong> de movimientos desde tus extractos (CSV/Excel)</li>
                                 <li>• <strong>Análisis inteligente</strong> con IA</li>
                                 <li>• <strong>Exportación</strong> a Excel/PDF</li>
                                 <li>• <strong>Notificaciones</strong> personalizadas</li>
