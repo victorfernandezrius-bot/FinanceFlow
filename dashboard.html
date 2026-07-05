@@ -338,41 +338,44 @@
             --success-color: #61CE70;
         }
         
-        /* Toggle switch para modo oscuro */
+        /* Toggle switch para modo oscuro (carril 44x24, bolita 18px) */
         .theme-toggle {
             position: relative;
-            width: 60px;
-            height: 30px;
-            : var(--border-color);
-            border-radius: 15px;
+            width: 44px;
+            height: 24px;
+            background: var(--border-color);
+            border-radius: 12px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            border: 2px solid var(--border-color);
+            border: none;
+            padding: 0;
+            flex-shrink: 0;
+            transition: background 200ms ease;
         }
-        
+
         .theme-toggle::after {
             content: '';
             position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 22px;
-            height: 22px;
-            : var(--text-primary);
+            top: 3px;
+            left: 3px;
+            width: 18px;
+            height: 18px;
+            background: #FFFFFF;
             border-radius: 50%;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+            transition: transform 200ms ease;
         }
-        
-        html.dark .theme-toggle::after {
-            transform: translateX(26px);
-            : var(--azul-claro);
+
+        .theme-toggle:focus-visible {
+            outline: 2px solid var(--brand-primary, #0158C9);
+            outline-offset: 2px;
         }
-        
+
         html.dark .theme-toggle {
-            background: var(--azul-oscuro);
-            border-color: var(--azul-claro);
+            background: var(--brand-primary, #0158C9);
+        }
+
+        html.dark .theme-toggle::after {
+            transform: translateX(20px);
         }
         
         /* Estilos para elementos de navegación */
@@ -466,7 +469,7 @@
                     <!-- Toggle de Modo Oscuro - Oculto en móvil pequeño -->
                     <div class="hidden sm:flex items-center" style="gap: var(--space-2);">
                         <i class="fas fa-sun" style="color: var(--text-secondary);"></i>
-                        <button id="theme-toggle" class="theme-toggle" title="Alternar modo oscuro/claro"></button>
+                        <button id="theme-toggle" class="theme-toggle" role="switch" aria-checked="false" aria-label="Cambiar tema" title="Alternar modo oscuro/claro"></button>
                         <i class="fas fa-moon" style="color: var(--text-secondary);"></i>
                     </div>
                     
@@ -8727,6 +8730,8 @@
                     html.classList.remove('dark');
                 }
                 localStorage.setItem('theme', this.isDarkMode ? 'dark' : 'light');
+                // Sincronizar estado accesible del switch
+                document.getElementById('theme-toggle')?.setAttribute('aria-checked', String(this.isDarkMode));
             }
 
             setupToggle() {
