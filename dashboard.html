@@ -2830,12 +2830,16 @@
                     this.showToast(msg, imported > 0 ? 'success' : 'error');
 
                     // Notificación in-app de importación completada (todos los planes)
-                    this.accountingManager.notifyImportCompleted({
+                    await this.accountingManager.notifyImportCompleted({
                         success: true,
                         importedCount: imported,
                         duplicatesSkipped: skipped
                     });
                     this.updateNotificationsBadge();
+                    const notifSection = document.getElementById('section-notifications');
+                    if (notifSection && !notifSection.classList.contains('hidden')) {
+                        this.renderNotificationsList();
+                    }
 
                     this.resetStatementImport(true);
                     if (this.renderMovementsList) this.renderMovementsList();

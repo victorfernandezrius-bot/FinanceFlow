@@ -1404,11 +1404,10 @@ class AccountingManager {
     
     // ===== SISTEMA DE NOTIFICACIONES INTERNAS =====
     
-    // SÍNCRONA: lee de caché
+    // SÍNCRONA: lee de caché. Sin gate premium: la LECTURA es para todos los
+    // planes (p. ej. el aviso de importación completada, que también es free);
+    // la GENERACIÓN de avisos premium sigue gateada en addNotification.
     getNotifications() {
-        if (!Auth.isPremium()) {
-            return [];
-        }
         return this._notifications || [];
     }
 
@@ -1451,10 +1450,6 @@ class AccountingManager {
     }
 
     async markNotificationAsRead(notificationId) {
-        if (!Auth.isPremium()) {
-            return { success: false };
-        }
-
         const notification = (this._notifications || []).find(n => n.id === notificationId);
         if (notification) {
             notification.read = true;
@@ -1465,27 +1460,16 @@ class AccountingManager {
     }
 
     async markAllNotificationsAsRead() {
-        if (!Auth.isPremium()) {
-            return { success: false };
-        }
-
         (this._notifications || []).forEach(n => n.read = true);
         await this._persistNotifications();
         return { success: true };
     }
 
     getUnreadNotificationsCount() {
-        if (!Auth.isPremium()) {
-            return 0;
-        }
         return (this._notifications || []).filter(n => !n.read).length;
     }
 
     async deleteNotification(notificationId) {
-        if (!Auth.isPremium()) {
-            return { success: false };
-        }
-
         this._notifications = (this._notifications || []).filter(n => n.id !== notificationId);
         await this._persistNotifications();
         return { success: true };
@@ -1627,22 +1611,24 @@ class AccountingManager {
 
     // Notificación de importación completada (flujo real de importar extracto CSV/Excel).
     // Disponible para TODOS los planes (excepción al gate premium).
-    notifyImportCompleted(importResult) {
+    async notifyImportCompleted(importResult) {
         if (!importResult || !importResult.success) {
-            return;
+            return { success: false };
         }
 
         const { importedCount, duplicatesSkipped = 0 } = importResult;
 
         if (importedCount > 0) {
-            this.addNotification(
+            // notifKey con timestamp ISO al minuto: cada importación es un evento propio
+            return await this.addNotification(
                 'import_completada',
                 'Importación completada',
                 `Se importaron ${importedCount} movimientos nuevos.${duplicatesSkipped > 0 ? ` Se omitieron ${duplicatesSkipped} duplicados.` : ''}`,
-                { notifKey: `import:${Date.now()}`, importedCount, duplicatesSkipped },
+                { notifKey: `import:${new Date().toISOString().slice(0, 16)}`, importedCount, duplicatesSkipped },
                 { allowFree: true }
             );
         }
+        return { success: false };
     }
     
     // ===== EXPORTACIÓN DE DATOS =====
