@@ -14,15 +14,33 @@
     <title>Dashboard - FinanceFlow</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://js.stripe.com/v3/"></script>
     <script src="./public/config.js"></script>
     <script src="./js/stripe-checkout.js"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        
+        :root {
+            --font-display: 'Bricolage Grotesque', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --font-body: 'Instrument Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --premium-navy: #0B2A55;
+            --premium-accent: #F5B301;
+            --radius-card: 12px;
+            --radius-control: 8px;
+            --shadow-card: 0 1px 3px rgba(2, 20, 50, .06), 0 1px 2px rgba(2, 20, 50, .04);
+        }
+        html.dark { --shadow-card: 0 1px 3px rgba(0, 0, 0, .4); }
+
+        body {
+            font-family: var(--font-body);
+            /* Cifras alineadas en tablas y tarjetas */
+            font-variant-numeric: tabular-nums;
+        }
+
         /* 🎯 Sidebar - Menú lateral con animación */
         .sidebar-active {
             transform: translateX(0) !important;
@@ -95,11 +113,12 @@
         
         /* Componentes adaptativos */
         .card-mobile {
-            -color: var(--bg-primary);
+            background-color: var(--bg-elevated, var(--bg-primary));
             border: 1px solid var(--border-color);
-            border-radius: var(--space-2);
+            border-radius: var(--radius-card);
             padding: var(--space-4);
             margin-bottom: var(--space-4);
+            box-shadow: var(--shadow-card);
         }
         
         @media (min-width: 641px) {
@@ -131,8 +150,8 @@
                 margin-bottom: var(--space-4);
                 padding: var(--space-4);
                 border: 1px solid var(--border-color);
-                border-radius: var(--space-2);
-                -color: var(--bg-primary);
+                border-radius: var(--radius-control);
+                background-color: var(--bg-elevated, var(--bg-primary));
             }
             
             .table-adaptive td {
@@ -151,22 +170,25 @@
         
         /* Sistema tipográfico responsive */
         .heading-1 {
+            font-family: var(--font-display);
             font-size: var(--text-2xl);
             font-weight: 700;
             line-height: 1.2;
             color: var(--text-primary);
             margin-bottom: var(--space-4);
         }
-        
+
         .heading-2 {
+            font-family: var(--font-display);
             font-size: var(--text-xl);
             font-weight: 600;
             line-height: 1.3;
             color: var(--text-primary);
             margin-bottom: var(--space-3);
         }
-        
+
         .heading-3 {
+            font-family: var(--font-display);
             font-size: var(--text-lg);
             font-weight: 600;
             line-height: 1.4;
@@ -422,6 +444,53 @@
 
         html.dark .theme-toggle::after {
             transform: translateX(20px);
+        }
+
+        /* ── Hoja de refinamiento visual ─────────────────────────────────────── */
+        /* Encabezados nativos con la fuente display */
+        h1, h2, h3 { font-family: var(--font-display); }
+
+        /* Cifras grandes de tarjeta (KPI del dashboard) */
+        #total-balance, #bank-balance, #monthly-income, #monthly-expenses, #monthly-balance {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        /* Sombra única de tarjeta desde token (sustituye la de Tailwind) */
+        .shadow-sm { box-shadow: var(--shadow-card) !important; }
+
+        /* Micro-interacción de tarjetas */
+        .card-mobile,
+        .bg-white.shadow-sm {
+            transition: transform 150ms ease, box-shadow 150ms ease;
+        }
+        .card-mobile:hover,
+        .bg-white.shadow-sm:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(2, 20, 50, .08), 0 2px 4px rgba(2, 20, 50, .05);
+        }
+        html.dark .card-mobile:hover,
+        html.dark .bg-white.shadow-sm:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
+        }
+
+        /* Anillo del Índice Flow */
+        .flow-ring { transform: rotate(-90deg); }
+        .flow-ring circle { fill: none; }
+        .flow-ring .flow-ring-track { stroke: var(--border-color); }
+        .flow-ring .flow-ring-progress {
+            stroke-linecap: round;
+            transition: stroke-dashoffset 800ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        /* Accesibilidad: sin animaciones si el usuario las reduce */
+        @media (prefers-reduced-motion: reduce) {
+            .card-mobile, .bg-white.shadow-sm { transition: none; }
+            .card-mobile:hover, .bg-white.shadow-sm:hover { transform: none; }
+            .flow-ring .flow-ring-progress { transition: none; }
+            .theme-toggle, .theme-toggle::after { transition: none; }
         }
         
         /* Estilos para elementos de navegación */
@@ -2600,15 +2669,15 @@
                     if (trialInfo) {
                         // Usuario en prueba premium
                         upgradeSection.innerHTML = `
-                            <div class="bg-gradient-to-r from-orange-500 to-red-600 text-white p-4 rounded-lg">
+                            <div class="text-white p-4 rounded-lg" style="background:var(--premium-navy, #0B2A55);border:1px solid var(--premium-accent, #F5B301);">
                                 <div class="flex items-center">
-                                    <i class="fas fa-star text-yellow-300 text-xl mr-3"></i>
+                                    <i class="fas fa-crown text-xl mr-3" style="color:var(--premium-accent, #F5B301);"></i>
                                     <div>
                                         <p class="font-semibold">Prueba Premium</p>
-                                        <p class="text-xs opacity-90">${trialInfo.days_left} días restantes</p>
+                                        <p class="text-xs font-semibold" style="color:var(--premium-accent, #F5B301);">${trialInfo.days_left} días restantes</p>
                                     </div>
                                 </div>
-                                <button onclick="dashboard.startPremiumCheckout()" class="w-full bg-white text-orange-600 py-2 rounded-md text-xs font-medium hover:bg-gray-100 mt-3">
+                                <button onclick="dashboard.startPremiumCheckout()" class="w-full py-2 rounded-md text-xs font-semibold mt-3" style="background:var(--premium-accent, #F5B301);color:#0B2A55;">
                                     Continuar con Premium
                                 </button>
                             </div>
@@ -2616,9 +2685,9 @@
                     } else {
                         // Premium real
                         upgradeSection.innerHTML = `
-                            <div class="bg-gradient-to-r from-purple-500 to-blue-600 text-white p-4 rounded-lg">
+                            <div class="text-white p-4 rounded-lg" style="background:var(--premium-navy, #0B2A55);">
                                 <div class="flex items-center">
-                                    <i class="fas fa-crown text-yellow-300 text-xl mr-3"></i>
+                                    <i class="fas fa-crown text-xl mr-3" style="color:var(--premium-accent, #F5B301);"></i>
                                     <div>
                                         <p class="font-semibold">Plan Premium</p>
                                         <p class="text-xs opacity-90">Todas las funciones desbloqueadas</p>
@@ -2633,7 +2702,7 @@
                             <h4 style="font-weight:600;color:#111827 !important;margin-bottom:0.5rem;">¿Necesitas más funciones?</h4>
                             <p style="font-size:0.875rem;color:#1f2937 !important;margin-bottom:0.75rem;">Desbloquea conexión bancaria, plan de autocontrol, reglas y más con Premium.</p>
                             <button onclick="dashboard.showPlanSelector()" style="width:100%;background:#2563eb;color:#ffffff;padding:0.5rem;border:none;border-radius:0.375rem;font-size:0.875rem;font-weight:600;cursor:pointer;" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
-                                <i class="fas fa-star" style="margin-right:0.5rem;color:#ffffff;"></i>
+                                <i class="fas fa-crown" style="margin-right:0.5rem;color:#ffffff;"></i>
                                 Ver Planes
                             </button>
                         </div>
@@ -5163,51 +5232,106 @@
                 const colorTramo = (v) => v < 40 ? '#EF4444' : (v < 70 ? '#EAB308' : '#16A34A');
                 const flowColor = colorTramo(h.flow);
 
-                const barra = (emoji, nombre, valor) => {
+                // Punto de color por sub-índice (sin emojis en métricas)
+                const barra = (dotColor, nombre, valor) => {
+                    const dot = `<span class="inline-block rounded-full mr-2" style="width:10px;height:10px;background:${dotColor};vertical-align:baseline;"></span>`;
                     if (valor === null) {
                         return `
                             <div>
                                 <div class="flex items-center justify-between mb-1">
-                                    <span class="text-sm" style="color:#1F2937;">${emoji} ${nombre}</span>
-                                    <span class="text-xs" style="color:#6B7280;">Necesita más historial</span>
+                                    <span class="text-sm" style="color:var(--text-primary);">${dot}${nombre}</span>
+                                    <span class="text-xs" style="color:var(--text-secondary);">Necesita más historial</span>
                                 </div>
-                                <div class="w-full rounded-full" style="height:8px;background:#E5E7EB;"></div>
+                                <div class="w-full rounded-full" style="height:8px;background:var(--border-color);"></div>
                             </div>`;
                     }
                     const v = Math.round(valor);
                     return `
                         <div>
                             <div class="flex items-center justify-between mb-1">
-                                <span class="text-sm" style="color:#1F2937;">${emoji} ${nombre}</span>
-                                <span class="text-sm font-semibold" style="color:#1F2937;">${v}</span>
+                                <span class="text-sm" style="color:var(--text-primary);">${dot}${nombre}</span>
+                                <span class="text-sm font-semibold" style="color:var(--text-primary);">${v}</span>
                             </div>
-                            <div class="w-full rounded-full" style="height:8px;background:#E5E7EB;">
+                            <div class="w-full rounded-full" style="height:8px;background:var(--border-color);">
                                 <div class="rounded-full" style="height:8px;width:${v}%;background:${colorTramo(v)};"></div>
                             </div>
                         </div>`;
                 };
 
+                // Anillo SVG con progreso: r=32, circunferencia ≈ 201
+                const R = 32, CIRC = 2 * Math.PI * R;
                 body.innerHTML = `
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                         <div>
                             <h3 class="text-lg font-semibold text-gray-900">Salud financiera</h3>
-                            <p class="text-xs mt-1" style="color:#6B7280;"><i class="fas fa-circle-info mr-1"></i>Calculado con tus últimos 6 meses</p>
+                            <p class="text-xs mt-1" style="color:var(--text-secondary);"><i class="fas fa-circle-info mr-1"></i>Calculado con tus últimos 6 meses</p>
                         </div>
                         <div class="flex flex-col items-center">
-                            <div class="flex items-center justify-center rounded-full"
-                                 style="width:72px;height:72px;border:5px solid ${flowColor};background:#F8FAFC;">
-                                <span class="text-2xl font-bold" style="color:${flowColor};">${h.flow}</span>
+                            <div style="position:relative;width:76px;height:76px;">
+                                <svg class="flow-ring" width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
+                                    <circle class="flow-ring-track" cx="38" cy="38" r="${R}" stroke-width="6"></circle>
+                                    <circle class="flow-ring-progress" id="flow-ring-progress" cx="38" cy="38" r="${R}" stroke-width="6"
+                                            stroke="${flowColor}" stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${CIRC.toFixed(1)}"></circle>
+                                </svg>
+                                <span id="flow-ring-value" class="text-2xl font-bold"
+                                      style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:${flowColor};font-family:var(--font-display);">0</span>
                             </div>
-                            <span class="text-xs mt-1 font-medium" style="color:#6B7280;">Índice Flow</span>
+                            <span class="text-xs mt-1 font-medium" style="color:var(--text-secondary);">Índice Flow</span>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-                        ${barra('🟢', 'Ahorro', h.ahorro)}
-                        ${barra('💧', 'Liquidez', h.liquidez)}
-                        ${barra('📈', 'Patrimonio', h.patrimonio)}
-                        ${barra('💳', 'Endeudamiento', h.endeudamiento)}
-                        ${barra('📊', 'Estabilidad', h.estabilidad)}
+                        ${barra('#16A34A', 'Ahorro', h.ahorro)}
+                        ${barra('#2B7BE4', 'Liquidez', h.liquidez)}
+                        ${barra('#5EC6FF', 'Patrimonio', h.patrimonio)}
+                        ${barra('#0B2A55', 'Endeudamiento', h.endeudamiento)}
+                        ${barra('#EAB308', 'Estabilidad', h.estabilidad)}
                     </div>`;
+
+                this._animateFlowRing(h.flow, CIRC);
+            }
+
+            // Rellena el anillo hasta el valor (800ms) con count-up sincronizado del número.
+            _animateFlowRing(flow, circ) {
+                const progress = document.getElementById('flow-ring-progress');
+                const valueEl = document.getElementById('flow-ring-value');
+                if (!progress || !valueEl) return;
+
+                const targetOffset = circ * (1 - Math.min(Math.max(flow, 0), 100) / 100);
+                const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+                if (reduced) {
+                    progress.style.strokeDashoffset = targetOffset;
+                    valueEl.textContent = flow;
+                    return;
+                }
+
+                // El stroke anima por CSS (transition 800ms); el número acompaña por rAF
+                requestAnimationFrame(() => { progress.style.strokeDashoffset = targetOffset; });
+                const start = performance.now();
+                const dur = 800;
+                const tick = (now) => {
+                    const t = Math.min((now - start) / dur, 1);
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    valueEl.textContent = Math.round(flow * eased);
+                    if (t < 1) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            }
+
+            // Count-up breve (400ms) para cifras monetarias del dashboard al cargar
+            _countUp(el, target, formatter) {
+                if (!el) return;
+                const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                if (reduced) { el.textContent = formatter(target); return; }
+                const start = performance.now();
+                const dur = 400;
+                const tick = (now) => {
+                    const t = Math.min((now - start) / dur, 1);
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    el.textContent = formatter(target * eased);
+                    if (t < 1) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
             }
 
             updateDashboardMetrics() {
@@ -5217,11 +5341,22 @@
                 // (si no hay ninguna marcada, calculateBankBalance hace fallback a todos los activos)
                 const bankBalance = this.accountingManager.calculateBankBalance();
                 
-                document.getElementById('total-balance').textContent = this.formatCurrency(stats.saldo_total);
-                document.getElementById('bank-balance').textContent = this.formatCurrency(bankBalance);
-                document.getElementById('monthly-income').textContent = this.formatCurrency(stats.ingresos_mes);
-                document.getElementById('monthly-expenses').textContent = this.formatCurrency(stats.gastos_mes);
-                document.getElementById('monthly-balance').textContent = this.formatCurrency(stats.balance_mes);
+                const fmtC = (v) => this.formatCurrency(v);
+                if (!this._metricsAnimated) {
+                    // Count-up breve solo en la primera carga
+                    this._metricsAnimated = true;
+                    this._countUp(document.getElementById('total-balance'), stats.saldo_total, fmtC);
+                    this._countUp(document.getElementById('bank-balance'), bankBalance, fmtC);
+                    this._countUp(document.getElementById('monthly-income'), stats.ingresos_mes, fmtC);
+                    this._countUp(document.getElementById('monthly-expenses'), stats.gastos_mes, fmtC);
+                    this._countUp(document.getElementById('monthly-balance'), stats.balance_mes, fmtC);
+                } else {
+                    document.getElementById('total-balance').textContent = fmtC(stats.saldo_total);
+                    document.getElementById('bank-balance').textContent = fmtC(bankBalance);
+                    document.getElementById('monthly-income').textContent = fmtC(stats.ingresos_mes);
+                    document.getElementById('monthly-expenses').textContent = fmtC(stats.gastos_mes);
+                    document.getElementById('monthly-balance').textContent = fmtC(stats.balance_mes);
+                }
                 
                 // Widgets Premium de Saldo Real
                 this.updatePremiumWidgets();
@@ -9551,14 +9686,14 @@
                             <div style="background: linear-gradient(135deg, rgba(245,158,11,0.12) 0%, rgba(217,119,6,0.12) 100%); padding: var(--space-4); border-radius: 10px; border: 2px solid #F59E0B;">
                                 <p style="font-weight: 700; color: #D97706; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--space-3);">⭐ Plan Premium — 2€/mes</p>
                                 <ul style="list-style: none; font-size: 0.85rem;">
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>10 cuentas activo</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>8 cuentas de ingresos</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>15 cuentas de gastos</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Conecta tu banco con autorización segura (PSD2) e importa movimientos automáticamente</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Plan Autocontrol 50/30/20</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Reglas de registro automático</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Notificaciones push</li>
-                                    <li><i class="fas fa-star mr-2" style="color: #F59E0B;"></i>Exportación CSV/Excel</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>10 cuentas activo</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>8 cuentas de ingresos</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>15 cuentas de gastos</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Conecta tu banco con autorización segura (PSD2) e importa movimientos automáticamente</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Plan Autocontrol 50/30/20</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Reglas de registro automático</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Notificaciones push</li>
+                                    <li><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Exportación CSV/Excel</li>
                                 </ul>
                             </div>
                         </div>

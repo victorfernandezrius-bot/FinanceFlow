@@ -267,25 +267,25 @@ class PlanLimitsManager {
             <div class="flex items-center justify-center min-h-screen p-4">
                 <div class="bg-white rounded-lg max-w-md w-full p-6 shadow-2xl">
                     <div class="text-center">
-                        <div class="bg-purple-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
-                            <i class="fas fa-star text-purple-600 text-2xl"></i>
+                        <div class="rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4" style="background:rgba(245,179,1,.15);">
+                            <i class="fas fa-crown text-2xl" style="color:#F5B301;"></i>
                         </div>
-                        
+
                         <h3 class="text-xl font-semibold text-gray-900 mb-2">
                             Función Premium
                         </h3>
-                        
+
                         <p class="text-gray-600 mb-4">
-                            <strong>${featureNames[feature] || feature}</strong> 
+                            <strong>${featureNames[feature] || feature}</strong>
                             está disponible solo en el plan Premium.
                         </p>
-                        
-                        <div class="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4 mb-6">
-                            <h4 class="font-semibold text-purple-900 mb-2">
-                                <i class="fas fa-crown mr-2"></i>
+
+                        <div class="rounded-lg p-4 mb-6" style="background:rgba(11,42,85,.06);border:1px solid rgba(11,42,85,.18);">
+                            <h4 class="font-semibold text-gray-900 mb-2">
+                                <i class="fas fa-crown mr-2" style="color:#F5B301;"></i>
                                 ¿Por qué Premium?
                             </h4>
-                            <ul class="text-sm text-purple-800 space-y-1 text-left">
+                            <ul class="text-sm text-gray-700 space-y-1 text-left">
                                 <li>• <strong>Automatización completa</strong> de tus finanzas</li>
                                 <li>• <strong>Conexión directa</strong> con tu banco</li>
                                 <li>• <strong>Análisis inteligente</strong> con IA</li>
@@ -298,7 +298,7 @@ class PlanLimitsManager {
                             <button id="close-feature-modal" class="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-400 transition-colors">
                                 Ahora No
                             </button>
-                            <button id="unlock-premium" class="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:from-purple-700 hover:to-blue-700 transition-all">
+                            <button id="unlock-premium" class="flex-1 text-white px-4 py-2 rounded-lg font-medium transition-all" style="background:#0B2A55;" onmouseover="this.style.background='#123A6F'" onmouseout="this.style.background='#0B2A55'">
                                 <i class="fas fa-unlock mr-2"></i>
                                 Desbloquear (€2/mes)
                             </button>
