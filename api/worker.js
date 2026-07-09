@@ -768,6 +768,20 @@ export default {
                 }
             }
 
+            // ---------- FEEDBACK (valoración al mes de registro) ----------
+            if (path === '/api/feedback/status' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const dias = (Date.now() - new Date(authUser.created_at).getTime()) / 86400000;
+                const shouldAsk = dias >= 30 && !authUser.feedback_requested_at;
+                return json({ shouldAsk: !!shouldAsk }, 200, cors);
+            }
+            if (path === '/api/feedback/dismiss' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                await env.DB.prepare('UPDATE users SET feedback_requested_at=? WHERE id=?')
+                    .bind(new Date().toISOString(), uid).run();
+                return json({ success: true }, 200, cors);
+            }
+
             // ---------- BANK CONNECTIONS ----------
             if (path === '/api/bank-connections') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
@@ -1032,6 +1046,32 @@ export default {
                 console.error('Cron push, usuario', user.id, ':', e);
             }
         }
+
+        // ── Solicitud de valoración al mes de registro (email, una sola vez) ──
+        try {
+            const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+            const { results: fbUsers } = await env.DB.prepare(
+                `SELECT id, name, email FROM users
+                 WHERE feedback_requested_at IS NULL AND created_at <= ?`)
+                .bind(cutoff).all();
+
+            for (const u of fbUsers) {
+                try {
+                    // Marcar ANTES de enviar: prioriza no repetir jamás la petición
+                    await env.DB.prepare('UPDATE users SET feedback_requested_at=? WHERE id=?')
+                        .bind(now.toISOString(), u.id).run();
+                    await sendEmail(env, {
+                        to: u.email,
+                        subject: '¿Nos ayudas a mejorar Finance Flow?',
+                        html: feedbackRequestEmailHTML(u.name || '', 'https://www.contabilidadpersonal.com/valoracion-finance-flow/')
+                    });
+                } catch (e) {
+                    console.error('Cron feedback, usuario', u.id, ':', e);
+                }
+            }
+        } catch (e) {
+            console.error('Cron feedback:', e);
+        }
     }
 };
 
@@ -1146,7 +1186,7 @@ function premiumActivatedEmailHTML(name, planType) {
     <tr><td style="background:#61CE70;padding:28px 32px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">¡Ya eres Premium! 🎉</h1></td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Gracias, ${name}</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Tu suscripción <strong>Premium ${planLabel}</strong> está activa. Ya tienes acceso a conexión bancaria, plan de autocontrol, reglas de categorización y notificaciones inteligentes.</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Tu suscripción <strong>Premium ${planLabel}</strong> está activa. Ya tienes acceso al registro automático de movimientos (importa tus extractos CSV/Excel), plan de autocontrol, reglas de registro automático y notificaciones inteligentes.</p>
     <a href="https://app.contabilidadpersonal.com/dashboard" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Ir a mi panel</a>
     </td></tr>
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Contabilidad Personal · contabilidadpersonal.com</p></td></tr>
@@ -1169,5 +1209,25 @@ function premiumActivatedEmailHTML(name, planType) {
     <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has solicitado esto, ignora este correo. Tu contraseña no cambiará.</p>
     </td></tr>
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
+    </table></td></tr></table></body></html>`;
+}
+function feedbackRequestEmailHTML(name, link) {
+  return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+    <tr><td style="background:#0158C9;padding:24px 32px;">
+      <table cellpadding="0" cellspacing="0"><tr>
+        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
+        <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:32px;">
+    <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¿Nos ayudas a mejorar?</h2>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
+    <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">Nos encantaría conocer tu opinión: qué te está funcionando y qué podríamos hacer mejor. Son solo 2 minutos y nos ayuda muchísimo.</p>
+    <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Dar mi opinión</a>
+    <p style="margin:28px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si ahora no es buen momento, no pasa nada: no volveremos a insistir.</p>
+    </td></tr>
+    <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Contabilidad Personal · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }

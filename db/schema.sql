@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     premium_trial_expires_at TEXT,
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
+    feedback_requested_at TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT
 );

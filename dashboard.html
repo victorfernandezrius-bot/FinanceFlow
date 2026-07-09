@@ -4744,6 +4744,66 @@
                 try { this.renderInsights(); } catch (e) { console.error('renderInsights:', e); }
                 try { this.renderFinancialHealth(); } catch (e) { console.error('renderFinancialHealth:', e); }
                 try { await this.runNotificationChecks(); } catch (e) { console.error('runNotificationChecks:', e); }
+                try { await this.checkFeedbackRequest(); } catch (e) { console.error('checkFeedbackRequest:', e); }
+            }
+
+            // ── Solicitud de valoración al mes de uso ────────────────────────
+            async checkFeedbackRequest() {
+                if (window.DATA_MODE !== 'remote') return;
+                const r = await fetch(`${window.API_URL}/feedback/status`, {
+                    headers: { 'Authorization': `Bearer ${DataClient.getAuthToken()}` }
+                });
+                if (!r.ok) return;
+                const { shouldAsk } = await r.json();
+                if (shouldAsk) this.showFeedbackModal();
+            }
+
+            showFeedbackModal() {
+                if (document.getElementById('feedback-modal')) return;
+                const modal = document.createElement('div');
+                modal.id = 'feedback-modal';
+                modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4';
+                modal.style.background = 'rgba(0,0,0,0.5)';
+                modal.innerHTML = `
+                    <div style="background:var(--bg-elevated, #fff);border:1px solid var(--border-color);border-radius:var(--radius-card, 12px);box-shadow:var(--shadow-card);max-width:26rem;width:100%;padding:1.5rem;position:relative;">
+                        <button id="feedback-close" aria-label="Cerrar" style="position:absolute;top:0.75rem;right:0.75rem;background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:1rem;padding:0.25rem;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <div style="width:44px;height:44px;border-radius:50%;background:rgba(1,88,201,0.10);display:flex;align-items:center;justify-content:center;margin-bottom:0.75rem;">
+                            <i class="fas fa-comment-dots" style="color:var(--brand-primary);"></i>
+                        </div>
+                        <h3 style="font-family:var(--font-display);font-size:1.125rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem;">¿Nos ayudas a mejorar?</h3>
+                        <p style="font-size:0.9rem;color:var(--text-secondary);line-height:1.5;margin-bottom:1.25rem;">
+                            Ya llevas un mes usando Finance Flow y nos encantaría conocer tu opinión. Son solo 2 minutos.
+                        </p>
+                        <div style="display:flex;gap:0.75rem;">
+                            <button id="feedback-later" style="flex:1;padding:0.55rem 1rem;border-radius:var(--radius-control, 8px);border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);font-size:0.875rem;font-weight:500;cursor:pointer;">
+                                Ahora no
+                            </button>
+                            <button id="feedback-go" style="flex:1;padding:0.55rem 1rem;border-radius:var(--radius-control, 8px);border:none;background:var(--brand-primary);color:#fff;font-size:0.875rem;font-weight:600;cursor:pointer;">
+                                Dar mi opinión
+                            </button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+
+                const dismiss = () => this._dismissFeedback();
+                modal.querySelector('#feedback-go').addEventListener('click', () => {
+                    window.open('https://www.contabilidadpersonal.com/valoracion-finance-flow/', '_blank');
+                    dismiss();
+                });
+                modal.querySelector('#feedback-later').addEventListener('click', dismiss);
+                modal.querySelector('#feedback-close').addEventListener('click', dismiss);
+                modal.addEventListener('click', (e) => { if (e.target === modal) dismiss(); });
+            }
+
+            _dismissFeedback() {
+                document.getElementById('feedback-modal')?.remove();
+                // Marcar en servidor para no volver a preguntar nunca (persistente, no por dispositivo)
+                fetch(`${window.API_URL}/feedback/dismiss`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${DataClient.getAuthToken()}` }
+                }).catch(() => { /* silencioso */ });
             }
 
             // Genera las notificaciones in-app con los datos reales ya cargados
