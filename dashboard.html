@@ -8408,18 +8408,6 @@
                                 </div>
                                 
                                 <div>
-                                    <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Nombre de la Aplicación</label>
-                                    <input 
-                                        type="text" 
-                                        id="profile-app-name" 
-                                        value="${userProfile.appName}" 
-                                        class="w-full rounded-md form-input" 
-                                        style="padding: var(--space-3); background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);"
-                                    >
-                                    <p class="small-text mt-1" style="color: var(--text-secondary);">Personaliza el nombre que aparece en la aplicación</p>
-                                </div>
-                                
-                                <div>
                                     <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Banco Principal</label>
                                     <input 
                                         type="text" 
@@ -8492,10 +8480,9 @@
                 };
             }
             
-            saveUserProfile() {
+            async saveUserProfile() {
                 try {
                     const name = document.getElementById('profile-name').value.trim();
-                    const appName = document.getElementById('profile-app-name').value.trim();
                     const mainBank = document.getElementById('profile-bank').value.trim();
                     const accountsCount = parseInt(document.getElementById('profile-accounts-count').value) || 1;
                     
@@ -8510,23 +8497,31 @@
                         return;
                     }
                     
-                    // Guardar perfil
+                    // Guardar preferencias de UI en localStorage
                     const userProfile = {
                         name,
-                        appName,
                         mainBank,
                         accountsCount,
                         lastUpdated: new Date().toISOString()
                     };
-                    
+
                     localStorage.setItem('userProfile', JSON.stringify(userProfile));
-                    
+
+                    // Persistir el NOMBRE en la base de datos (mismo mecanismo autenticado que el
+                    // resto de la app: DataClient.saveUser -> PUT /api/users/:id con Bearer).
+                    // El worker solo aplica 'name'; email y plan no se tocan.
+                    this.currentUser.name = name;
+                    await DataClient.saveUser({ ...this.currentUser, name });
+                    // Actualizar sesión y Auth en memoria para que el nombre persista tras F5
+                    await DataClient.saveSession({ currentUser: this.currentUser });
+                    if (window.Auth) Auth.currentUser = this.currentUser;
+
                     // Actualizar nombre en la interfaz
                     const userName = document.getElementById('user-name');
                     const userMenuName = document.getElementById('user-menu-name');
                     if (userName) userName.textContent = name;
                     if (userMenuName) userMenuName.textContent = name;
-                    
+
                     // Cerrar modal
                     document.getElementById('profile-modal').remove();
                     
