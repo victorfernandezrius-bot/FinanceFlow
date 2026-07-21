@@ -1481,7 +1481,7 @@ class AccountingManager {
         const movements = this.getMovements();
         const spend = { savings: 0, investment: 0, needs: 0, leisure: 0 };
         Object.keys(spend).forEach(group => {
-            (associations[group] || []).forEach(accountId => {
+            (Array.isArray(associations[group]) ? associations[group] : []).forEach(accountId => {
                 if (group === 'savings' || group === 'investment') {
                     // Ahorro/Inversión: movimientos ENTRANTES del mes (transferencias o ingresos)
                     spend[group] += movements

@@ -4735,7 +4735,7 @@
                 const uid = this.currentUser?.id;
                 if (uid) {
                     try { this._autocontrolPlan = await DataClient.getAutocontrolPlan(uid); } catch (e) { console.error('autocontrolPlan:', e); }
-                    try { const assoc = await DataClient.getAutocontrolAssociations(uid); if (assoc) this.accountAssociations = assoc; } catch (e) { console.error('assoc:', e); }
+                    try { const assoc = await DataClient.getAutocontrolAssociations(uid); this.accountAssociations = this._normalizeAssociations(assoc); } catch (e) { console.error('assoc:', e); }
                     try { this._scenariosCache = await DataClient.getScenarios(uid); } catch (e) { console.error('scenarios:', e); }
                 }
                 try { this.updateDashboardMetrics(); } catch (e) { console.error('updateDashboardMetrics:', e); }
@@ -8057,10 +8057,23 @@
             }
             
             
+            // Garantiza SIEMPRE la estructura { savings:[], investment:[], needs:[], leisure:[] }
+            // con arrays válidos. Descarta claves extra y coacciona a [] lo que no sea array.
+            // D1 devuelve associations_data como texto ya parseado por el DataClient; si el
+            // valor es null/undefined o algo inesperado, cae a la estructura por defecto.
+            _normalizeAssociations(raw) {
+                const src = (raw && typeof raw === 'object') ? raw : {};
+                const categories = ['savings', 'investment', 'needs', 'leisure'];
+                const out = {};
+                categories.forEach(k => { out[k] = Array.isArray(src[k]) ? src[k] : []; });
+                return out;
+            }
+
             updateAutocontrolTable() {
                 const plan = this._autocontrolPlan;
-                const associations = this.accountAssociations;
-                
+                // Blindaje: normalizar por si accountAssociations se mutó en otro punto.
+                const associations = this._normalizeAssociations(this.accountAssociations);
+
                 if (!plan || !associations) return;
                 
                 // A. OBTENER INGRESO MENSUAL DEL MES ACTUAL (NO último mes)
@@ -8334,11 +8347,12 @@
                     return;
                 }
                 
-                // Asegurar que accountAssociations existe
-                if (!this.accountAssociations) {
-                    this.accountAssociations = { savings: [], investment: [], needs: [], leisure: [] };
+                // Asegurar que accountAssociations tiene la estructura completa con arrays válidos
+                this.accountAssociations = this._normalizeAssociations(this.accountAssociations);
+                if (!Array.isArray(this.accountAssociations[category])) {
+                    this.accountAssociations[category] = [];
                 }
-                
+
                 // Añadir cuentas a la categoría
                 selectedAccounts.forEach(accountId => {
                     if (!this.accountAssociations[category].includes(accountId)) {
