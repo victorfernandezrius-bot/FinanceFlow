@@ -168,3 +168,20 @@ CREATE TABLE IF NOT EXISTS stripe_events (
 CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 CREATE TABLE IF NOT EXISTS push_log (user_id TEXT NOT NULL, notif_key TEXT NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY (user_id, notif_key));
+
+-- Cartera de Inversión (posiciones/holdings del usuario). Ver también
+-- db/migrations/0001_cartera_activos.sql. usuario_id es TEXT (users.id es TEXT).
+CREATE TABLE IF NOT EXISTS cartera_activos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  nombre TEXT,
+  tipo_activo TEXT NOT NULL, -- 'accion' | 'etf' | 'fondo' | 'cripto'
+  cantidad REAL NOT NULL,
+  precio_medio_compra REAL NOT NULL,
+  moneda TEXT DEFAULT 'EUR',
+  broker_origen TEXT,
+  fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cartera_usuario ON cartera_activos(usuario_id);

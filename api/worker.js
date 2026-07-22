@@ -13,6 +13,9 @@
 //              POST /api/stripe/verify-session
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
+//   Portfolio: GET/POST /api/portfolio/holdings,
+//              PUT/DELETE /api/portfolio/holdings/:id,
+//              GET /api/portfolio/prices?tickers=AAPL,MSFT
 //
 // Bindings (wrangler.toml): DB (D1), CACHE (KV)
 // Secrets: JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
@@ -342,6 +345,73 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
     }
 
     return [...superados, ...al80, ...costesFijos, ...resumen, ...inactividad];
+}
+
+// ============================================================
+// CARTERA DE INVERSIÓN — helpers
+// ============================================================
+
+// TTL de la caché de precios en KV (segundos). 900s = 15 min.
+// Para probar la degradación a "stale" en local, bájalo temporalmente a 10.
+const PRICE_TTL = 900;
+
+// Normaliza una fila de cartera_activos (coacciona numéricos igual que el resto
+// del código normaliza booleans/campos D1 tras leerlos).
+function _normalizeHolding(row) {
+    if (!row) return row;
+    return {
+        ...row,
+        id: row.id != null ? Number(row.id) : row.id,
+        cantidad: row.cantidad != null ? Number(row.cantidad) : row.cantidad,
+        precio_medio_compra: row.precio_medio_compra != null ? Number(row.precio_medio_compra) : row.precio_medio_compra
+    };
+}
+
+// Precio actual de un ticker con estrategia cache-first sobre KV (env.CACHE):
+//   1) Si hay precio fresco en `price:{ticker}` (dentro del TTL), se devuelve.
+//   2) Si no, se consulta Twelve Data, se cachea y se devuelve.
+//   3) Si la API externa falla, se devuelve el último precio conocido desde el
+//      backup `price_bak:{ticker}` (sin TTL) con flag `stale: true`. Nunca lanza
+//      un error duro: como mucho devuelve price=null con stale=true.
+// Se mantiene el backup sin TTL aparte porque KV borra la clave con TTL al
+// expirar, y entonces no podríamos servir "el último precio aunque haya expirado".
+async function getTickerPrice(ticker, env) {
+    const cacheKey = `price:${ticker}`;
+    const backupKey = `price_bak:${ticker}`;
+
+    // 1) Cache-first: hit fresco dentro del TTL de KV.
+    const cachedRaw = await env.CACHE.get(cacheKey);
+    if (cachedRaw) {
+        try { return { ...JSON.parse(cachedRaw), stale: false }; } catch { /* cae a refetch */ }
+    }
+
+    // 2) Miss: consultar la API externa.
+    try {
+        const apiKey = env.TWELVE_DATA_API_KEY;
+        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
+        const resp = await fetch(
+            `https://api.twelvedata.com/price?symbol=${encodeURIComponent(ticker)}&apikey=${apiKey}`);
+        const data = await resp.json();
+        // Twelve Data: OK -> { price: "123.45" }; error/límite -> { status:'error', message, code }
+        if (!data || data.status === 'error' || data.price == null) {
+            throw new Error(data && data.message ? data.message : 'Respuesta inválida de Twelve Data');
+        }
+        const price = parseFloat(data.price);
+        if (!isFinite(price)) throw new Error('Precio no numérico');
+        const payload = { ticker, price, fetched_at: new Date().toISOString() };
+        // Caché fresca con TTL + backup sin TTL (para degradación a stale).
+        await env.CACHE.put(cacheKey, JSON.stringify(payload), { expirationTtl: PRICE_TTL });
+        await env.CACHE.put(backupKey, JSON.stringify(payload));
+        return { ...payload, stale: false };
+    } catch (err) {
+        // 3) Degradar: último precio conocido aunque haya expirado.
+        const backupRaw = await env.CACHE.get(backupKey);
+        if (backupRaw) {
+            try { return { ...JSON.parse(backupRaw), stale: true }; } catch { /* ignore */ }
+        }
+        // Sin dato previo: no romper el dashboard, devolver precio nulo marcado stale.
+        return { ticker, price: null, fetched_at: null, stale: true };
+    }
 }
 
 // ============================================================
@@ -1009,6 +1079,80 @@ export default {
                     const data = await r.json();
                     return json(data, 200, cors); // el frontend mapea a movimientos contables
                 }
+            }
+
+            // ---------- CARTERA DE INVERSIÓN ----------
+            if (path === '/api/portfolio/holdings') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (method === 'GET') {
+                    const { results } = await env.DB.prepare(
+                        'SELECT * FROM cartera_activos WHERE usuario_id=? ORDER BY fecha_creacion DESC')
+                        .bind(uid).all();
+                    return json(results.map(_normalizeHolding), 200, cors);
+                }
+                if (method === 'POST') {
+                    const h = await request.json();
+                    if (!h || !h.ticker || !h.tipo_activo || h.cantidad == null || h.precio_medio_compra == null) {
+                        return json({ error: 'Campos obligatorios: ticker, tipo_activo, cantidad, precio_medio_compra' }, 400, cors);
+                    }
+                    const now = new Date().toISOString();
+                    const res = await env.DB.prepare(
+                        `INSERT INTO cartera_activos
+                            (usuario_id,ticker,nombre,tipo_activo,cantidad,precio_medio_compra,moneda,broker_origen,fecha_creacion)
+                         VALUES (?,?,?,?,?,?,?,?,?)`)
+                        .bind(uid, String(h.ticker).toUpperCase(), h.nombre ?? null, h.tipo_activo,
+                              Number(h.cantidad), Number(h.precio_medio_compra), h.moneda || 'EUR',
+                              h.broker_origen ?? null, now).run();
+                    const newId = res.meta && res.meta.last_row_id;
+                    const row = await env.DB.prepare('SELECT * FROM cartera_activos WHERE id=? AND usuario_id=?')
+                        .bind(newId, uid).first();
+                    return json(_normalizeHolding(row), 201, cors);
+                }
+            }
+            const holdMatch = path.match(/^\/api\/portfolio\/holdings\/(.+)$/);
+            if (holdMatch) {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const holdingId = holdMatch[1].split('?')[0];
+                if (method === 'PUT') {
+                    const existing = await env.DB.prepare('SELECT * FROM cartera_activos WHERE id=? AND usuario_id=?')
+                        .bind(holdingId, uid).first();
+                    if (!existing) return json({ error: 'No encontrado' }, 404, cors);
+                    const h = await request.json();
+                    const merged = {
+                        ticker: h.ticker != null ? String(h.ticker).toUpperCase() : existing.ticker,
+                        nombre: h.nombre !== undefined ? h.nombre : existing.nombre,
+                        tipo_activo: h.tipo_activo ?? existing.tipo_activo,
+                        cantidad: h.cantidad != null ? Number(h.cantidad) : existing.cantidad,
+                        precio_medio_compra: h.precio_medio_compra != null ? Number(h.precio_medio_compra) : existing.precio_medio_compra,
+                        moneda: h.moneda ?? existing.moneda,
+                        broker_origen: h.broker_origen !== undefined ? h.broker_origen : existing.broker_origen
+                    };
+                    await env.DB.prepare(
+                        `UPDATE cartera_activos
+                            SET ticker=?, nombre=?, tipo_activo=?, cantidad=?, precio_medio_compra=?, moneda=?, broker_origen=?
+                          WHERE id=? AND usuario_id=?`)
+                        .bind(merged.ticker, merged.nombre, merged.tipo_activo, merged.cantidad,
+                              merged.precio_medio_compra, merged.moneda, merged.broker_origen, holdingId, uid).run();
+                    return json(_normalizeHolding({ ...existing, ...merged }), 200, cors);
+                }
+                if (method === 'DELETE') {
+                    await env.DB.prepare('DELETE FROM cartera_activos WHERE id=? AND usuario_id=?')
+                        .bind(holdingId, uid).run();
+                    return json({ success: true }, 200, cors);
+                }
+            }
+            if (path === '/api/portfolio/prices' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const raw = url.searchParams.get('tickers') || '';
+                const tickers = [...new Set(
+                    raw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+                )].slice(0, 50);
+                if (!tickers.length) return json({ error: 'Falta el parámetro tickers' }, 400, cors);
+                const prices = {};
+                for (const ticker of tickers) {
+                    prices[ticker] = await getTickerPrice(ticker, env);
+                }
+                return json({ prices }, 200, cors);
             }
 
                  return json({ error: 'Not found', path }, 404, cors);
