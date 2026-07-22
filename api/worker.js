@@ -15,7 +15,8 @@
 //              GET /api/banking/accounts, POST /api/banking/sync
 //   Portfolio: GET/POST /api/portfolio/holdings,
 //              PUT/DELETE /api/portfolio/holdings/:id,
-//              GET /api/portfolio/prices?tickers=AAPL,MSFT
+//              GET /api/portfolio/prices?tickers=AAPL,MSFT (batch a Twelve Data)
+//   UI:        GET /cartera.html (página standalone de la cartera)
 //
 // Bindings (wrangler.toml): DB (D1), CACHE (KV)
 // Secrets: JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
@@ -23,6 +24,7 @@
 // ============================================================
 
 import { buildPushPayload } from '@block65/webcrypto-web-push';
+import { CARTERA_HTML } from './cartera-page.js';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -367,51 +369,85 @@ function _normalizeHolding(row) {
     };
 }
 
-// Precio actual de un ticker con estrategia cache-first sobre KV (env.CACHE):
-//   1) Si hay precio fresco en `price:{ticker}` (dentro del TTL), se devuelve.
-//   2) Si no, se consulta Twelve Data, se cachea y se devuelve.
-//   3) Si la API externa falla, se devuelve el último precio conocido desde el
-//      backup `price_bak:{ticker}` (sin TTL) con flag `stale: true`. Nunca lanza
-//      un error duro: como mucho devuelve price=null con stale=true.
-// Se mantiene el backup sin TTL aparte porque KV borra la clave con TTL al
-// expirar, y entonces no podríamos servir "el último precio aunque haya expirado".
-async function getTickerPrice(ticker, env) {
-    const cacheKey = `price:${ticker}`;
-    const backupKey = `price_bak:${ticker}`;
+// Tipos de activo admitidos para cartera_activos.
+const TIPOS_ACTIVO = ['accion', 'etf', 'fondo', 'cripto'];
 
-    // 1) Cache-first: hit fresco dentro del TTL de KV.
-    const cachedRaw = await env.CACHE.get(cacheKey);
-    if (cachedRaw) {
-        try { return { ...JSON.parse(cachedRaw), stale: false }; } catch { /* cae a refetch */ }
+// Degradación a "stale" para un ticker: último precio conocido desde el backup
+// `price_bak:{ticker}` (sin TTL) o, si no existe, precio nulo. Nunca lanza error.
+async function _stalePrice(ticker, env) {
+    const backupRaw = await env.CACHE.get(`price_bak:${ticker}`);
+    if (backupRaw) {
+        try { return { ...JSON.parse(backupRaw), stale: true }; } catch { /* ignore */ }
     }
+    return { ticker, price: null, fetched_at: null, stale: true };
+}
 
-    // 2) Miss: consultar la API externa.
+// Precios de varios tickers con estrategia cache-first sobre KV (env.CACHE) y
+// UNA sola llamada batch a Twelve Data para los que falten:
+//   1) Para cada ticker, si hay precio fresco en `price:{ticker}` (dentro del
+//      TTL) se usa directamente (no entra en la llamada externa).
+//   2) Con los tickers que faltan se hace UNA única petición batch
+//      `/price?symbol=A,B,C`. Twelve Data devuelve `{price:"..."}` cuando se pide
+//      un único símbolo y `{ A:{price:"..."}, B:{status:"error"} }` cuando se
+//      piden varios; se parsean ambos formatos.
+//   3) Si el batch falla del todo (red, apikey, rate limit global) o un ticker
+//      concreto no viene o viene con error, ese ticker degrada a `stale:true`
+//      con su último precio conocido (backup sin TTL). Nunca error duro.
+// El backup sin TTL se mantiene aparte porque KV borra la clave con TTL al
+// expirar, y entonces no podríamos servir "el último precio aunque haya expirado".
+export async function getTickerPrices(tickers, env) {
+    const result = {};
+    const misses = [];
+
+    // 1) Cache-first por ticker.
+    for (const ticker of tickers) {
+        const cachedRaw = await env.CACHE.get(`price:${ticker}`);
+        if (cachedRaw) {
+            try { result[ticker] = { ...JSON.parse(cachedRaw), stale: false }; continue; } catch { /* refetch */ }
+        }
+        misses.push(ticker);
+    }
+    if (!misses.length) return result;
+
+    // 2) UNA sola llamada batch para los que faltan.
+    let batch = null;
     try {
         const apiKey = env.TWELVE_DATA_API_KEY;
         if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
-        const resp = await fetch(
-            `https://api.twelvedata.com/price?symbol=${encodeURIComponent(ticker)}&apikey=${apiKey}`);
+        const symbol = misses.map(encodeURIComponent).join(',');
+        const resp = await fetch(`https://api.twelvedata.com/price?symbol=${symbol}&apikey=${apiKey}`);
         const data = await resp.json();
-        // Twelve Data: OK -> { price: "123.45" }; error/límite -> { status:'error', message, code }
-        if (!data || data.status === 'error' || data.price == null) {
-            throw new Error(data && data.message ? data.message : 'Respuesta inválida de Twelve Data');
-        }
-        const price = parseFloat(data.price);
-        if (!isFinite(price)) throw new Error('Precio no numérico');
-        const payload = { ticker, price, fetched_at: new Date().toISOString() };
-        // Caché fresca con TTL + backup sin TTL (para degradación a stale).
-        await env.CACHE.put(cacheKey, JSON.stringify(payload), { expirationTtl: PRICE_TTL });
-        await env.CACHE.put(backupKey, JSON.stringify(payload));
-        return { ...payload, stale: false };
+        // Error global (apikey inválida, límite de plan agotado, etc.).
+        if (data && data.status === 'error') throw new Error(data.message || 'Error de Twelve Data');
+        batch = data;
     } catch (err) {
-        // 3) Degradar: último precio conocido aunque haya expirado.
-        const backupRaw = await env.CACHE.get(backupKey);
-        if (backupRaw) {
-            try { return { ...JSON.parse(backupRaw), stale: true }; } catch { /* ignore */ }
-        }
-        // Sin dato previo: no romper el dashboard, devolver precio nulo marcado stale.
-        return { ticker, price: null, fetched_at: null, stale: true };
+        // Batch caído por completo: todos los que faltan degradan a stale.
+        for (const ticker of misses) result[ticker] = await _stalePrice(ticker, env);
+        return result;
     }
+
+    // 3) Resolver cada ticker que faltaba a partir de la respuesta batch.
+    const now = new Date().toISOString();
+    for (const ticker of misses) {
+        // Formato 1 símbolo -> { price }; varios -> { TICKER: { price | status:'error' } }.
+        let priceStr = null;
+        if (misses.length === 1 && batch && batch.price != null) {
+            priceStr = batch.price;
+        } else if (batch && batch[ticker] && batch[ticker].status !== 'error' && batch[ticker].price != null) {
+            priceStr = batch[ticker].price;
+        }
+        const price = priceStr != null ? parseFloat(priceStr) : NaN;
+        if (isFinite(price)) {
+            const payload = { ticker, price, fetched_at: now };
+            await env.CACHE.put(`price:${ticker}`, JSON.stringify(payload), { expirationTtl: PRICE_TTL });
+            await env.CACHE.put(`price_bak:${ticker}`, JSON.stringify(payload));
+            result[ticker] = { ...payload, stale: false };
+        } else {
+            // Ticker ausente o con error en el batch: degradar a stale.
+            result[ticker] = await _stalePrice(ticker, env);
+        }
+    }
+    return result;
 }
 
 // ============================================================
@@ -429,6 +465,17 @@ export default {
         try {
             // ---------- HEALTH ----------
             if (path === '/api/health') return json({ ok: true, ts: Date.now() }, 200, cors);
+
+            // ---------- UI CARTERA (página standalone, servida por el Worker) ----------
+            // Pública (la propia página pide el JWT); mismo origen que la API para
+            // poder verificarla con `wrangler dev` sin CORS. En producción la web
+            // estática va por Pages; esto es sobre todo para pruebas locales.
+            if ((path === '/cartera' || path === '/cartera.html') && method === 'GET') {
+                return new Response(CARTERA_HTML, {
+                    status: 200,
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+                });
+            }
 
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
@@ -1095,13 +1142,24 @@ export default {
                     if (!h || !h.ticker || !h.tipo_activo || h.cantidad == null || h.precio_medio_compra == null) {
                         return json({ error: 'Campos obligatorios: ticker, tipo_activo, cantidad, precio_medio_compra' }, 400, cors);
                     }
+                    if (!TIPOS_ACTIVO.includes(h.tipo_activo)) {
+                        return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
+                    }
+                    const cantidad = Number(h.cantidad);
+                    if (!isFinite(cantidad) || cantidad <= 0) {
+                        return json({ error: 'cantidad debe ser un número positivo (> 0)' }, 400, cors);
+                    }
+                    const precio = Number(h.precio_medio_compra);
+                    if (!isFinite(precio) || precio <= 0) {
+                        return json({ error: 'precio_medio_compra debe ser un número positivo (> 0)' }, 400, cors);
+                    }
                     const now = new Date().toISOString();
                     const res = await env.DB.prepare(
                         `INSERT INTO cartera_activos
                             (usuario_id,ticker,nombre,tipo_activo,cantidad,precio_medio_compra,moneda,broker_origen,fecha_creacion)
                          VALUES (?,?,?,?,?,?,?,?,?)`)
                         .bind(uid, String(h.ticker).toUpperCase(), h.nombre ?? null, h.tipo_activo,
-                              Number(h.cantidad), Number(h.precio_medio_compra), h.moneda || 'EUR',
+                              cantidad, precio, h.moneda || 'EUR',
                               h.broker_origen ?? null, now).run();
                     const newId = res.meta && res.meta.last_row_id;
                     const row = await env.DB.prepare('SELECT * FROM cartera_activos WHERE id=? AND usuario_id=?')
@@ -1118,6 +1176,17 @@ export default {
                         .bind(holdingId, uid).first();
                     if (!existing) return json({ error: 'No encontrado' }, 404, cors);
                     const h = await request.json();
+                    if (h.tipo_activo != null && !TIPOS_ACTIVO.includes(h.tipo_activo)) {
+                        return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
+                    }
+                    if (h.cantidad != null) {
+                        const c = Number(h.cantidad);
+                        if (!isFinite(c) || c <= 0) return json({ error: 'cantidad debe ser un número positivo (> 0)' }, 400, cors);
+                    }
+                    if (h.precio_medio_compra != null) {
+                        const p = Number(h.precio_medio_compra);
+                        if (!isFinite(p) || p <= 0) return json({ error: 'precio_medio_compra debe ser un número positivo (> 0)' }, 400, cors);
+                    }
                     const merged = {
                         ticker: h.ticker != null ? String(h.ticker).toUpperCase() : existing.ticker,
                         nombre: h.nombre !== undefined ? h.nombre : existing.nombre,
@@ -1148,10 +1217,7 @@ export default {
                     raw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
                 )].slice(0, 50);
                 if (!tickers.length) return json({ error: 'Falta el parámetro tickers' }, 400, cors);
-                const prices = {};
-                for (const ticker of tickers) {
-                    prices[ticker] = await getTickerPrice(ticker, env);
-                }
+                const prices = await getTickerPrices(tickers, env);
                 return json({ prices }, 200, cors);
             }
 
