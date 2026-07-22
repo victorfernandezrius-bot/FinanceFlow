@@ -415,20 +415,8 @@ class AuthSystem {
     // ===== PRUEBA PREMIUM =====
 
     async startPremiumTrial() {
-        if (!this.currentUser) {
-            throw new Error('Usuario no autenticado');
-        }
-
-        // Configurar prueba por 7 días
-        const trialExpiry = new Date(Date.now() + 7*24*60*60*1000).toISOString();
-
-        await DataClient.savePremiumTrial(this.currentUser.id, trialExpiry);
-        
-        return {
-            success: true,
-            message: 'Prueba premium activada por 7 días',
-            expires_at: trialExpiry
-        };
+        // Las pruebas premium gratuitas ya no están disponibles (se retiró el flujo de trial).
+        return { success: false, error: 'Las pruebas gratuitas ya no están disponibles' };
     }
 
     // Refresca la caché del trial premium (llamar tras login / init)

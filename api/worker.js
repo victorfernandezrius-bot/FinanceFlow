@@ -84,11 +84,21 @@ async function hashPassword(password, salt) {
     return `${saltHex}:${hashHex}`;
 }
 
+// Comparación en tiempo constante (evita timing attacks). Para cadenas de la
+// misma longitud fija (hashes hex, firmas HMAC hex); la longitud no es secreta.
+function timingSafeEqual(a, b) {
+    a = String(a); b = String(b);
+    if (a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
+}
+
 async function verifyPassword(password, stored) {
     const [saltHex] = stored.split(':');
     const salt = Uint8Array.from(saltHex.match(/.{2}/g).map(h => parseInt(h, 16)));
     const recomputed = await hashPassword(password, salt);
-    return recomputed === stored;
+    return timingSafeEqual(recomputed, stored);
 }
 
 async function getAuthUser(request, env) {
@@ -98,6 +108,22 @@ async function getAuthUser(request, env) {
     const payload = await verifyJWT(token, env.JWT_SECRET);
     if (!payload) return null;
     return env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
+}
+
+// Rate limit sencillo con KV (env.CACHE). Devuelve true si se SUPERA el límite.
+// Ventana deslizante (el TTL se renueva en cada intento). No es transaccional
+// (posible sub-conteo con alta concurrencia), suficiente para frenar abuso.
+async function rateLimited(env, key, max, ttlSeconds) {
+    try {
+        const current = parseInt(await env.CACHE.get(key), 10) || 0;
+        if (current >= max) return true;
+        await env.CACHE.put(key, String(current + 1), { expirationTtl: ttlSeconds });
+        return false;
+    } catch (e) {
+        // Si el KV falla, no bloqueamos el servicio (fail-open en disponibilidad)
+        console.error('rateLimited:', e);
+        return false;
+    }
 }
 
 // ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
@@ -336,7 +362,7 @@ export default {
 
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
-                const { email, password, name, plan = 'free' } = await request.json();
+                const { email, password, name } = await request.json();
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
 
@@ -347,8 +373,10 @@ export default {
                 const id = crypto.randomUUID();
                 const now = new Date().toISOString();
                 const pwHash = await hashPassword(password);
-                const planExp = plan === 'premium'
-                    ? new Date(Date.now() + 30 * 864e5).toISOString() : null;
+                // Seguridad: el registro SIEMPRE crea plan 'free'. El premium solo lo
+                // activa el flujo de pago (Stripe webhook / verify-session), nunca el cliente.
+                const plan = 'free';
+                const planExp = null;
 
                 await env.DB.prepare(
                     `INSERT INTO users (id,email,name,password_hash,plan,plan_expires_at,created_at)
@@ -367,6 +395,10 @@ export default {
             }
 
             if (path === '/api/auth/login' && method === 'POST') {
+                // B4: máx. 10 intentos por IP cada 15 min (anti fuerza bruta)
+                const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { email, password } = await request.json();
                 const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
                     .bind((email || '').toLowerCase()).first();
@@ -462,8 +494,16 @@ export default {
             }
             if (path === "/api/auth/forgot-password" && method === "POST") {
         const fp = await request.json();
+        const fpEmail = (fp.email || "").toLowerCase();
+        // B4: máx. 3 solicitudes por email/hora y 10 por IP/hora (anti bombardeo de emails).
+        // Se responde igual que el flujo normal para no revelar el límite ni si el email existe.
+        const fpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (await rateLimited(env, `rl:reset:${fpEmail}`, 3, 3600) ||
+            await rateLimited(env, `rl:reset-ip:${fpIp}`, 10, 3600)) {
+          return json({ success: true }, 200, cors);
+        }
         const fpUser = await env.DB.prepare("SELECT id, name, email FROM users WHERE email=?")
-          .bind((fp.email || "").toLowerCase()).first();
+          .bind(fpEmail).first();
         if (fpUser) {
           const resetToken = crypto.randomUUID();
           await env.CACHE.put("reset:" + resetToken, fpUser.id, { expirationTtl: 3600 });
@@ -552,7 +592,8 @@ export default {
                             saldo_inicial=excluded.saldo_inicial, saldo_actual=excluded.saldo_actual,
                             is_fixed_cost=excluded.is_fixed_cost, fixed_monthly_amount=excluded.fixed_monthly_amount,
                             fixed_due_day=excluded.fixed_due_day, is_bank_account=excluded.is_bank_account,
-                            updated_at=excluded.updated_at`)
+                            updated_at=excluded.updated_at
+                         WHERE accounts.user_id = excluded.user_id`)
                         .bind(a.id, uid, a.nombre, a.tipo, a.descripcion || '', a.saldo_inicial || 0,
                               a.saldo_actual || 0, a.is_fixed_cost ? 1 : 0, a.fixed_monthly_amount ?? null,
                               a.fixed_due_day ?? null, a.is_bank_account ? 1 : 0, a.created_at || now, now).run();
@@ -585,7 +626,8 @@ export default {
                          ON CONFLICT(id) DO UPDATE SET tipo=excluded.tipo, cantidad=excluded.cantidad,
                             descripcion=excluded.descripcion, fecha=excluded.fecha, cuenta_id=excluded.cuenta_id,
                             cuenta_destino_id=excluded.cuenta_destino_id, categoria=excluded.categoria,
-                            updated_at=excluded.updated_at`)
+                            updated_at=excluded.updated_at
+                         WHERE movements.user_id = excluded.user_id`)
                         .bind(m.id, uid, m.tipo, m.cantidad, m.descripcion, m.fecha, m.cuenta_id ?? null,
                               m.cuenta_destino_id ?? null, m.categoria ?? null, m.origen || 'manual',
                               m.auto_categorized ? 1 : 0, m.applied_rule ?? null, m.rule_name ?? null,
@@ -627,7 +669,8 @@ export default {
                          VALUES (?,?,?,?,?,?,?,?,?,?)
                          ON CONFLICT(id) DO UPDATE SET name=excluded.name, keywords=excluded.keywords,
                             account_type=excluded.account_type, account_id=excluded.account_id,
-                            account_name=excluded.account_name, enabled=excluded.enabled`)
+                            account_name=excluded.account_name, enabled=excluded.enabled
+                         WHERE categorization_rules.user_id = excluded.user_id`)
                         .bind(r.id, uid, r.name, JSON.stringify(r.keywords || []), r.accountType ?? null,
                               r.accountId ?? null, r.accountName ?? null, r.enabled ? 1 : 0,
                               r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()).run();
@@ -715,11 +758,9 @@ export default {
                     const row = await env.DB.prepare('SELECT premium_trial_expires_at FROM users WHERE id=?').bind(uid).first();
                     return json({ expiry: row?.premium_trial_expires_at || null }, 200, cors);
                 }
-                if (method === 'POST') {
-                    const { expiry } = await request.json();
-                    await env.DB.prepare('UPDATE users SET premium_trial_expires_at=? WHERE id=?').bind(expiry, uid).run();
-                    return json({ success: true }, 200, cors);
-                }
+                // POST eliminado: las pruebas premium gratuitas ya no existen.
+                // Antes aceptaba un 'expiry' arbitrario del cliente -> escalada de privilegios.
+                if (method === 'POST') return json({ error: 'Función no disponible' }, 410, cors);
             }
 
             // ---------- NOTIFICATIONS ----------
@@ -973,7 +1014,9 @@ export default {
                  return json({ error: 'Not found', path }, 404, cors);
 
         } catch (err) {
-            return json({ error: 'Server error', detail: err.message }, 500, cors);
+            // No filtrar detalles internos al cliente; registrar el detalle en el servidor.
+            console.error('Error 500:', err && err.stack ? err.stack : err);
+            return json({ error: 'Server error' }, 500, cors);
         }
     },
 
@@ -1101,7 +1144,12 @@ async function verifyStripeSignature(payload, sigHeader, secret) {
             { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
         const sig = await crypto.subtle.sign('HMAC', key, enc.encode(signedPayload));
         const expected = [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
-        return expected === parts.v1;
+        // B6: comparación en tiempo constante
+        if (!timingSafeEqual(expected, parts.v1 || '')) return false;
+        // B3: anti-replay — rechazar eventos fuera de una tolerancia de 5 minutos
+        const ts = Number(parts.t);
+        if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
+        return true;
     } catch { return false; }
 }
 // ---------- Resend correos app ----------
