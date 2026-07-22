@@ -347,8 +347,9 @@ class AccountingManager {
                 break;
 
             case 'gasto':
-                if (cuentaOrigen.tipo !== 'activo') {
-                    throw new Error('La cuenta origen debe ser de tipo Activo');
+                // Origen: Activo (gasto normal) o Patrimonio (deterioro/pérdida de valor de un bien)
+                if (!['activo', 'patrimonio'].includes(cuentaOrigen.tipo)) {
+                    throw new Error('La cuenta origen debe ser de tipo Activo o Patrimonio');
                 }
                 if (cuentaDestino.tipo !== 'gasto') {
                     throw new Error('La cuenta destino debe ser de tipo Gasto');
@@ -356,11 +357,12 @@ class AccountingManager {
                 break;
 
             case 'transferencia':
-                if (!['activo', 'pasivo'].includes(cuentaOrigen.tipo)) {
-                    throw new Error('La cuenta origen debe ser Activo o Pasivo');
+                // Permite mover valor entre Activo, Pasivo y Patrimonio (p. ej. comprar/vender un bien)
+                if (!['activo', 'pasivo', 'patrimonio'].includes(cuentaOrigen.tipo)) {
+                    throw new Error('La cuenta origen debe ser Activo, Pasivo o Patrimonio');
                 }
-                if (!['activo', 'pasivo'].includes(cuentaDestino.tipo)) {
-                    throw new Error('La cuenta destino debe ser Activo o Pasivo');
+                if (!['activo', 'pasivo', 'patrimonio'].includes(cuentaDestino.tipo)) {
+                    throw new Error('La cuenta destino debe ser Activo, Pasivo o Patrimonio');
                 }
                 if (cuentaOrigen.id === cuentaDestino.id) {
                     throw new Error('Las cuentas origen y destino deben ser diferentes');
@@ -404,6 +406,12 @@ class AccountingManager {
                 } else if (cuentaOrigen.tipo === 'pasivo' && cuentaDestino.tipo === 'activo') {
                     // Endeudamiento (pasivo → activo)
                     cuentaOrigen.saldo_actual -= cantidad; // Aumenta la deuda (más negativo)
+                    cuentaDestino.saldo_actual += cantidad;
+                } else {
+                    // Cualquier otra combinación (incluye patrimonio): origen resta, destino suma.
+                    // Igual que recalcAllBalances; evita el fallo silencioso al mover valor
+                    // desde/hacia cuentas de patrimonio (comprar/vender bienes, etc.).
+                    cuentaOrigen.saldo_actual -= cantidad;
                     cuentaDestino.saldo_actual += cantidad;
                 }
                 break;

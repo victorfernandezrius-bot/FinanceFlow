@@ -7356,10 +7356,10 @@
                     case 'gasto':
                         accountsSection.innerHTML = `
                             <div>
-                                <label for="source-account" class="block text-sm font-medium text-gray-700">Cuenta Origen (Activo)</label>
+                                <label for="source-account" class="block text-sm font-medium text-gray-700">Cuenta Origen (Activo o Patrimonio)</label>
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta origen...</option>
-                                    ${accounts.filter(acc => acc.tipo === 'activo').map(acc => 
+                                    ${accounts.filter(acc => ['activo', 'patrimonio'].includes(acc.tipo)).map(acc =>
                                         `<option value="${acc.id}">${acc.nombre}</option>`
                                     ).join('')}
                                 </select>
@@ -7378,7 +7378,7 @@
                         
                     case 'transferencia': {
                         const pasivoAccounts = accounts.filter(acc => acc.tipo === 'pasivo');
-                        const activoPasivoAccounts = accounts.filter(acc => ['activo', 'pasivo'].includes(acc.tipo));
+                        const activoPasivoAccounts = accounts.filter(acc => ['activo', 'pasivo', 'patrimonio'].includes(acc.tipo));
                         const gastoAccounts = accounts.filter(acc => acc.tipo === 'gasto');
                         
                         accountsSection.innerHTML = `
