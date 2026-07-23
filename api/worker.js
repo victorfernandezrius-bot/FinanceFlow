@@ -13,8 +13,10 @@
 //              POST /api/stripe/verify-session
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
-//   Portfolio: GET/POST /api/portfolio/holdings,
-//              PUT/DELETE /api/portfolio/holdings/:id,
+//   Portfolio: POST /api/portfolio/operations, GET /api/portfolio/holdings,
+//              POST /api/portfolio/close, GET /api/portfolio/journal,
+//              GET /api/portfolio/allocation, GET /api/portfolio/history,
+//              GET /api/portfolio/daily-return,
 //              GET /api/portfolio/prices?tickers=AAPL,MSFT (batch a Twelve Data)
 //   UI:        GET /cartera.html (página standalone de la cartera)
 //
@@ -25,6 +27,8 @@
 
 import { buildPushPayload } from '@block65/webcrypto-web-push';
 import { CARTERA_HTML } from './cartera-page.js';
+import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS }
+    from './cartera-logic.js';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -357,18 +361,6 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
 // Para probar la degradación a "stale" en local, bájalo temporalmente a 10.
 const PRICE_TTL = 900;
 
-// Normaliza una fila de cartera_activos (coacciona numéricos igual que el resto
-// del código normaliza booleans/campos D1 tras leerlos).
-function _normalizeHolding(row) {
-    if (!row) return row;
-    return {
-        ...row,
-        id: row.id != null ? Number(row.id) : row.id,
-        cantidad: row.cantidad != null ? Number(row.cantidad) : row.cantidad,
-        precio_medio_compra: row.precio_medio_compra != null ? Number(row.precio_medio_compra) : row.precio_medio_compra
-    };
-}
-
 // Tipos de activo admitidos para cartera_activos.
 const TIPOS_ACTIVO = ['accion', 'etf', 'fondo', 'cripto'];
 
@@ -448,6 +440,68 @@ export async function getTickerPrices(tickers, env) {
         }
     }
     return result;
+}
+
+// Benchmarks soportados por /api/portfolio/history. Los símbolos de índice de
+// Twelve Data pueden no coincidir 1:1 con estos alias; conviene verificarlos
+// contra la documentación de Twelve Data antes de producción.
+const BENCHMARKS = {
+    SP500:     { symbol: 'SPX',  nombre: 'S&P 500' },
+    NASDAQ100: { symbol: 'NDX',  nombre: 'Nasdaq 100' },
+    DOWJONES:  { symbol: 'DJI',  nombre: 'Dow Jones' },
+    IBEX35:    { symbol: 'IBEX', nombre: 'IBEX 35' },
+    CAC40:     { symbol: 'CAC',  nombre: 'CAC 40' },
+    DAX:       { symbol: 'DAX',  nombre: 'DAX' },
+    FTSE100:   { symbol: 'FTSE', nombre: 'FTSE 100' }
+};
+
+// Traduce un código de periodo a fecha de inicio (YYYY-MM-DD) respecto a hoy.
+function periodoToStartDate(periodo, refDate) {
+    const d = new Date(refDate.getTime());
+    const p = String(periodo || '').toUpperCase();
+    if (p === '1M' || p === 'MENSUAL') d.setMonth(d.getMonth() - 1);
+    else if (p === '3M' || p === 'TRIMESTRAL') d.setMonth(d.getMonth() - 3);
+    else if (p === '6M' || p === 'SEMESTRAL') d.setMonth(d.getMonth() - 6);
+    else if (p === '1A' || p === '1Y' || p === 'ANUAL') d.setFullYear(d.getFullYear() - 1);
+    else if (p === 'YTD') { d.setMonth(0); d.setDate(1); }
+    else if (p === 'MAX') return '1970-01-01';
+    else d.setFullYear(d.getFullYear() - 1); // por defecto, 1 año
+    return d.toISOString().slice(0, 10);
+}
+
+// Serie del benchmark alineada a las fechas de la cartera. Cache-first en KV
+// (`benchmark:{symbol}:{fecha}`, sin TTL: un cierre histórico ya no cambia).
+// Best-effort: si la API externa falla, se sirve lo que haya en caché.
+async function getBenchmarkSeries(env, symbol, fechas) {
+    if (!fechas || !fechas.length) return [];
+    const start = fechas[0], end = fechas[fechas.length - 1];
+    try {
+        const apiKey = env.TWELVE_DATA_API_KEY;
+        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
+        const u = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}`
+            + `&interval=1day&start_date=${start}&end_date=${end}&order=ASC&apikey=${apiKey}`;
+        const r = await fetch(u);
+        const d = await r.json();
+        if (d && d.status !== 'error' && Array.isArray(d.values)) {
+            for (const v of d.values) {
+                const fecha = (v.datetime || '').slice(0, 10);
+                const close = parseFloat(v.close);
+                if (fecha && isFinite(close)) {
+                    await env.CACHE.put(`benchmark:${symbol}:${fecha}`, String(close));
+                }
+            }
+        }
+    } catch (e) { /* best-effort: caemos a lo cacheado */ }
+
+    const serie = [];
+    for (const fecha of fechas) {
+        const raw = await env.CACHE.get(`benchmark:${symbol}:${fecha}`);
+        if (raw != null) {
+            const val = parseFloat(raw);
+            if (isFinite(val)) serie.push({ fecha, valor: val });
+        }
+    }
+    return serie;
 }
 
 // ============================================================
@@ -1128,88 +1182,198 @@ export default {
                 }
             }
 
-            // ---------- CARTERA DE INVERSIÓN ----------
-            if (path === '/api/portfolio/holdings') {
+            // ---------- CARTERA DE INVERSIÓN v2 (basada en histórico de operaciones) ----------
+            // POST /api/portfolio/operations — registra una compra o venta.
+            if (path === '/api/portfolio/operations' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
-                if (method === 'GET') {
-                    const { results } = await env.DB.prepare(
-                        'SELECT * FROM cartera_activos WHERE usuario_id=? ORDER BY fecha_creacion DESC')
-                        .bind(uid).all();
-                    return json(results.map(_normalizeHolding), 200, cors);
+                const o = await request.json();
+                if (!o || !o.ticker || !o.tipo_activo || !o.tipo_operacion || !o.fecha
+                    || o.cantidad == null || o.precio == null) {
+                    return json({ error: 'Campos obligatorios: ticker, tipo_activo, tipo_operacion, fecha, cantidad, precio' }, 400, cors);
                 }
-                if (method === 'POST') {
-                    const h = await request.json();
-                    if (!h || !h.ticker || !h.tipo_activo || h.cantidad == null || h.precio_medio_compra == null) {
-                        return json({ error: 'Campos obligatorios: ticker, tipo_activo, cantidad, precio_medio_compra' }, 400, cors);
-                    }
-                    if (!TIPOS_ACTIVO.includes(h.tipo_activo)) {
-                        return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
-                    }
-                    const cantidad = Number(h.cantidad);
-                    if (!isFinite(cantidad) || cantidad <= 0) {
-                        return json({ error: 'cantidad debe ser un número positivo (> 0)' }, 400, cors);
-                    }
-                    const precio = Number(h.precio_medio_compra);
-                    if (!isFinite(precio) || precio <= 0) {
-                        return json({ error: 'precio_medio_compra debe ser un número positivo (> 0)' }, 400, cors);
-                    }
-                    const now = new Date().toISOString();
-                    const res = await env.DB.prepare(
-                        `INSERT INTO cartera_activos
-                            (usuario_id,ticker,nombre,tipo_activo,cantidad,precio_medio_compra,moneda,broker_origen,fecha_creacion)
-                         VALUES (?,?,?,?,?,?,?,?,?)`)
-                        .bind(uid, String(h.ticker).toUpperCase(), h.nombre ?? null, h.tipo_activo,
-                              cantidad, precio, h.moneda || 'EUR',
-                              h.broker_origen ?? null, now).run();
-                    const newId = res.meta && res.meta.last_row_id;
-                    const row = await env.DB.prepare('SELECT * FROM cartera_activos WHERE id=? AND usuario_id=?')
-                        .bind(newId, uid).first();
-                    return json(_normalizeHolding(row), 201, cors);
+                if (!TIPOS_ACTIVO.includes(o.tipo_activo)) {
+                    return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
                 }
+                if (o.tipo_operacion !== 'compra' && o.tipo_operacion !== 'venta') {
+                    return json({ error: "tipo_operacion debe ser 'compra' o 'venta'" }, 400, cors);
+                }
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(o.fecha)) {
+                    return json({ error: 'fecha debe tener formato YYYY-MM-DD' }, 400, cors);
+                }
+                const cantidad = Number(o.cantidad);
+                if (!isFinite(cantidad) || cantidad <= 0) return json({ error: 'cantidad debe ser un número positivo (> 0)' }, 400, cors);
+                const precio = Number(o.precio);
+                if (!isFinite(precio) || precio <= 0) return json({ error: 'precio debe ser un número positivo (> 0)' }, 400, cors);
+                const comision = o.comision != null ? Number(o.comision) : 0;
+                if (!isFinite(comision) || comision < 0) return json({ error: 'comision no puede ser negativa' }, 400, cors);
+                const ticker = String(o.ticker).toUpperCase();
+
+                if (o.tipo_operacion === 'venta') {
+                    const { results: prev } = await env.DB.prepare(
+                        'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
+                    const abierta = openQty(prev, ticker);
+                    if (cantidad > abierta + EPS) {
+                        return json({ error: `No puedes vender ${cantidad} de ${ticker}: solo tienes ${abierta} abiertas.` }, 400, cors);
+                    }
+                }
+                const res = await env.DB.prepare(
+                    `INSERT INTO cartera_operaciones
+                        (usuario_id,ticker,tipo_activo,tipo_operacion,fecha,cantidad,precio,comision,moneda,broker_origen,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+                    .bind(uid, ticker, o.tipo_activo, o.tipo_operacion, o.fecha, cantidad, precio, comision,
+                          o.moneda || 'EUR', o.broker_origen ?? null, new Date().toISOString()).run();
+                const newId = res.meta && res.meta.last_row_id;
+                // Devolver la operación creada + la posición recalculada del ticker.
+                const { results: all } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
+                const agg = aggregate(all).get(ticker);
+                return json({ id: newId, ticker, tipo_operacion: o.tipo_operacion,
+                              posicion: agg ? positionFrom(agg) : null }, 201, cors);
             }
-            const holdMatch = path.match(/^\/api\/portfolio\/holdings\/(.+)$/);
-            if (holdMatch) {
+
+            // GET /api/portfolio/holdings — posiciones abiertas agregadas del histórico.
+            if (path === '/api/portfolio/holdings' && method === 'GET') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
-                const holdingId = holdMatch[1].split('?')[0];
-                if (method === 'PUT') {
-                    const existing = await env.DB.prepare('SELECT * FROM cartera_activos WHERE id=? AND usuario_id=?')
-                        .bind(holdingId, uid).first();
-                    if (!existing) return json({ error: 'No encontrado' }, 404, cors);
-                    const h = await request.json();
-                    if (h.tipo_activo != null && !TIPOS_ACTIVO.includes(h.tipo_activo)) {
-                        return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
-                    }
-                    if (h.cantidad != null) {
-                        const c = Number(h.cantidad);
-                        if (!isFinite(c) || c <= 0) return json({ error: 'cantidad debe ser un número positivo (> 0)' }, 400, cors);
-                    }
-                    if (h.precio_medio_compra != null) {
-                        const p = Number(h.precio_medio_compra);
-                        if (!isFinite(p) || p <= 0) return json({ error: 'precio_medio_compra debe ser un número positivo (> 0)' }, 400, cors);
-                    }
-                    const merged = {
-                        ticker: h.ticker != null ? String(h.ticker).toUpperCase() : existing.ticker,
-                        nombre: h.nombre !== undefined ? h.nombre : existing.nombre,
-                        tipo_activo: h.tipo_activo ?? existing.tipo_activo,
-                        cantidad: h.cantidad != null ? Number(h.cantidad) : existing.cantidad,
-                        precio_medio_compra: h.precio_medio_compra != null ? Number(h.precio_medio_compra) : existing.precio_medio_compra,
-                        moneda: h.moneda ?? existing.moneda,
-                        broker_origen: h.broker_origen !== undefined ? h.broker_origen : existing.broker_origen
-                    };
-                    await env.DB.prepare(
-                        `UPDATE cartera_activos
-                            SET ticker=?, nombre=?, tipo_activo=?, cantidad=?, precio_medio_compra=?, moneda=?, broker_origen=?
-                          WHERE id=? AND usuario_id=?`)
-                        .bind(merged.ticker, merged.nombre, merged.tipo_activo, merged.cantidad,
-                              merged.precio_medio_compra, merged.moneda, merged.broker_origen, holdingId, uid).run();
-                    return json(_normalizeHolding({ ...existing, ...merged }), 200, cors);
-                }
-                if (method === 'DELETE') {
-                    await env.DB.prepare('DELETE FROM cartera_activos WHERE id=? AND usuario_id=?')
-                        .bind(holdingId, uid).run();
-                    return json({ success: true }, 200, cors);
-                }
+                const { results } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
+                return json(openPositions(results), 200, cors);
             }
+
+            // POST /api/portfolio/close — cierra la posición abierta de un ticker (venta total).
+            if (path === '/api/portfolio/close' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const b = await request.json();
+                if (!b || !b.ticker || b.precio_cierre == null || !b.fecha_cierre) {
+                    return json({ error: 'Campos obligatorios: ticker, precio_cierre, fecha_cierre' }, 400, cors);
+                }
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha_cierre)) {
+                    return json({ error: 'fecha_cierre debe tener formato YYYY-MM-DD' }, 400, cors);
+                }
+                const precioCierre = Number(b.precio_cierre);
+                if (!isFinite(precioCierre) || precioCierre <= 0) return json({ error: 'precio_cierre debe ser un número positivo (> 0)' }, 400, cors);
+                const comSalida = b.comision_salida != null ? Number(b.comision_salida) : 0;
+                if (!isFinite(comSalida) || comSalida < 0) return json({ error: 'comision_salida no puede ser negativa' }, 400, cors);
+                const ticker = String(b.ticker).toUpperCase();
+
+                const { results } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
+                const cl = computeClose(results, ticker, precioCierre, comSalida);
+                if (!cl) return json({ error: `No hay posición abierta de ${ticker} para cerrar` }, 400, cors);
+
+                await env.DB.prepare(
+                    `INSERT INTO cartera_operaciones
+                        (usuario_id,ticker,tipo_activo,tipo_operacion,fecha,cantidad,precio,comision,moneda,broker_origen,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+                    .bind(uid, ticker, cl.tipo_activo, 'venta', b.fecha_cierre, cl.cantidad, precioCierre, comSalida,
+                          cl.moneda, b.broker_origen ?? null, new Date().toISOString()).run();
+
+                return json({
+                    ticker, cantidad_cerrada: cl.cantidad, precio_medio: cl.precio_medio, precio_cierre: precioCierre,
+                    comision_entrada_proporcional: cl.comision_entrada_proporcional, comision_salida: comSalida,
+                    beneficio: cl.beneficio, rentabilidad_pct: cl.rentabilidad_pct
+                }, 200, cors);
+            }
+
+            // GET /api/portfolio/journal — diario de operaciones con filtros + totales.
+            if (path === '/api/portfolio/journal' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                // El P&L realizado se calcula sobre TODO el histórico (para que el precio
+                // medio sea correcto); los filtros se aplican después, solo a la vista.
+                const { results: allOps } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
+                const { rows } = buildJournal(allOps);
+
+                const desde = url.searchParams.get('desde');
+                const hasta = url.searchParams.get('hasta');
+                const fTicker = url.searchParams.get('ticker');
+                const fTipo = url.searchParams.get('tipo_operacion');
+                let view = rows;
+                if (desde) view = view.filter(r => r.fecha >= desde);
+                if (hasta) view = view.filter(r => r.fecha <= hasta);
+                if (fTicker) view = view.filter(r => r.ticker === String(fTicker).toUpperCase());
+                if (fTipo) view = view.filter(r => r.tipo_operacion === fTipo);
+
+                const ventas = view.filter(r => r.tipo_operacion === 'venta');
+                const beneficio_total = ventas.reduce((a, r) => a + (r.beneficio || 0), 0);
+                const baseTotal = ventas.reduce((a, r) => a + (r.base_venta || 0), 0);
+                // Comisión real pagada por operación: compra -> comision_entrada; venta -> comision_salida.
+                const comisiones_totales = view.reduce((a, r) =>
+                    a + (r.tipo_operacion === 'compra' ? (r.comision_entrada || 0) : (r.comision_salida || 0)), 0);
+                const totales = {
+                    beneficio_total,
+                    comisiones_totales,
+                    rentabilidad_pct_media_ponderada: baseTotal > 0 ? (beneficio_total / baseTotal) * 100 : 0,
+                    peso_total: openPositions(allOps).length > 0 ? 100 : 0
+                };
+                // No exponemos el campo interno base_venta.
+                const cleanRows = view.map(({ base_venta, ...r }) => r);
+                return json({ rows: cleanRows, totales }, 200, cors);
+            }
+
+            // GET /api/portfolio/allocation — peso de cada posición sobre el valor de mercado.
+            if (path === '/api/portfolio/allocation' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+                const pos = openPositions(results);
+                const tickers = [...new Set(pos.map(p => p.ticker))];
+                const prices = tickers.length ? await getTickerPrices(tickers, env) : {};
+                const { items, total } = computeAllocation(pos, prices);
+                return json({ items, total }, 200, cors);
+            }
+
+            // GET /api/portfolio/history — serie diaria de valor de cartera + benchmark.
+            if (path === '/api/portfolio/history' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const periodo = url.searchParams.get('periodo') || '1A';
+                const benchKey = (url.searchParams.get('benchmark') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const start = periodoToStartDate(periodo, new Date());
+                const { results } = await env.DB.prepare(
+                    'SELECT fecha, valor_total FROM cartera_valor_diario WHERE usuario_id=? AND fecha>=? ORDER BY fecha ASC')
+                    .bind(uid, start).all();
+                const portfolio = results.map(r => ({ fecha: r.fecha, valor: Number(r.valor_total) }));
+
+                let benchmark = null;
+                if (benchKey) {
+                    const bench = BENCHMARKS[benchKey];
+                    if (!bench) {
+                        benchmark = { key: benchKey, error: 'benchmark no soportado', soportados: Object.keys(BENCHMARKS) };
+                    } else {
+                        const serie = portfolio.length
+                            ? await getBenchmarkSeries(env, bench.symbol, portfolio.map(p => p.fecha)) : [];
+                        benchmark = { key: benchKey, symbol: bench.symbol, nombre: bench.nombre, serie };
+                    }
+                }
+                return json({ periodo, desde: start, portfolio, benchmark }, 200, cors);
+            }
+
+            // GET /api/portfolio/daily-return — rentabilidad diaria y acumulada del periodo.
+            if (path === '/api/portfolio/daily-return' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const periodo = url.searchParams.get('periodo') || 'mensual';
+                const start = periodoToStartDate(periodo, new Date());
+                const { results } = await env.DB.prepare(
+                    'SELECT fecha, valor_total FROM cartera_valor_diario WHERE usuario_id=? ORDER BY fecha ASC').bind(uid).all();
+                const serie = results.map(r => ({ fecha: r.fecha, valor: Number(r.valor_total) }));
+
+                let valor_actual = null, fecha_actual = null, valor_anterior = null, rentabilidad_diaria_pct = null;
+                if (serie.length >= 1) { valor_actual = serie[serie.length - 1].valor; fecha_actual = serie[serie.length - 1].fecha; }
+                if (serie.length >= 2) {
+                    valor_anterior = serie[serie.length - 2].valor;
+                    rentabilidad_diaria_pct = valor_anterior > 0 ? ((valor_actual - valor_anterior) / valor_anterior) * 100 : null;
+                }
+                const enRango = serie.filter(s => s.fecha >= start);
+                let valor_inicial = null, fecha_inicial = null, rentabilidad_acumulada_pct = null;
+                if (enRango.length >= 1) {
+                    valor_inicial = enRango[0].valor; fecha_inicial = enRango[0].fecha;
+                    if (valor_inicial > 0 && valor_actual != null) {
+                        rentabilidad_acumulada_pct = ((valor_actual - valor_inicial) / valor_inicial) * 100;
+                    }
+                }
+                return json({ periodo, rentabilidad_diaria_pct, rentabilidad_acumulada_pct,
+                              valor_actual, valor_anterior, valor_inicial, fecha_actual, fecha_inicial }, 200, cors);
+            }
+
             if (path === '/api/portfolio/prices' && method === 'GET') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const raw = url.searchParams.get('tickers') || '';
@@ -1298,6 +1462,39 @@ export default {
             } catch (e) {
                 console.error('Cron push, usuario', user.id, ':', e);
             }
+        }
+
+        // ── Snapshot diario del valor de cartera (cartera_valor_diario) ──
+        // Requisito clave: sin esto no hay serie para el gráfico de evolución ni
+        // para la rentabilidad acumulada. Para cada usuario con posiciones abiertas,
+        // valor_total = Σ cantidad_abierta × precio_actual.
+        try {
+            const today = now.toISOString().slice(0, 10);
+            const { results: carteraUsers } = await env.DB.prepare(
+                'SELECT DISTINCT usuario_id FROM cartera_operaciones').all();
+            for (const cu of carteraUsers) {
+                try {
+                    const { results: ops } = await env.DB.prepare(
+                        'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(cu.usuario_id).all();
+                    const pos = openPositions(ops);
+                    if (!pos.length) continue;
+                    const prices = await getTickerPrices([...new Set(pos.map(p => p.ticker))], env);
+                    let valor = 0, hasPrice = false;
+                    for (const p of pos) {
+                        const pr = prices[p.ticker];
+                        if (pr && pr.price != null && isFinite(pr.price)) { valor += pr.price * p.cantidad_abierta; hasPrice = true; }
+                    }
+                    if (!hasPrice) continue; // sin ningún precio no guardamos un 0 engañoso
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_valor_diario (usuario_id, fecha, valor_total) VALUES (?,?,?)
+                         ON CONFLICT(usuario_id, fecha) DO UPDATE SET valor_total = excluded.valor_total`)
+                        .bind(cu.usuario_id, today, valor).run();
+                } catch (e) {
+                    console.error('Cron cartera snapshot, usuario', cu.usuario_id, ':', e);
+                }
+            }
+        } catch (e) {
+            console.error('Cron cartera snapshot:', e);
         }
 
         // ── Solicitud de valoración al mes de registro (email, una sola vez) ──

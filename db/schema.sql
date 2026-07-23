@@ -185,3 +185,35 @@ CREATE TABLE IF NOT EXISTS cartera_activos (
   FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_cartera_usuario ON cartera_activos(usuario_id);
+
+-- Cartera de Inversión v2: histórico de operaciones (fuente de verdad; las
+-- posiciones y el precio medio se calculan agregando esta tabla). cartera_activos
+-- queda obsoleta como fuente de verdad. Ver db/migrations/0002_cartera_operaciones.sql.
+CREATE TABLE IF NOT EXISTS cartera_operaciones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  tipo_activo TEXT NOT NULL,        -- 'accion' | 'etf' | 'fondo' | 'cripto'
+  tipo_operacion TEXT NOT NULL,     -- 'compra' | 'venta'
+  fecha TEXT NOT NULL,              -- YYYY-MM-DD
+  cantidad REAL NOT NULL,
+  precio REAL NOT NULL,             -- entrada en compras, cierre en ventas
+  comision REAL DEFAULT 0,
+  moneda TEXT DEFAULT 'EUR',
+  broker_origen TEXT,
+  cierra_operacion_id INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_operaciones_usuario ON cartera_operaciones(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_operaciones_usuario_ticker ON cartera_operaciones(usuario_id, ticker);
+CREATE INDEX IF NOT EXISTS idx_operaciones_fecha ON cartera_operaciones(usuario_id, fecha);
+
+-- Snapshot diario del valor total de cartera (para histórico y rentabilidad).
+CREATE TABLE IF NOT EXISTS cartera_valor_diario (
+  usuario_id TEXT NOT NULL,
+  fecha TEXT NOT NULL,              -- YYYY-MM-DD
+  valor_total REAL NOT NULL,
+  PRIMARY KEY (usuario_id, fecha),
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
