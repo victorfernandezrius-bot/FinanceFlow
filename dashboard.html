@@ -2224,8 +2224,9 @@
 
                 this.showSection('dashboard');
 
-                // Migración push /public/ -> / (no bloquea; se autorreintenta si falla).
-                this.migratePushSubscription();
+                // Migración push /public/ -> / y luego reconciliación de huérfanas
+                // (no bloquean el arranque; se autorreintentan en la siguiente carga).
+                this.migratePushSubscription().then(() => this.reconcilePushSubscription());
             }
             
             setupEventListeners() {
@@ -4395,6 +4396,20 @@
                 return await navigator.serviceWorker.ready;
             }
 
+            // Identificador estable de este dispositivo (persiste en localStorage).
+            // Se envía en cada suscripción para poder reconciliar solo las suscripciones
+            // muertas de ESTE dispositivo, sin tocar las de otros dispositivos del usuario.
+            _getDeviceId() {
+                let id = localStorage.getItem('ff_device_id');
+                if (!id) {
+                    id = (self.crypto && crypto.randomUUID)
+                        ? crypto.randomUUID()
+                        : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+                    localStorage.setItem('ff_device_id', id);
+                }
+                return id;
+            }
+
             async renderPushToggle() {
                 const block = document.getElementById('push-optin-block');
                 const statusEl = document.getElementById('push-status-text');
@@ -4455,7 +4470,7 @@
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${DataClient.getAuthToken()}`
                         },
-                        body: JSON.stringify(sub.toJSON())
+                        body: JSON.stringify({ ...sub.toJSON(), deviceId: this._getDeviceId() })
                     });
                     if (!r.ok) {
                         const err = await r.json().catch(() => ({}));
@@ -4533,7 +4548,7 @@
                             'Content-Type': 'application/json',
                             'Authorization': `Bearer ${DataClient.getAuthToken()}`
                         },
-                        body: JSON.stringify(sub.toJSON())
+                        body: JSON.stringify({ ...sub.toJSON(), deviceId: this._getDeviceId() })
                     });
                     if (!postRes.ok) return; // 6. fallo: no borrar nada, reintento próxima carga
 
@@ -4558,6 +4573,68 @@
                 } catch (error) {
                     // 6. No desregistrar, no borrar la clave: se reintenta en la próxima carga.
                     console.error('migratePushSubscription:', error);
+                }
+            }
+
+            // ── Autorreparación de suscripciones huérfanas (iOS reinstala la PWA) ──
+            // En iOS, si el usuario reinstala la PWA, la suscripción push muere pero la
+            // vieja sigue en la BD y Apple devuelve 201 al enviarle: fallo silencioso.
+            // Aquí, al arrancar, se compara el endpoint actual con lo que tiene el
+            // servidor y se reconcilia SOLO la de este dispositivo (mismo device_id),
+            // nunca las de otros dispositivos legítimos. No bloquea el arranque.
+            async reconcilePushSubscription() {
+                try {
+                    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+                    if (Notification.permission !== 'granted') return;
+                    if (!Auth.isPremium()) return;
+
+                    const reg = await navigator.serviceWorker.getRegistration('/');
+                    const sub = reg ? await reg.pushManager.getSubscription() : null;
+                    if (!sub) return; // este dispositivo no tiene suscripción activa: nada que reconciliar
+                    const deviceId = this._getDeviceId();
+
+                    // Suscripciones que el servidor tiene para este usuario.
+                    const listRes = await fetch(`${window.API_URL}/push/subscriptions`, {
+                        headers: { 'Authorization': `Bearer ${DataClient.getAuthToken()}` }
+                    });
+                    if (!listRes.ok) return;
+                    const data = await listRes.json().catch(() => ({}));
+                    const serverSubs = (data && data.subscriptions) || [];
+
+                    // Si el endpoint actual no está registrado, o su fila no tiene aún este
+                    // device_id (fila antigua con device_id NULL/otro), (re)enviarlo. Esto
+                    // "adopta" la fila del endpoint actual bajo este device_id.
+                    const current = serverSubs.find(s => s.endpoint === sub.endpoint);
+                    if (!current || current.device_id !== deviceId) {
+                        const postRes = await fetch(`${window.API_URL}/push/subscribe`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                            },
+                            body: JSON.stringify({ ...sub.toJSON(), deviceId })
+                        });
+                        if (!postRes.ok) return;
+                    }
+
+                    // Borrar SOLO las suscripciones muertas de ESTE dispositivo: mismo
+                    // device_id pero endpoint distinto al actual. Nunca se tocan las de
+                    // otros device_id, ni las de device_id NULL (podrían ser de otro
+                    // dispositivo previo a esta versión).
+                    const stale = serverSubs.filter(s =>
+                        s.device_id && s.device_id === deviceId && s.endpoint !== sub.endpoint);
+                    for (const s of stale) {
+                        await fetch(`${window.API_URL}/push/subscribe`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                            },
+                            body: JSON.stringify({ endpoint: s.endpoint })
+                        });
+                    }
+                } catch (error) {
+                    console.error('reconcilePushSubscription:', error);
                 }
             }
 

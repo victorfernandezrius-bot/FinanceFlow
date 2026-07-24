@@ -801,13 +801,17 @@ export default {
                     const sub = await request.json();
                     if (!sub || !sub.endpoint || !sub.keys?.p256dh || !sub.keys?.auth)
                         return json({ error: 'Suscripción inválida' }, 400, cors);
+                    // device_id: identificador estable del dispositivo (localStorage del
+                    // cliente). Permite reconciliar suscripciones muertas del MISMO
+                    // dispositivo sin tocar las de otros dispositivos del usuario.
+                    const deviceId = (typeof sub.deviceId === 'string' && sub.deviceId) ? sub.deviceId.slice(0, 64) : null;
                     await env.DB.prepare(
-                        `INSERT INTO push_subscriptions (id,user_id,endpoint,p256dh,auth,user_agent,created_at)
-                         VALUES (?,?,?,?,?,?,?)
+                        `INSERT INTO push_subscriptions (id,user_id,endpoint,p256dh,auth,user_agent,device_id,created_at)
+                         VALUES (?,?,?,?,?,?,?,?)
                          ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,
-                            p256dh=excluded.p256dh, auth=excluded.auth`)
+                            p256dh=excluded.p256dh, auth=excluded.auth, device_id=excluded.device_id`)
                         .bind(crypto.randomUUID(), uid, sub.endpoint, sub.keys.p256dh, sub.keys.auth,
-                              request.headers.get('User-Agent') || null, new Date().toISOString()).run();
+                              request.headers.get('User-Agent') || null, deviceId, new Date().toISOString()).run();
                     return json({ success: true }, 200, cors);
                 }
                 if (method === 'DELETE') {
@@ -816,6 +820,17 @@ export default {
                         .bind(uid, endpoint || '').run();
                     return json({ success: true }, 200, cors);
                 }
+            }
+
+            // ---------- WEB PUSH: LISTA DE SUSCRIPCIONES (reconciliación) ----------
+            // Devuelve los endpoints registrados del usuario (endpoint, device_id y
+            // fecha; nada sensible) para que el cliente reconcilie la suscripción del
+            // dispositivo actual sin borrar las de otros dispositivos.
+            if (path === '/api/push/subscriptions' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT endpoint, device_id, created_at FROM push_subscriptions WHERE user_id=?').bind(uid).all();
+                return json({ subscriptions: results || [] }, 200, cors);
             }
 
             // ---------- WEB PUSH: TEST (temporal, diagnóstico) ----------
