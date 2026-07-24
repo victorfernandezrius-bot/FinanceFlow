@@ -833,11 +833,20 @@ export default {
                 return json({ subscriptions: results || [] }, 200, cors);
             }
 
-            // ---------- WEB PUSH: TEST (temporal, diagnóstico) ----------
-            // Envía una notificación de prueba a TODAS las suscripciones del usuario
-            // autenticado y devuelve status/error por endpoint (para ver el fallo de Apple).
+            // ---------- WEB PUSH: TEST (diagnóstico / soporte) ----------
+            // Herramienta de soporte: envía una notificación de prueba a TODAS las
+            // suscripciones del usuario autenticado y devuelve, por endpoint, el host,
+            // el status HTTP y el error del proveedor (Apple/FCM). Sirve para verificar
+            // de un vistazo si las notificaciones llegan a un dispositivo concreto sin
+            // esperar al cron. Se dispara desde la app:
+            //   fetch(API_URL + '/push/test', { method:'POST',
+            //     headers:{ Authorization:'Bearer '+token } }).then(r=>r.json())
+            // Protegido con rate limit (5 llamadas por usuario cada 10 min) para que no
+            // pueda usarse como amplificador de envíos push.
             if (path === '/api/push/test' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `rl:pushtest:${uid}`, 5, 600))
+                    return json({ error: 'Demasiadas pruebas. Espera unos minutos e inténtalo de nuevo.' }, 429, cors);
                 const { results: testSubs } = await env.DB.prepare(
                     'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').bind(uid).all();
                 if (!testSubs.length)
