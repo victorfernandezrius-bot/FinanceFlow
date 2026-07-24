@@ -2060,13 +2060,10 @@
         </div>
     </div>
 
+    <!-- Service worker (PWA): registro + migración de scope /public/ -> / -->
+    <script src="/public/sw-register.js"></script>
+
     <script type="module">
-        // Service Worker Registration
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./public/sw.js')
-                .catch(err => console.log('SW:', err));
-        }
-        
         import Auth from './js/auth.js';
         import PlanLimits from './js/plan-limits.js';
         import AccountingManager from './js/accounting-manager.js';
@@ -2226,6 +2223,9 @@
                 safe(this.showNotificationsContainer, 'showNotificationsContainer');
 
                 this.showSection('dashboard');
+
+                // Migración push /public/ -> / (no bloquea; se autorreintenta si falla).
+                this.migratePushSubscription();
             }
             
             setupEventListeners() {
@@ -4390,9 +4390,9 @@
             }
 
             async _getPushRegistration() {
-                const reg = await navigator.serviceWorker.register('./public/sw.js');
-                if (!reg.active) await new Promise(res => setTimeout(res, 500));
-                return reg;
+                // El SW de raíz (/sw.js, scope /) ya lo registra sw-register.js.
+                await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+                return await navigator.serviceWorker.ready;
             }
 
             async renderPushToggle() {
@@ -4414,7 +4414,7 @@
 
                 let subscribed = false;
                 try {
-                    const reg = await navigator.serviceWorker.getRegistration('./public/sw.js');
+                    const reg = await navigator.serviceWorker.getRegistration('/');
                     const sub = reg ? await reg.pushManager.getSubscription() : null;
                     subscribed = !!sub;
                 } catch (e) { /* estado desconocido: tratar como desactivado */ }
@@ -4472,7 +4472,7 @@
 
             async disablePush() {
                 try {
-                    const reg = await navigator.serviceWorker.getRegistration('./public/sw.js');
+                    const reg = await navigator.serviceWorker.getRegistration('/');
                     const sub = reg ? await reg.pushManager.getSubscription() : null;
                     if (sub) {
                         const endpoint = sub.endpoint;
@@ -4494,7 +4494,73 @@
                     this.renderPushToggle();
                 }
             }
-            
+
+            // ── Migración de suscripción push del SW antiguo (/public/) al nuevo (/) ──
+            // sw-register.js dejó en localStorage 'ff_old_push_endpoint' con el endpoint
+            // de la suscripción vieja. Aquí, en contexto autenticado, resuscribimos sobre
+            // el SW de raíz y solo tras un POST correcto borramos la vieja del servidor,
+            // limpiamos localStorage y desregistramos el SW /public/. Si algo falla, no
+            // tocamos nada y se reintenta en la próxima carga. Nunca bloquea el arranque.
+            async migratePushSubscription() {
+                try {
+                    const oldEndpoint = localStorage.getItem('ff_old_push_endpoint');
+                    if (!oldEndpoint) return;                          // nada que migrar
+                    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+                    if (Notification.permission !== 'granted') return; // no resuscribir sin permiso
+                    if (!Auth.isPremium()) return;                     // POST /push/subscribe exige premium
+                    if (!window.VAPID_PUBLIC_KEY || window.VAPID_PUBLIC_KEY === 'PENDIENTE_VAPID_PUBLIC') return;
+
+                    // 4. Crear/obtener la suscripción sobre el registro de raíz (/sw.js).
+                    const reg = await navigator.serviceWorker.ready;
+                    let sub = await reg.pushManager.getSubscription();
+                    if (!sub) {
+                        sub = await reg.pushManager.subscribe({
+                            userVisibleOnly: true,
+                            applicationServerKey: this._urlBase64ToUint8Array(window.VAPID_PUBLIC_KEY)
+                        });
+                    }
+                    // Si la suscripción nueva resultara ser la misma que la vieja, no hay
+                    // migración real: limpiar la clave y salir.
+                    if (sub.endpoint === oldEndpoint) {
+                        localStorage.removeItem('ff_old_push_endpoint');
+                        return;
+                    }
+
+                    // Enviar la nueva al servidor.
+                    const postRes = await fetch(`${window.API_URL}/push/subscribe`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                        },
+                        body: JSON.stringify(sub.toJSON())
+                    });
+                    if (!postRes.ok) return; // 6. fallo: no borrar nada, reintento próxima carga
+
+                    // 5. Solo con POST OK: borrar la vieja del servidor, limpiar localStorage
+                    //    y desregistrar el SW antiguo /public/.
+                    await fetch(`${window.API_URL}/push/subscribe`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                        },
+                        body: JSON.stringify({ endpoint: oldEndpoint })
+                    });
+                    localStorage.removeItem('ff_old_push_endpoint');
+
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    for (const r of regs) {
+                        if (r.scope && r.scope.replace(/\/+$/, '').endsWith('/public')) {
+                            await r.unregister();
+                        }
+                    }
+                } catch (error) {
+                    // 6. No desregistrar, no borrar la clave: se reintenta en la próxima carga.
+                    console.error('migratePushSubscription:', error);
+                }
+            }
+
             showNotificationsUpgrade() {
                 const container = document.querySelector('#section-notifications .p-6');
                 container.innerHTML = `
