@@ -130,6 +130,8 @@ async function rateLimited(env, key, max, ttlSeconds) {
 // subscription: fila de push_subscriptions ({endpoint, p256dh, auth}).
 // payload: { title, body, url, tag }. Si la suscripción está muerta (404/410), se borra.
 async function sendPush(env, subscription, payload) {
+    let host = subscription.endpoint;
+    try { host = new URL(subscription.endpoint).host; } catch (_) {}
     try {
         const vapid = {
             subject: 'mailto:no-reply@contabilidadpersonal.com',
@@ -144,16 +146,23 @@ async function sendPush(env, subscription, payload) {
         const message = { data: JSON.stringify(payload), options: { ttl: 86400 } };
         const init = await buildPushPayload(message, sub, vapid);
         const res = await fetch(subscription.endpoint, init);
+        // Visibilidad del error real: registrar host, status y cuerpo cuando falla.
+        let body = '';
+        if (!res.ok) {
+            body = await res.text().catch(() => '');
+            console.error('sendPush FAIL:', host, res.status, body);
+        }
         if (res.status === 404 || res.status === 410) {
             // Suscripción muerta: eliminarla
             await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint=?')
                 .bind(subscription.endpoint).run();
-            return false;
+            return { ok: false, status: res.status, host, error: body || 'gone', deleted: true };
         }
-        return res.ok;
+        return { ok: res.ok, status: res.status, host, error: res.ok ? null : (body || null) };
     } catch (e) {
-        console.error('sendPush:', e);
-        return false;
+        const msg = (e && e.message) ? e.message : String(e);
+        console.error('sendPush EXCEPTION:', host, msg);
+        return { ok: false, status: 0, host, error: msg };
     }
 }
 
@@ -807,6 +816,28 @@ export default {
                         .bind(uid, endpoint || '').run();
                     return json({ success: true }, 200, cors);
                 }
+            }
+
+            // ---------- WEB PUSH: TEST (temporal, diagnóstico) ----------
+            // Envía una notificación de prueba a TODAS las suscripciones del usuario
+            // autenticado y devuelve status/error por endpoint (para ver el fallo de Apple).
+            if (path === '/api/push/test' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const { results: testSubs } = await env.DB.prepare(
+                    'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').bind(uid).all();
+                if (!testSubs.length)
+                    return json({ error: 'No hay suscripciones para este usuario' }, 404, cors);
+                const results = [];
+                for (const s of testSubs) {
+                    const r = await sendPush(env, s, {
+                        title: 'Prueba de notificación',
+                        body: 'Si ves esto, las notificaciones push funcionan.',
+                        url: '/dashboard.html',
+                        tag: 'push-test'
+                    });
+                    results.push({ host: r.host, status: r.status, ok: r.ok, error: r.error });
+                }
+                return json({ count: results.length, results }, 200, cors);
             }
 
             // ---------- FEEDBACK (valoración al mes de registro) ----------
