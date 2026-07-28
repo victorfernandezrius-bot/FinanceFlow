@@ -2410,8 +2410,8 @@
                             // Prefijar el mes actual como punto de partida
                             const now = new Date();
                             const first = new Date(now.getFullYear(), now.getMonth(), 1);
-                            fromEl.value = first.toISOString().slice(0, 10);
-                            toEl.value = now.toISOString().slice(0, 10);
+                            fromEl.value = this._formatDateLocal(first);
+                            toEl.value = this._formatDateLocal(now);
                         }
                         this.renderIncomeExpensesChart();
                     });
@@ -3073,9 +3073,19 @@
                 return neg ? -n : n;
             }
 
+            // Formatea una fecha en hora LOCAL como 'YYYY-MM-DD'. NO usa toISOString(),
+            // que convierte a UTC y desplaza el día en zonas horarias positivas (España
+            // UTC+1/+2), haciendo que p. ej. el día 1 de un mes salga como el día anterior.
+            _formatDateLocal(d) {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            }
+
             _parseDate(value) {
                 if (value == null || value === '') return '';
-                if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
+                if (value instanceof Date && !isNaN(value)) return this._formatDateLocal(value);
                 const s = String(value).trim();
                 let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
                 if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
@@ -6103,20 +6113,14 @@
                     );
                 }
                 
-                // Aplicar filtro por fecha desde
+                // Aplicar filtro por fecha desde (mov.fecha ya es 'YYYY-MM-DD', comparación directa)
                 if (dateFromFilter) {
-                    movements = movements.filter(mov => {
-                        const movDate = new Date(mov.fecha).toISOString().split('T')[0];
-                        return movDate >= dateFromFilter;
-                    });
+                    movements = movements.filter(mov => mov.fecha >= dateFromFilter);
                 }
-                
+
                 // Aplicar filtro por fecha hasta
                 if (dateToFilter) {
-                    movements = movements.filter(mov => {
-                        const movDate = new Date(mov.fecha).toISOString().split('T')[0];
-                        return movDate <= dateToFilter;
-                    });
+                    movements = movements.filter(mov => mov.fecha <= dateToFilter);
                 }
                 
                 // Renderizar la tabla filtrada
@@ -6232,8 +6236,8 @@
                     }
                     
                     if (fromDate && toDate) {
-                        dateFromInput.value = fromDate.toISOString().split('T')[0];
-                        dateToInput.value = toDate.toISOString().split('T')[0];
+                        dateFromInput.value = this._formatDateLocal(fromDate);
+                        dateToInput.value = this._formatDateLocal(toDate);
                     }
                 }
                 
@@ -6529,12 +6533,12 @@
                     
                     if (reportType === 'estado-resultados') {
                         // Estado de Resultados: mes actual por defecto
-                        filters.dateFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-                        filters.dateTo = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+                        filters.dateFrom = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+                        filters.dateTo = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
                         filters.period = 'current-month';
                     } else if (reportType === 'balance') {
                         // Balance: acumulado hasta hoy por defecto
-                        filters.dateTo = now.toISOString().split('T')[0];
+                        filters.dateTo = this._formatDateLocal(now);
                         filters.period = 'cumulative';
                     }
                 }
@@ -6894,8 +6898,8 @@
                     dateTo = filters.dateTo || '';
                 } else {
                     const now = new Date();
-                    dateFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-                    dateTo = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+                    dateFrom = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+                    dateTo = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
                 }
 
                 // Calcular totales del período
@@ -7404,8 +7408,8 @@
                 title.textContent = movement ? 'Editar Movimiento' : 'Nuevo Movimiento';
                 form.reset();
                 
-                // Establecer fecha actual por defecto
-                const today = new Date().toISOString().split('T')[0];
+                // Establecer fecha actual por defecto (en hora local, no UTC)
+                const today = this._formatDateLocal(new Date());
                 document.getElementById('movement-date').value = today;
                 
                 modal.classList.remove('hidden');
@@ -8221,7 +8225,7 @@
                 
                 // A. OBTENER INGRESO MENSUAL DEL MES ACTUAL (NO último mes)
                 const movements = this.accountingManager.getMovements();
-                const thisMonth = new Date().toISOString().substring(0, 7); // YYYY-MM formato
+                const thisMonth = this._formatDateLocal(new Date()).substring(0, 7); // YYYY-MM local (no UTC)
                 
                 // Calcular ingreso mensual basado en movimientos del MES ACTUAL
                 const monthlyIncome = movements
