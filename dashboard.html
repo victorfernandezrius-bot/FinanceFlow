@@ -2128,78 +2128,71 @@
                 }
             }
 
+            // Retorno del pago de Stripe:
+            //   success_url = .../dashboard.html?upgrade=success&session_id={CHECKOUT_SESSION_ID}
             checkPaymentSuccess() {
                 const urlParams = new URLSearchParams(window.location.search);
                 const sessionId = urlParams.get('session_id');
-                const success = urlParams.get('success');
-                const planType = urlParams.get('plan') || 'monthly';
-                
-                // Only activate Premium if we have a session ID from Stripe
-                if (success === 'true' && sessionId) {
-                    this.verifyStripePayment(sessionId, planType);
-                } else if (success === 'true') {
-                    // Fallback for existing users without session_id
-                    this.activatePremium(planType);
-                }
-                
-                // Clean URL regardless
-                if (success === 'true') {
-                    window.history.replaceState({}, document.title, window.location.pathname);
-                }
+                if (urlParams.get('upgrade') !== 'success' || !sessionId) return;
+                // Limpiar la URL cuanto antes para que no se re-dispare al recargar.
+                window.history.replaceState({}, document.title, window.location.pathname);
+                // Procesar en segundo plano (no bloquea la carga del dashboard).
+                this.handleUpgradeReturn(sessionId);
             }
-            
-            async verifyStripePayment(sessionId, planType) {
+
+            // Verifica el pago con Stripe (verify-session), refresca el usuario desde el
+            // servidor con reintentos (carrera con el webhook checkout.session.completed)
+            // y desbloquea Premium sin recargar. Nunca lanza: cualquier fallo deja el
+            // dashboard funcionando (el usuario siempre puede cerrar sesión y volver a entrar).
+            async handleUpgradeReturn(sessionId) {
                 try {
-                    // Verify payment status with Stripe
-                    const response = await fetch('/api/stripe/verify-session', {
+                    const resp = await fetch(`${window.API_URL}/stripe/verify-session`, {
                         method: 'POST',
                         headers: {
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${DataClient.getAuthToken()}`
                         },
-                        body: JSON.stringify({ 
-                            sessionId: sessionId,
-                            userId: this.currentUser.id 
-                        })
+                        body: JSON.stringify({ session_id: sessionId })
                     });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success && result.paid === true) {
-                        // Payment verified - activate Premium
-                        this.activatePremium(result.planType || planType);
-                        console.log('✅ Payment verified and Premium activated');
-                    } else {
-                        // Payment not verified
-                        console.error('❌ Payment verification failed:', result.error);
-                        this.showToast('Error al verificar el pago. Por favor contacta soporte.', 'error');
+                    const result = await resp.json().catch(() => ({}));
+                    if (!resp.ok || result.paid !== true) {
+                        console.warn('verify-session: pago no confirmado', result);
+                        return;
                     }
+
+                    // Pago confirmado por Stripe. Refrescar el usuario desde la BD,
+                    // reintentando por si el webhook aún no ha escrito plan='premium'.
+                    let fresh = null;
+                    for (let intento = 0; intento < 3; intento++) {
+                        fresh = await DataClient.getUser(this.currentUser.id).catch(() => null);
+                        if (fresh && fresh.plan === 'premium') break;
+                        if (intento < 2) await new Promise(res => setTimeout(res, 1500));
+                    }
+
+                    // Opción B: si la BD aún no refleja Premium (webhook con retraso),
+                    // como Stripe ya confirmó el pago activamos Premium en local; el
+                    // webhook consolidará la BD. Partimos del usuario del servidor si lo
+                    // tenemos (datos frescos) o del actual.
+                    const base = fresh || this.currentUser;
+                    const premiumUser = { ...base, plan: 'premium', isPremium: true, premium: true, trial_active: false };
+                    this._applyPremiumUser(premiumUser);
+                    this.showToast('¡Bienvenido a Premium! Ya tienes todas las funciones desbloqueadas.', 'success');
                 } catch (error) {
-                    console.error('Payment verification error:', error);
-                    // Fallback to simple activation for backwards compatibility
-                    this.activatePremium(planType);
+                    console.error('handleUpgradeReturn:', error);
+                    // No bloquea la carga del dashboard.
                 }
             }
 
-            activatePremium(planType = 'monthly') {
-                // Update user to premium status with correct fields
-                this.currentUser.isPremium = true;
-                this.currentUser.premium = true;
-                this.currentUser.premiumPlan = planType;
-                this.currentUser.plan = 'premium';
-                this.currentUser.trial_active = false;
-                
-                // Save updated user to localStorage
-                localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
-                
-                // Show success message
-                this.showToast('¡Bienvenido a Premium! Tu cuenta ha sido activada exitosamente.', 'success');
-                
-                // Refresh the UI to show premium features
-                setTimeout(() => {
-                    this.renderPlanBadge();
-                    this.renderUpgradeSection();
-                    this.renderImportStatementSection();
-                }, 1000);
+            // Adopta el usuario Premium como sesión activa (memoria + Auth + localStorage)
+            // y desbloquea la UI sin recargar.
+            _applyPremiumUser(user) {
+                this.currentUser = user;
+                if (Auth) Auth.currentUser = user;
+                DataClient.saveSession({ currentUser: user });
+                this.renderPlanBadge();
+                this.renderUpgradeSection();
+                this.renderImportStatementSection();
+                this.showSection(this.currentSection);
             }
 
             async init() {
