@@ -283,14 +283,14 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
                     superados.push({
                         type: 'presupuesto_superado',
                         notifKey: `presupuesto_superado:${g.nombre}:${monthStr}`,
-                        title: `Presupuesto de ${g.nombre} superado`,
+                        title: `⚠️ Presupuesto de ${g.nombre} superado`,
                         body: `Has superado tu presupuesto de ${g.nombre} en ${fmtEur(exceso)} € este mes (${fmtEur(gastado)} € de ${fmtEur(presupuesto)} €).`
                     });
                 } else if (pct >= 80) {
                     al80.push({
                         type: 'presupuesto_80',
                         notifKey: `presupuesto_80:${g.nombre}:${monthStr}`,
-                        title: `Presupuesto de ${g.nombre} al ${pct} %`,
+                        title: `📊 Presupuesto de ${g.nombre} al ${pct} %`,
                         body: `Llevas gastado el ${pct} % de tu presupuesto de ${g.nombre} este mes (${fmtEur(gastado)} € de ${fmtEur(presupuesto)} €).`
                     });
                 }
@@ -308,7 +308,7 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
                 costesFijos.push({
                     type: 'coste_fijo_proximo',
                     notifKey: `coste_fijo:${a.id}:${monthStr}`,
-                    title: `Próximo vencimiento: ${a.nombre}`,
+                    title: `📅 Próximo vencimiento: ${a.nombre}`,
                     body: `El día ${a.fixed_due_day} vence ${a.nombre}: ${fmtEur(a.fixed_monthly_amount || 0)} €.`
                 });
             }
@@ -329,7 +329,7 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
             resumen.push({
                 type: 'resumen_mensual',
                 notifKey: `resumen:${prevStr}`,
-                title: `Tu resumen de ${mesNombre}`,
+                title: `📈 Tu resumen de ${mesNombre}`,
                 body: `Balance de ${mesNombre}: ${fmtEur(prev.resultado)} € · Tasa de ahorro: ${tasaFmt} % · Índice Flow: ${flow}.`
             });
         }
@@ -344,7 +344,7 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
             inactividad.push({
                 type: 'sin_actividad',
                 notifKey: `sin_actividad:${now.getFullYear()}-W${week}`,
-                title: 'Te echamos de menos',
+                title: '👋 Te echamos de menos',
                 body: `Llevas ${dias} días sin registrar movimientos. Mantén tus finanzas al día.`
             });
         }
