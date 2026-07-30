@@ -24,6 +24,18 @@ class StripeCheckout {
 
     async redirectToCheckout(planType = 'monthly') {
         try {
+            // Refuerzo in-app: en los webviews de Instagram/Facebook/TikTok el checkout
+            // de Stripe falla. Detección PROPIA inline (no depende de que el banner haya
+            // cargado); window.FFInApp se usa solo como comodidad si ya existe.
+            let inApp = /Instagram|FBAN|FBAV|BytedanceWebview/i.test(navigator.userAgent || '');
+            if (window.FFInApp && typeof window.FFInApp.isInApp === 'function') {
+                inApp = inApp || window.FFInApp.isInApp();
+            }
+            if (inApp) {
+                alert('El pago no funciona dentro de Instagram. Abre la app en tu navegador para completar la suscripción.');
+                return;
+            }
+
             if (!this.stripe) {
                 throw new Error('Stripe no está inicializado correctamente');
             }
