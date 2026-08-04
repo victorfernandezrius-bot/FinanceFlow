@@ -361,8 +361,10 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
 // Para probar la degradación a "stale" en local, bájalo temporalmente a 10.
 const PRICE_TTL = 900;
 
-// Tipos de activo admitidos para cartera_activos.
-const TIPOS_ACTIVO = ['accion', 'etf', 'fondo', 'cripto'];
+// Tipos de activo admitidos. v3 amplía el enum con renta fija, derivados y liquidez.
+const TIPOS_ACTIVO = ['accion', 'etf', 'fondo', 'renta_fija', 'derivado', 'cripto', 'liquidez'];
+// Clases de renta variable (para betas/clasificación) y agrupación por clase.
+const TIPOS_RENTA_VARIABLE = ['accion', 'etf', 'fondo'];
 
 // Degradación a "stale" para un ticker: último precio conocido desde el backup
 // `price_bak:{ticker}` (sin TTL) o, si no existe, precio nulo. Nunca lanza error.
