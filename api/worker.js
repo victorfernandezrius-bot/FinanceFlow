@@ -13,10 +13,12 @@
 //              POST /api/stripe/verify-session
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
-//   Portfolio: POST /api/portfolio/operations, GET /api/portfolio/holdings,
+//   Portfolio: POST /api/portfolio/operations, GET /api/portfolio/holdings?estado=,
 //              POST /api/portfolio/close, GET /api/portfolio/journal,
 //              GET /api/portfolio/allocation, GET /api/portfolio/history,
 //              GET /api/portfolio/daily-return,
+//              GET/PUT /api/portfolio/instruments/:ticker, GET/PUT /api/portfolio/cash,
+//              GET /api/portfolio/risk|breakdown|kpis?benchmark=X,
 //              GET /api/portfolio/prices?tickers=AAPL,MSFT (batch a Twelve Data)
 //   UI:        GET /cartera.html (página standalone de la cartera)
 //
@@ -29,6 +31,8 @@ import { buildPushPayload } from '@block65/webcrypto-web-push';
 import { CARTERA_HTML } from './cartera-page.js';
 import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS }
     from './cartera-logic.js';
+import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
+    portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -504,6 +508,305 @@ async function getBenchmarkSeries(env, symbol, fechas) {
         }
     }
     return serie;
+}
+
+// ============================================================
+// v3 — Series históricas y fuente de benchmark (aisladas)
+// ============================================================
+
+// Series diarias de cierres por ticker con cache-first en KV (`series:{ticker}:{fecha}`,
+// TTL 24h: la serie diaria solo cambia una vez al día). UNA sola llamada batch a
+// Twelve Data para todos los que falten (misma técnica que getTickerPrices).
+async function getSeriesBatch(env, tickers) {
+    const today = new Date().toISOString().slice(0, 10);
+    const result = {};
+    const misses = [];
+    for (const t of tickers) {
+        const raw = await env.CACHE.get(`series:${t}:${today}`);
+        if (raw) { try { result[t] = JSON.parse(raw); continue; } catch { /* refetch */ } }
+        misses.push(t);
+    }
+    if (!misses.length) return result;
+    try {
+        const apiKey = env.TWELVE_DATA_API_KEY;
+        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
+        const sym = misses.map(encodeURIComponent).join(',');
+        const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${sym}`
+            + `&interval=1day&outputsize=${RISK_WINDOW}&order=ASC&apikey=${apiKey}`);
+        const d = await r.json();
+        for (const t of misses) {
+            let values = null;
+            if (misses.length === 1 && Array.isArray(d.values)) values = d.values;
+            else if (d[t] && Array.isArray(d[t].values)) values = d[t].values;
+            if (values) {
+                const serie = values
+                    .map(v => ({ fecha: (v.datetime || '').slice(0, 10), close: parseFloat(v.close) }))
+                    .filter(x => x.fecha && isFinite(x.close));
+                result[t] = serie;
+                await env.CACHE.put(`series:${t}:${today}`, JSON.stringify(serie), { expirationTtl: 86400 });
+            }
+        }
+    } catch (e) { /* best-effort: se devuelve lo cacheado */ }
+    return result;
+}
+
+// Símbolos de benchmark en Stooq (CSV, sin API key). Fuente AISLADA a propósito
+// para poder cambiarla (Twelve Data anuncia sus índices como "coming soon").
+const STOOQ_SYMBOLS = {
+    SP500: '^spx', NASDAQ100: '^ndq', DOWJONES: '^dji',
+    IBEX35: '^ibex', CAC40: '^cac', DAX: '^dax', FTSE100: '^ukx'
+};
+
+// Cierres diarios del benchmark [{fecha, close}] desde Stooq, con cache-first en KV.
+async function getBenchmarkDailySeries(env, benchKey) {
+    const today = new Date().toISOString().slice(0, 10);
+    const cacheKey = `series:BENCH_${benchKey}:${today}`;
+    const cached = await env.CACHE.get(cacheKey);
+    if (cached) { try { return JSON.parse(cached); } catch { /* refetch */ } }
+    const serie = await fetchBenchmarkClosesStooq(benchKey);
+    if (serie && serie.length) await env.CACHE.put(cacheKey, JSON.stringify(serie), { expirationTtl: 86400 });
+    return serie || [];
+}
+
+async function fetchBenchmarkClosesStooq(benchKey) {
+    const sym = STOOQ_SYMBOLS[benchKey];
+    if (!sym) return [];
+    try {
+        const r = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&i=d`);
+        if (!r.ok) return [];
+        const csv = await r.text();
+        const lines = csv.trim().split('\n');
+        if (lines.length < 2) return [];
+        const out = [];
+        for (let i = 1; i < lines.length; i++) {
+            const c = lines[i].split(',');           // Date,Open,High,Low,Close,Volume
+            const fecha = c[0], close = parseFloat(c[4]);
+            if (fecha && isFinite(close)) out.push({ fecha, close });
+        }
+        return out.slice(-RISK_WINDOW);
+    } catch (e) { return []; }
+}
+
+// Construye el payload de riesgo (matriz var-cov, betas, volatilidades, clasificación,
+// beta y volatilidad de cartera) a partir de las series y los pesos (tanto por uno).
+async function computeRiskPayload(env, benchKey, positions, weightsByTicker) {
+    const tickers = positions.map(p => p.ticker);
+    const seriesAssets = tickers.length ? await getSeriesBatch(env, tickers) : {};
+    const benchSerie = await getBenchmarkDailySeries(env, benchKey);
+    const hasBench = benchSerie && benchSerie.length > 0;
+
+    const withData = tickers.filter(t => seriesAssets[t] && seriesAssets[t].length);
+    const seriesByKey = {};
+    withData.forEach(t => { seriesByKey[t] = seriesAssets[t]; });
+    if (hasBench) seriesByKey['__BENCH__'] = benchSerie;
+    const keys = hasBench ? [...withData, '__BENCH__'] : [...withData];
+    const { dates, returns } = keys.length ? alignedReturns(seriesByKey, keys) : { dates: [], returns: {} };
+
+    const betas = {}, volatilidades = {}, clasificacion = {};
+    const benchReturns = returns['__BENCH__'] || [];
+    for (const t of withData) {
+        const rt = returns[t] || [];
+        volatilidades[t] = rt.length >= MIN_SESSIONS ? annualizedVolatility(rt) : null;
+        if (hasBench && rt.length >= MIN_SESSIONS && benchReturns.length >= MIN_SESSIONS) {
+            const b = beta(rt, benchReturns);
+            betas[t] = b; clasificacion[t] = classifyBeta(b);
+        } else { betas[t] = null; clasificacion[t] = null; }
+    }
+    const returnsByTicker = {};
+    withData.forEach(t => { returnsByTicker[t] = returns[t] || []; });
+    const { tickers: sufTickers, matriz } = covarianceMatrix(returnsByTicker, withData);
+    const insuficientes = tickers.filter(t => !sufTickers.includes(t)); // incluye los sin serie
+    const portfolio_volatilidad = portfolioVolatility(weightsByTicker, matriz, sufTickers);
+    const portfolio_beta = portfolioBeta(weightsByTicker, betas);
+
+    return {
+        benchmark: benchKey, fecha_calculo: new Date().toISOString().slice(0, 10),
+        sesiones: dates.length, benchmark_disponible: hasBench,
+        tickers: sufTickers, insuficientes, matriz, betas, volatilidades, clasificacion,
+        portfolio_beta, portfolio_volatilidad
+    };
+}
+
+// ---------- Normalizadores v3 ----------
+function _normalizeInstrument(r) {
+    if (!r) return null;
+    const num = v => v == null ? null : Number(v);
+    return {
+        ticker: r.ticker, nombre: r.nombre ?? null, tipo_activo: r.tipo_activo, sector: r.sector ?? null,
+        rf_tipo_interes: num(r.rf_tipo_interes), rf_cupon: num(r.rf_cupon), rf_frecuencia_cupon: r.rf_frecuencia_cupon ?? null,
+        rf_vencimiento: r.rf_vencimiento ?? null, rf_nominal: num(r.rf_nominal),
+        der_tipo: r.der_tipo ?? null, der_vencimiento: r.der_vencimiento ?? null,
+        der_subyacente_cobertura: r.der_subyacente_cobertura ?? null, der_tipo_opcion: r.der_tipo_opcion ?? null,
+        der_prima: num(r.der_prima)
+    };
+}
+
+// Interés devengado: saldo × ((1 + i/m)^(m·t) − 1). m = capitalizaciones/año,
+// t = años desde fecha_inicio.
+function _accruedInterest(c) {
+    const saldo = Number(c.saldo) || 0;
+    const remunerada = (c.remunerada === 1 || c.remunerada === true);
+    const i = (Number(c.tipo_interes_anual) || 0) / 100;
+    if (!remunerada || i <= 0 || !c.fecha_inicio) return 0;
+    const mMap = { anual: 1, semestral: 2, trimestral: 4, mensual: 12, diaria: 365 };
+    const m = mMap[c.capitalizacion] || 1;
+    const t = (Date.now() - new Date(c.fecha_inicio).getTime()) / (365.25 * 86400000);
+    if (!(t > 0)) return 0;
+    return saldo * (Math.pow(1 + i / m, m * t) - 1);
+}
+function _normalizeCash(c) {
+    return {
+        moneda: c.moneda, saldo: Number(c.saldo) || 0,
+        remunerada: (c.remunerada === 1 || c.remunerada === true),
+        tipo_interes_anual: Number(c.tipo_interes_anual) || 0,
+        capitalizacion: c.capitalizacion || 'anual',
+        fecha_inicio: c.fecha_inicio || null,
+        interes_devengado: _accruedInterest(c)
+    };
+}
+
+// Contexto de cartera compartido por risk/breakdown/kpis: posiciones con valor de
+// mercado, liquidez (con interés devengado), instrumentos y pesos (incluida la
+// liquidez en el total). weightsInvested excluye el efectivo.
+async function _carteraContext(env, uid) {
+    const { results: ops } = await env.DB.prepare(
+        'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+    const positions = openPositions(ops);
+    const tickers = [...new Set(positions.map(p => p.ticker))];
+    const prices = tickers.length ? await getTickerPrices(tickers, env) : {};
+    const { results: cashRows } = await env.DB.prepare(
+        'SELECT * FROM cartera_liquidez WHERE usuario_id=?').bind(uid).all();
+    const { results: instrRows } = await env.DB.prepare(
+        'SELECT * FROM cartera_instrumentos WHERE usuario_id=?').bind(uid).all();
+    const instrMap = {}; instrRows.forEach(r => { instrMap[r.ticker] = _normalizeInstrument(r); });
+
+    let marketValue = 0;
+    const posValues = positions.map(p => {
+        const pr = prices[p.ticker];
+        const price = pr && pr.price != null && isFinite(pr.price) ? Number(pr.price) : null;
+        // Sin precio de mercado (típico en renta fija / derivados: no hay feed) se
+        // valora a coste (precio_medio × cantidad) para que la posición cuente en
+        // los pesos; se marca con valor_estimado_coste para poder señalarlo en la UI.
+        const valorEsCoste = price == null;
+        const valor = price != null ? price * p.cantidad_abierta : p.precio_medio * p.cantidad_abierta;
+        marketValue += valor;
+        return { ...p, precio_actual: price, valor, valor_estimado_coste: valorEsCoste,
+                 stale: pr ? !!pr.stale : true, instrumento: instrMap[p.ticker] || null };
+    });
+    let cashTotal = 0;
+    const cash = cashRows.map(c => { const n = _normalizeCash(c); cashTotal += n.saldo + n.interes_devengado; return n; });
+    const totalValue = marketValue + cashTotal;
+
+    const weightsTotal = {}, weightsInvested = {};
+    posValues.forEach(p => {
+        weightsTotal[p.ticker] = totalValue > 0 && p.valor != null ? p.valor / totalValue : 0;
+        weightsInvested[p.ticker] = marketValue > 0 && p.valor != null ? p.valor / marketValue : 0;
+    });
+    return { ops, positions: posValues, prices, cash, cashTotal, instrMap, marketValue, totalValue, weightsTotal, weightsInvested };
+}
+
+// Riesgo desde caché (si es de hoy) o recalculado y guardado.
+async function _riskCachedOrCompute(env, uid, benchKey, ctx) {
+    const today = new Date().toISOString().slice(0, 10);
+    const cached = await env.DB.prepare(
+        'SELECT payload, fecha_calculo FROM cartera_riesgo_cache WHERE usuario_id=? AND benchmark=?')
+        .bind(uid, benchKey).first();
+    if (cached && cached.fecha_calculo === today) {
+        try { return JSON.parse(cached.payload); } catch { /* recompute */ }
+    }
+    const payload = await computeRiskPayload(env, benchKey, ctx.positions, ctx.weightsTotal);
+    await env.DB.prepare(
+        `INSERT INTO cartera_riesgo_cache (usuario_id,benchmark,fecha_calculo,payload) VALUES (?,?,?,?)
+         ON CONFLICT(usuario_id,benchmark) DO UPDATE SET fecha_calculo=excluded.fecha_calculo, payload=excluded.payload`)
+        .bind(uid, benchKey, today, JSON.stringify(payload)).run();
+    return payload;
+}
+
+// Fuerza que la suma de todos los pesos por clase (+ liquidez) sea exactamente 100%,
+// absorbiendo el residuo de redondeo en la partida mayor (requisito de cuadre).
+function _forceSum100(clases) {
+    const items = [];
+    for (const k of Object.keys(clases)) for (const it of clases[k]) items.push(it);
+    if (!items.length) return;
+    const sum = items.reduce((a, it) => a + (it.peso_pct || 0), 0);
+    const resid = 100 - sum;
+    if (Math.abs(resid) < 1e-9) return;
+    let max = items[0];
+    for (const it of items) if ((it.peso_pct || 0) > (max.peso_pct || 0)) max = it;
+    max.peso_pct = (max.peso_pct || 0) + resid;
+}
+
+// Agrupa las posiciones por clase de activo con sus campos específicos + pesos.
+function _buildBreakdown(ctx, risk) {
+    const total = ctx.totalValue;
+    const wpct = v => (total > 0 && v != null) ? v / total * 100 : 0;
+    const betas = (risk && risk.betas) || {}, clasi = (risk && risk.clasificacion) || {};
+    const rv = [], rf = [], der = [], cripto = [];
+    ctx.positions.forEach(p => {
+        const ins = p.instrumento || {};
+        const base = {
+            ticker: p.ticker, nombre: ins.nombre || null, unidades: p.cantidad_abierta,
+            peso_pct: wpct(p.valor), peso_invertido_pct: ctx.marketValue > 0 && p.valor != null ? p.valor / ctx.marketValue * 100 : 0,
+            valor: p.valor, tipo_activo: p.tipo_activo, precio_medio: p.precio_medio, precio_actual: p.precio_actual, stale: p.stale
+        };
+        if (TIPOS_RENTA_VARIABLE.includes(p.tipo_activo)) {
+            rv.push({ ...base, beta: betas[p.ticker] ?? null, clasificacion: clasi[p.ticker] ?? null, sector: ins.sector || null });
+        } else if (p.tipo_activo === 'renta_fija') {
+            let dur = null;
+            if (ins.rf_vencimiento && ins.rf_nominal) {
+                dur = bondDuration({ cupon_pct: ins.rf_cupon, frecuencia: ins.rf_frecuencia_cupon,
+                    vencimiento: ins.rf_vencimiento, nominal: ins.rf_nominal, ytm_pct: ins.rf_tipo_interes });
+            }
+            rf.push({ ...base, tipo_interes: ins.rf_tipo_interes ?? null, cupon: ins.rf_cupon ?? null,
+                frecuencia_cupon: ins.rf_frecuencia_cupon ?? null, vencimiento: ins.rf_vencimiento ?? null, nominal: ins.rf_nominal ?? null,
+                duracion_macaulay: dur ? dur.macaulay : null, duracion_modificada: dur ? dur.modificada : null });
+        } else if (p.tipo_activo === 'derivado') {
+            der.push({ ...base, der_tipo: ins.der_tipo ?? null, der_vencimiento: ins.der_vencimiento ?? null,
+                der_subyacente_cobertura: ins.der_subyacente_cobertura ?? null, der_tipo_opcion: ins.der_tipo_opcion ?? null, der_prima: ins.der_prima ?? null });
+        } else if (p.tipo_activo === 'cripto') {
+            cripto.push({ ticker: p.ticker, tipo_activo: 'cripto', peso_pct: wpct(p.valor), valor: p.valor });
+        } else {
+            rv.push({ ...base, beta: null, clasificacion: null, sector: ins.sector || null });
+        }
+    });
+    const liquidez = ctx.cash.map(c => ({ ...c, peso_pct: wpct(c.saldo + c.interes_devengado) }));
+    const clases = { renta_variable: rv, renta_fija: rf, derivados: der, cripto, liquidez };
+    _forceSum100(clases);
+    return { benchmark: risk ? risk.benchmark : null, total, valor_posiciones: ctx.marketValue, cashTotal: ctx.cashTotal, clases };
+}
+
+// KPIs agregados de la cartera.
+function _buildKpis(ctx, risk, journal) {
+    const total = ctx.totalValue, marketValue = ctx.marketValue, cashTotal = ctx.cashTotal;
+    let coste = 0, pnlNoReal = 0;
+    ctx.positions.forEach(p => {
+        const base = p.precio_medio * p.cantidad_abierta;
+        coste += base;
+        if (p.valor != null) pnlNoReal += p.valor - base;
+    });
+    const clsW = { renta_variable: 0, renta_fija: 0, derivados: 0, cripto: 0, liquidez: total > 0 ? cashTotal / total * 100 : 0 };
+    ctx.positions.forEach(p => {
+        const w = total > 0 && p.valor != null ? p.valor / total * 100 : 0;
+        if (TIPOS_RENTA_VARIABLE.includes(p.tipo_activo)) clsW.renta_variable += w;
+        else if (p.tipo_activo === 'renta_fija') clsW.renta_fija += w;
+        else if (p.tipo_activo === 'derivado') clsW.derivados += w;
+        else if (p.tipo_activo === 'cripto') clsW.cripto += w;
+        else clsW.renta_variable += w;
+    });
+    const pnlReal = journal.totales.beneficio_total;
+    return {
+        valor_mercado_total: total,
+        valor_posiciones: marketValue,
+        coste_total_invertido: coste,
+        pnl_no_realizado: pnlNoReal,
+        pnl_realizado: pnlReal,
+        rentabilidad_total_pct: coste > 0 ? (pnlNoReal + pnlReal) / coste * 100 : null,
+        beta_cartera: risk ? risk.portfolio_beta : null,
+        volatilidad_anualizada_pct: risk && risk.portfolio_volatilidad != null ? risk.portfolio_volatilidad * 100 : null,
+        comisiones_totales: journal.totales.comisiones_totales,
+        pct_liquidez: total > 0 ? cashTotal / total * 100 : 0,
+        peso_por_clase: clsW
+    };
 }
 
 // ============================================================
@@ -1233,12 +1536,18 @@ export default {
                               posicion: agg ? positionFrom(agg) : null }, 201, cors);
             }
 
-            // GET /api/portfolio/holdings — posiciones abiertas agregadas del histórico.
+            // GET /api/portfolio/holdings?estado=abiertas|cerradas|todas — posiciones agregadas.
             if (path === '/api/portfolio/holdings' && method === 'GET') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const { results } = await env.DB.prepare(
                     'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
-                return json(openPositions(results), 200, cors);
+                const estado = url.searchParams.get('estado') || 'abiertas';
+                const todas = [...aggregate(results).values()].map(positionFrom);
+                let out;
+                if (estado === 'cerradas') out = todas.filter(p => p.cantidad_abierta <= EPS);
+                else if (estado === 'todas') out = todas;
+                else out = todas.filter(p => p.cantidad_abierta > EPS);
+                return json(out, 200, cors);
             }
 
             // POST /api/portfolio/close — cierra la posición abierta de un ticker (venta total).
@@ -1376,6 +1685,106 @@ export default {
                               valor_actual, valor_anterior, valor_inicial, fecha_actual, fecha_inicial }, 200, cors);
             }
 
+            // GET/PUT /api/portfolio/instruments/:ticker — atributos manuales del instrumento.
+            const instrMatch = path.match(/^\/api\/portfolio\/instruments\/(.+)$/);
+            if (instrMatch) {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const ticker = decodeURIComponent(instrMatch[1].split('?')[0]).toUpperCase();
+                if (method === 'GET') {
+                    const row = await env.DB.prepare(
+                        'SELECT * FROM cartera_instrumentos WHERE usuario_id=? AND ticker=?').bind(uid, ticker).first();
+                    return json(_normalizeInstrument(row) || { ticker }, 200, cors);
+                }
+                if (method === 'PUT') {
+                    const b = await request.json();
+                    if (b.tipo_activo && !TIPOS_ACTIVO.includes(b.tipo_activo)) {
+                        return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
+                    }
+                    const n = v => (v == null || v === '') ? null : Number(v);
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_instrumentos
+                            (usuario_id,ticker,nombre,tipo_activo,sector,rf_tipo_interes,rf_cupon,rf_frecuencia_cupon,
+                             rf_vencimiento,rf_nominal,der_tipo,der_vencimiento,der_subyacente_cobertura,der_tipo_opcion,der_prima)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         ON CONFLICT(usuario_id,ticker) DO UPDATE SET nombre=excluded.nombre, tipo_activo=excluded.tipo_activo,
+                             sector=excluded.sector, rf_tipo_interes=excluded.rf_tipo_interes, rf_cupon=excluded.rf_cupon,
+                             rf_frecuencia_cupon=excluded.rf_frecuencia_cupon, rf_vencimiento=excluded.rf_vencimiento,
+                             rf_nominal=excluded.rf_nominal, der_tipo=excluded.der_tipo, der_vencimiento=excluded.der_vencimiento,
+                             der_subyacente_cobertura=excluded.der_subyacente_cobertura, der_tipo_opcion=excluded.der_tipo_opcion,
+                             der_prima=excluded.der_prima`)
+                        .bind(uid, ticker, b.nombre ?? null, b.tipo_activo ?? 'accion', b.sector ?? null,
+                              n(b.rf_tipo_interes), n(b.rf_cupon), b.rf_frecuencia_cupon ?? null, b.rf_vencimiento ?? null, n(b.rf_nominal),
+                              b.der_tipo ?? null, b.der_vencimiento ?? null, b.der_subyacente_cobertura ?? null,
+                              b.der_tipo_opcion ?? null, n(b.der_prima)).run();
+                    const row = await env.DB.prepare(
+                        'SELECT * FROM cartera_instrumentos WHERE usuario_id=? AND ticker=?').bind(uid, ticker).first();
+                    return json(_normalizeInstrument(row), 200, cors);
+                }
+            }
+
+            // GET/PUT /api/portfolio/cash — liquidez con interés devengado calculado.
+            if (path === '/api/portfolio/cash') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (method === 'GET') {
+                    const { results } = await env.DB.prepare(
+                        'SELECT * FROM cartera_liquidez WHERE usuario_id=?').bind(uid).all();
+                    const rows = results.map(_normalizeCash);
+                    const total = rows.reduce((a, c) => a + c.saldo + c.interes_devengado, 0);
+                    return json({ cash: rows, total }, 200, cors);
+                }
+                if (method === 'PUT') {
+                    const b = await request.json();
+                    const moneda = (b.moneda || 'EUR').toUpperCase();
+                    const saldo = Number(b.saldo);
+                    if (!isFinite(saldo) || saldo < 0) return json({ error: 'saldo debe ser un número >= 0' }, 400, cors);
+                    const tin = b.tipo_interes_anual != null ? Number(b.tipo_interes_anual) : 0;
+                    if (!isFinite(tin) || tin < 0) return json({ error: 'tipo_interes_anual no puede ser negativo' }, 400, cors);
+                    const capOK = ['anual', 'semestral', 'trimestral', 'mensual', 'diaria'];
+                    const cap = capOK.includes(b.capitalizacion) ? b.capitalizacion : 'anual';
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_liquidez (usuario_id,moneda,saldo,remunerada,tipo_interes_anual,capitalizacion,fecha_inicio)
+                         VALUES (?,?,?,?,?,?,?)
+                         ON CONFLICT(usuario_id,moneda) DO UPDATE SET saldo=excluded.saldo, remunerada=excluded.remunerada,
+                             tipo_interes_anual=excluded.tipo_interes_anual, capitalizacion=excluded.capitalizacion,
+                             fecha_inicio=excluded.fecha_inicio`)
+                        .bind(uid, moneda, saldo, b.remunerada ? 1 : 0, tin, cap, b.fecha_inicio ?? null).run();
+                    const row = await env.DB.prepare(
+                        'SELECT * FROM cartera_liquidez WHERE usuario_id=? AND moneda=?').bind(uid, moneda).first();
+                    return json(_normalizeCash(row), 200, cors);
+                }
+            }
+
+            // GET /api/portfolio/risk?benchmark=X — matriz var-cov, betas, clasificación, volatilidades.
+            if (path === '/api/portfolio/risk' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const ctx = await _carteraContext(env, uid);
+                const payload = await _riskCachedOrCompute(env, uid, benchKey, ctx);
+                return json(payload, 200, cors);
+            }
+
+            // GET /api/portfolio/breakdown?benchmark=X — posiciones agrupadas por clase de activo.
+            if (path === '/api/portfolio/breakdown' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const ctx = await _carteraContext(env, uid);
+                const risk = await _riskCachedOrCompute(env, uid, benchKey, ctx);
+                const bd = _buildBreakdown(ctx, risk);
+                return json(bd, 200, cors);
+            }
+
+            // GET /api/portfolio/kpis?benchmark=X — KPIs agregados.
+            if (path === '/api/portfolio/kpis' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const ctx = await _carteraContext(env, uid);
+                const risk = await _riskCachedOrCompute(env, uid, benchKey, ctx);
+                const { results: allOps } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
+                const journal = buildJournal(allOps);
+                return json(_buildKpis(ctx, risk, journal), 200, cors);
+            }
+
             if (path === '/api/portfolio/prices' && method === 'GET') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const raw = url.searchParams.get('tickers') || '';
@@ -1497,6 +1906,29 @@ export default {
             }
         } catch (e) {
             console.error('Cron cartera snapshot:', e);
+        }
+
+        // ── Recalcular caché de riesgo por usuario con posiciones (benchmark por defecto) ──
+        // Así el primer usuario del día no paga el coste de calcular toda la matriz.
+        try {
+            const DEFAULT_BENCH = 'SP500';
+            const { results: carteraUsers } = await env.DB.prepare(
+                'SELECT DISTINCT usuario_id FROM cartera_operaciones').all();
+            for (const cu of carteraUsers) {
+                try {
+                    const ctx = await _carteraContext(env, cu.usuario_id);
+                    if (!ctx.positions.length) continue;
+                    const payload = await computeRiskPayload(env, DEFAULT_BENCH, ctx.positions, ctx.weightsTotal);
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_riesgo_cache (usuario_id,benchmark,fecha_calculo,payload) VALUES (?,?,?,?)
+                         ON CONFLICT(usuario_id,benchmark) DO UPDATE SET fecha_calculo=excluded.fecha_calculo, payload=excluded.payload`)
+                        .bind(cu.usuario_id, DEFAULT_BENCH, now.toISOString().slice(0, 10), JSON.stringify(payload)).run();
+                } catch (e) {
+                    console.error('Cron riesgo, usuario', cu.usuario_id, ':', e);
+                }
+            }
+        } catch (e) {
+            console.error('Cron riesgo:', e);
         }
 
         // ── Solicitud de valoración al mes de registro (email, una sola vez) ──

@@ -181,3 +181,147 @@ export function computeAllocation(positions, priceMap) {
     }
     return { items, total };
 }
+
+// ============================================================
+// v3 — Motor de riesgo (funciones puras, testeables sin red ni BD)
+// ============================================================
+
+// Ventana y umbrales (constantes nombradas, no incrustadas en la lógica).
+export const RISK_WINDOW = 252;         // sesiones de rendimientos diarios
+export const TRADING_DAYS = 252;        // factor de anualización
+export const MIN_SESSIONS = 60;         // mínimo de sesiones para calcular beta/varianza
+export const BETA_AGRESIVA = 1.1;       // β > 1.1  -> agresiva
+export const BETA_DEFENSIVA = 0.9;      // β < 0.9  -> defensiva  (entre medias: igual al benchmark)
+
+// Rendimientos diarios logarítmicos a partir de una serie de cierres ascendente.
+export function dailyLogReturns(closes) {
+    const out = [];
+    for (let i = 1; i < closes.length; i++) {
+        const a = Number(closes[i - 1]), b = Number(closes[i]);
+        if (a > 0 && b > 0) out.push(Math.log(b / a));
+    }
+    return out;
+}
+
+function mean(a) { return a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0; }
+// Varianza y covarianza muestrales (divisor n-1), convención financiera estándar.
+export function sampleVariance(a) {
+    if (a.length < 2) return 0;
+    const m = mean(a); let s = 0;
+    for (const x of a) s += (x - m) * (x - m);
+    return s / (a.length - 1);
+}
+export function sampleCovariance(a, b) {
+    const n = Math.min(a.length, b.length);
+    if (n < 2) return 0;
+    const ma = mean(a.slice(0, n)), mb = mean(b.slice(0, n));
+    let s = 0;
+    for (let i = 0; i < n; i++) s += (a[i] - ma) * (b[i] - mb);
+    return s / (n - 1);
+}
+
+// Alinea series por FECHA (intersección de fechas) y devuelve los rendimientos
+// logarítmicos de cada clave sobre el conjunto de fechas común, en orden.
+// seriesByKey: { clave: [{fecha, close}] } (fechas ascendentes).
+export function alignedReturns(seriesByKey, keys) {
+    // Fechas comunes a todas las claves con serie no vacía.
+    let common = null;
+    for (const k of keys) {
+        const s = seriesByKey[k];
+        if (!s || !s.length) { return { dates: [], returns: {} }; }
+        const set = new Set(s.map(p => p.fecha));
+        common = common == null ? set : new Set([...common].filter(f => set.has(f)));
+    }
+    const dates = [...(common || [])].sort();
+    const returns = {};
+    for (const k of keys) {
+        const map = new Map(seriesByKey[k].map(p => [p.fecha, Number(p.close)]));
+        const closes = dates.map(f => map.get(f));
+        returns[k] = dailyLogReturns(closes);
+    }
+    return { dates, returns };
+}
+
+export function beta(rAsset, rBench) {
+    const vB = sampleVariance(rBench);
+    if (vB === 0) return null;
+    return sampleCovariance(rAsset, rBench) / vB;
+}
+
+export function classifyBeta(b) {
+    if (b == null || !isFinite(b)) return null;
+    if (b > BETA_AGRESIVA) return 'agresiva';
+    if (b < BETA_DEFENSIVA) return 'defensiva';
+    return 'igual_benchmark';
+}
+
+// Volatilidad anualizada de una serie de rendimientos diarios.
+export function annualizedVolatility(returns) {
+    return Math.sqrt(sampleVariance(returns) * TRADING_DAYS);
+}
+
+// Matriz de varianzas-covarianzas ANUALIZADA (×252) entre los tickers con
+// histórico suficiente (>= MIN_SESSIONS rendimientos). Los que no llegan se
+// devuelven en `insuficientes` y NO entran en la matriz (nunca un 0 falso).
+// returnsByTicker: { ticker: [r...] }.
+export function covarianceMatrix(returnsByTicker, tickers) {
+    const suf = tickers.filter(t => (returnsByTicker[t] || []).length >= MIN_SESSIONS);
+    const insuf = tickers.filter(t => (returnsByTicker[t] || []).length < MIN_SESSIONS);
+    const matriz = suf.map(ti => suf.map(tj =>
+        sampleCovariance(returnsByTicker[ti], returnsByTicker[tj]) * TRADING_DAYS));
+    return { tickers: suf, insuficientes: insuf, matriz };
+}
+
+// Volatilidad de la cartera: σ_p = √(wᵀ·Σ·w). weightsByTicker en tanto por uno.
+export function portfolioVolatility(weightsByTicker, matriz, tickers) {
+    const w = tickers.map(t => Number(weightsByTicker[t]) || 0);
+    let s = 0;
+    for (let i = 0; i < tickers.length; i++)
+        for (let j = 0; j < tickers.length; j++)
+            s += w[i] * matriz[i][j] * w[j];
+    return s > 0 ? Math.sqrt(s) : 0;
+}
+
+// Beta de la cartera: media de las betas individuales ponderada por peso
+// (solo activos con beta calculable). Normaliza por la suma de esos pesos.
+export function portfolioBeta(weightsByTicker, betasByTicker) {
+    let num = 0, den = 0;
+    for (const t of Object.keys(betasByTicker)) {
+        const b = betasByTicker[t];
+        if (b == null || !isFinite(b)) continue;
+        const w = Number(weightsByTicker[t]) || 0;
+        num += w * b; den += w;
+    }
+    return den > 0 ? num / den : null;
+}
+
+// Duración de un bono (renta fija).
+// Macaulay D = Σ_k [ t_k · PV(CF_k) ] / Precio, con PV(CF_k)=CF_k/(1+y/m)^k,
+//   t_k = k/m (años), m = pagos de cupón al año, y = YTM (tipo de interés) anual.
+// CF_k = cupón periódico = nominal·(cupón%/100)/m, y en el último período + nominal.
+// Duración modificada = Macaulay / (1 + y/m). Devuelve años.
+export function bondDuration({ cupon_pct, frecuencia, vencimiento, nominal, ytm_pct, fechaRef }) {
+    const mMap = { anual: 1, semestral: 2, trimestral: 4 };
+    const m = mMap[frecuencia] || 1;
+    const N = Number(nominal) || 0;
+    const y = (Number(ytm_pct) || 0) / 100;
+    const cupon = N * ((Number(cupon_pct) || 0) / 100) / m;
+    const ref = fechaRef ? new Date(fechaRef) : new Date();
+    const venc = new Date(vencimiento);
+    const years = (venc - ref) / (365.25 * 86400000);
+    if (!(years > 0) || N <= 0) return null;
+    const n = Math.max(1, Math.round(years * m));
+    const rate = y / m;
+    let price = 0, weighted = 0;
+    for (let k = 1; k <= n; k++) {
+        let cf = cupon;
+        if (k === n) cf += N;
+        const pv = cf / Math.pow(1 + rate, k);
+        price += pv;
+        weighted += (k / m) * pv;
+    }
+    if (price <= 0) return null;
+    const macaulay = weighted / price;
+    const modificada = macaulay / (1 + rate);
+    return { macaulay, modificada, precio: price };
+}
