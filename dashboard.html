@@ -8173,28 +8173,28 @@
             
             loadExistingAutocontrolPlan() {
                 const planData = this._autocontrolPlan;
-                const assocData0 = this.accountAssociations;
-                
+
                 if (planData) {
                     document.getElementById('income-account-select').value = planData.incomeAccountId;
                     document.getElementById('savings-percent').value = planData.percentages.savings;
                     document.getElementById('investment-percent').value = planData.percentages.investment;
                     document.getElementById('needs-percent').value = planData.percentages.needs;
                     document.getElementById('leisure-percent').value = planData.percentages.leisure;
-                    
+
                     this.validatePercentages();
-                    
+
                     // Mostrar sección de cuentas
                     document.getElementById('autocontrol-accounts').classList.remove('hidden');
-                    this.loadExpenseAccounts();
-                    
-                    if (assocData0 && Object.values(assocData0).some(a => a && a.length)) {
-                        // Renderizar asociaciones como checkboxes
-                        this.renderAccountAssociationsAsCheckboxes();
-                        
-                        document.getElementById('autocontrol-table').classList.remove('hidden');
-                        this.updateAutocontrolTable();
-                    }
+
+                    // Render de las asociaciones SIEMPRE que exista el plan, desde las
+                    // asociaciones reales cargadas de BD (independiente de los ingresos del
+                    // mes). NO se llama a loadExpenseAccounts(), que las resetea a vacío
+                    // (eso es solo para el flujo de plan nuevo).
+                    this.accountAssociations = this._normalizeAssociations(this.accountAssociations);
+                    this.renderAccountAssociationsAsCheckboxes();
+
+                    document.getElementById('autocontrol-table').classList.remove('hidden');
+                    this.updateAutocontrolTable();
                 }
             }
             
