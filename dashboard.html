@@ -9329,6 +9329,11 @@
             }
 
             closeTutorial() {
+                // Cerrar por CUALQUIER vía (X, Escape, clic fuera) marca el tutorial como
+                // visto, igual que "Saltar" y "Finalizar", para que no vuelva a salir solo.
+                // No afecta al botón flotante de ayuda: showTutorial() no comprueba
+                // hasSeenTutorial(), así que puede reabrirlo cuantas veces quiera el usuario.
+                this.markTutorialAsSeen();
                 const modal = document.getElementById('tutorial-modal');
                 if (modal) {
                     modal.classList.add('hidden');
