@@ -15,7 +15,6 @@
     <script src="./public/config.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* Paleta de marca Contabilidad Personal */
@@ -351,15 +350,13 @@
         // Toggle mostrar/ocultar contraseña
         document.getElementById('toggle-password').addEventListener('click', () => {
             const passwordInput = document.getElementById('password');
-            const icon = document.querySelector('toggle-password i');
+            const icon = document.getElementById('toggle-password').querySelector('svg, i');
             if (passwordInput.type === 'password') {
                 passwordInput.type = 'text';
-                icon.classList.remove('fa-eye');
-                icon.classList.add('fa-eye-slash');
+                icon.outerHTML = FlowIcons.icon('flow-eye-off', (icon.getAttribute('class') || '').replace('ff','').trim());
             } else {
                 passwordInput.type = 'password';
-                icon.classList.remove('fa-eye-slash');
-                icon.classList.add('fa-eye');
+                icon.outerHTML = FlowIcons.icon('flow-eye', (icon.getAttribute('class') || '').replace('ff','').trim());
             }
         });
 
@@ -448,5 +445,6 @@
     <script src="/public/inapp-browser-banner.js"></script>
     <!-- Service worker (PWA): registro + migración de scope /public/ -> / -->
     <script src="/public/sw-register.js"></script>
+    <script src="./js/flow-icons.js"></script>
 </body>
 </html>

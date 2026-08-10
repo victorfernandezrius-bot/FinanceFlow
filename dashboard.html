@@ -13,7 +13,6 @@
     <link rel="shortcut icon" type="image/png" href="./public/logo.png">
     <title>Dashboard - FinanceFlow</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
@@ -23,6 +22,7 @@
     <script src="https://js.stripe.com/v3/"></script>
     <script src="./public/config.js"></script>
     <script src="./js/stripe-checkout.js"></script>
+    <script src="./js/flow-icons.js"></script>
     <style>
         :root {
             --font-display: 'Bricolage Grotesque', 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -768,7 +768,7 @@
                             <div class="rounded-lg p-6 shadow-sm transition-colors duration-300" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);">
                                 <div class="flex items-center">
                                     <div class="p-3 rounded-lg" style="background-color: rgba(1, 88, 201, 0.1);">
-                                        <i class="fas fa-university text-xl" style="color: var(--brand-primary);"></i>
+                                        <i class="fas flow-cash text-xl" style="color: var(--brand-primary);"></i>
                                     </div>
                                     <div class="ml-4">
                                         <p class="text-sm font-medium" style="color: var(--text-secondary);">Saldo Bancario</p>
@@ -835,7 +835,7 @@
                             <div class="rounded-lg p-6 shadow-sm transition-colors duration-300 cursor-pointer hover:shadow-md" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);" onclick="dashboard.openBankAccountMajorBook()">
                                 <div class="flex flex-col items-center text-center">
                                     <div class="p-4 rounded-full mb-3" style="background-color: rgba(1, 88, 201, 0.1);">
-                                        <i class="fas fa-university text-2xl" style="color: var(--brand-primary);"></i>
+                                        <i class="fas flow-cash text-2xl" style="color: var(--brand-primary);"></i>
                                     </div>
                                     <p class="text-sm font-medium mb-1" style="color: var(--text-secondary);">Saldo Bancario</p>
                                     <p id="widget-saldo-bancario" class="text-2xl font-bold" style="color: var(--brand-primary);">€0.00</p>
@@ -847,7 +847,7 @@
                             <div class="rounded-lg p-6 shadow-sm transition-colors duration-300" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);">
                                 <div class="flex flex-col items-center text-center">
                                     <div class="p-4 rounded-full mb-3" style="background-color: rgba(239, 68, 68, 0.1);">
-                                        <i class="fas fa-calendar-check text-2xl text-red-500"></i>
+                                        <i class="fas flow-fixed-cost text-2xl text-red-500"></i>
                                     </div>
                                     <p class="text-sm font-medium mb-1" style="color: var(--text-secondary);">Costes Fijos</p>
                                     <p id="widget-costes-fijos" class="text-2xl font-bold text-red-500">€0.00</p>
@@ -1138,7 +1138,7 @@
                             </button>
                             
                             <button class="report-tab bg-gray-200 text-gray-700 p-3 rounded-lg hover:bg-gray-300" data-report="estado-resultados">
-                                <i class="fas fa-chart-line text-xl mb-2"></i>
+                                <i class="fas flow-income-statement text-xl mb-2"></i>
                                 <div class="text-sm font-medium">Estado de Resultados</div>
                             </button>
                         </div>
@@ -6753,7 +6753,7 @@
                                             <div>
                                                 <h5 class="font-medium text-gray-900 flex items-center">
                                                     ${account.nombre}
-                                                    ${account.is_fixed_cost ? '<i class="fas fa-calendar-check text-red-500 ml-2" title="Coste fijo"></i>' : ''}
+                                                    ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h5>
                                                 <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
                                                 ${account.is_fixed_cost ? `<p class="text-xs text-red-600">€${account.fixed_monthly_amount}/mes - Día ${account.fixed_due_day}</p>` : ''}
@@ -7838,13 +7838,13 @@
 
             getAccountIcon(type) {
                 const icons = {
-                    'activo': 'fa-university',
-                    'ingreso': 'fa-arrow-up',
-                    'gasto': 'fa-arrow-down',
-                    'pasivo': 'fa-credit-card',
-                    'patrimonio': 'fa-gem'
+                    'activo': 'flow-asset',
+                    'ingreso': 'flow-in',
+                    'gasto': 'flow-out',
+                    'pasivo': 'flow-liability',
+                    'patrimonio': 'flow-equity'
                 };
-                return icons[type] || 'fa-question';
+                return icons[type] || 'flow-unknown';
             }
 
             getAccountBalanceColor(account) {
