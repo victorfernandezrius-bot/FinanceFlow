@@ -312,7 +312,7 @@
 
   function hydrate(root) {
     var scope = root || document;
-    var list = scope.querySelectorAll('i[class*="fa-"], span[class*="fa-"]');
+    var list = scope.querySelectorAll('i[class*="fa-"], i[class*="flow-"], span[class*="fa-"], span[class*="flow-"]');
     var n = 0;
     for (var i = 0; i < list.length; i++) {
       if (list[i].tagName === 'SPAN' && !/\bfa[srb]?\b/.test(list[i].className)) continue;
@@ -338,7 +338,7 @@
         for (var j = 0; j < added.length; j++) {
           var node = added[j];
           if (node.nodeType !== 1) continue;
-          if (node.tagName === 'I' && /\bfa-/.test(node.className || '')) replaceNode(node);
+          if (node.tagName === 'I' && /\b(fa-|flow-)/.test(node.className || '')) replaceNode(node);
           else if (node.querySelectorAll) hydrate(node);
         }
       }
