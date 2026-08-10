@@ -782,25 +782,25 @@
         // Toggle mostrar/ocultar contraseñas en registro
         document.getElementById('toggle-password-reg')?.addEventListener('click', () => {
             const input = document.getElementById('password');
-            const icon = document.getElementById('toggle-password-reg-icon');
+            const icon = document.getElementById('toggle-password-reg').querySelector('svg, i');
             if (input.type === 'password') {
                 input.type = 'text';
-                icon.classList.replace('fa-eye', 'fa-eye-slash');
+                icon.outerHTML = FlowIcons.icon('flow-eye-off', (icon.getAttribute('class') || '').replace('ff','').trim());
             } else {
                 input.type = 'password';
-                icon.classList.replace('fa-eye-slash', 'fa-eye');
+                icon.outerHTML = FlowIcons.icon('flow-eye', (icon.getAttribute('class') || '').replace('ff','').trim());
             }
         });
 
         document.getElementById('toggle-password-confirm-reg')?.addEventListener('click', () => {
             const input = document.getElementById('password-confirm');
-            const icon = document.getElementById('toggle-password-confirm-reg-icon');
+            const icon = document.getElementById('toggle-password-confirm-reg').querySelector('svg, i');
             if (input.type === 'password') {
                 input.type = 'text';
-                icon.classList.replace('fa-eye', 'fa-eye-slash');
+                icon.outerHTML = FlowIcons.icon('flow-eye-off', (icon.getAttribute('class') || '').replace('ff','').trim());
             } else {
                 input.type = 'password';
-                icon.classList.replace('fa-eye-slash', 'fa-eye');
+                icon.outerHTML = FlowIcons.icon('flow-eye', (icon.getAttribute('class') || '').replace('ff','').trim());
             }
         });
 

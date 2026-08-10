@@ -351,15 +351,13 @@
         // Toggle mostrar/ocultar contraseña
         document.getElementById('toggle-password').addEventListener('click', () => {
             const passwordInput = document.getElementById('password');
-            const icon = document.querySelector('toggle-password i');
+            const icon = document.getElementById('toggle-password').querySelector('svg, i');
             if (passwordInput.type === 'password') {
                 passwordInput.type = 'text';
-                icon.classList.remove('fa-eye');
-                icon.classList.add('fa-eye-slash');
+                icon.outerHTML = FlowIcons.icon('flow-eye-off', (icon.getAttribute('class') || '').replace('ff','').trim());
             } else {
                 passwordInput.type = 'password';
-                icon.classList.remove('fa-eye-slash');
-                icon.classList.add('fa-eye');
+                icon.outerHTML = FlowIcons.icon('flow-eye', (icon.getAttribute('class') || '').replace('ff','').trim());
             }
         });
 
