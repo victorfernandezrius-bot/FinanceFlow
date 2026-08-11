@@ -644,6 +644,106 @@ table { border-collapse: collapse; }
         .inst-t { font-size: 0.96rem; color: var(--gris-tinta); padding-top: 0.25rem; }
         .inst-t b { color: var(--negro); font-weight: 700; }
 
+        /* ═══════════════ MODAL CALCULADORA PLAN DE AUTOCONTROL ═══════════════ */
+        .ac-close-btn {
+            position: absolute;
+            top: -14px; right: -14px;
+            width: 34px; height: 34px;
+            border-radius: 999px;
+            background: var(--blanco);
+            color: var(--gris-tinta);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+            z-index: 5;
+        }
+        .ac-close-btn:hover { color: var(--negro); }
+        .ac-phone-screen {
+            background: var(--gris-papel);
+            border-radius: 26px;
+            padding: 1.5rem 1.1rem 1.15rem;
+            max-height: min(78vh, 660px);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .ac-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.1rem; }
+        .ac-header .ficon { font-size: 1.3rem; }
+        .ac-h-title { font-size: 0.98rem; font-weight: 800; color: var(--negro); letter-spacing: -0.01em; }
+        .ac-h-sub { font-size: 0.7rem; color: var(--gris-suave); }
+        .ac-label { display: block; font-size: 0.7rem; font-weight: 600; color: var(--gris-suave); margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .ac-input-wrap {
+            display: flex; align-items: center; gap: 0.5rem;
+            background: var(--blanco);
+            border: 1.5px solid #E5E7EB;
+            border-radius: 10px;
+            padding: 0.6rem 0.85rem;
+            margin-bottom: 1.2rem;
+            transition: border-color 0.15s;
+        }
+        .ac-input-wrap:focus-within { border-color: var(--azul-oscuro); }
+        .ac-input-income {
+            border: none; outline: none; flex: 1; min-width: 0;
+            font-size: 1.05rem; font-weight: 700; color: var(--negro);
+            background: transparent;
+        }
+        .ac-input-suffix { font-size: 0.95rem; font-weight: 600; color: var(--gris-suave); }
+        .ac-groups { display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.85rem; }
+        .ac-group {
+            display: flex; align-items: center; gap: 0.6rem;
+            background: var(--blanco);
+            border: 1.5px solid #E5E7EB;
+            border-radius: 10px;
+            padding: 0.5rem 0.7rem;
+        }
+        .ac-emoji { font-size: 1.15rem; line-height: 1; flex-shrink: 0; }
+        .ac-glabel { flex: 1; font-size: 0.82rem; font-weight: 600; color: var(--gris-tinta); }
+        .ac-pct-wrap { display: flex; align-items: center; gap: 0.2rem; }
+        .ac-pct {
+            width: 42px; border: none; outline: none;
+            font-size: 0.9rem; font-weight: 700; color: var(--negro);
+            text-align: right; background: transparent;
+            -moz-appearance: textfield;
+        }
+        .ac-pct::-webkit-outer-spin-button, .ac-pct::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .ac-pct-wrap span { font-size: 0.8rem; color: var(--gris-suave); font-weight: 600; }
+        .ac-total-row {
+            display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+            font-size: 0.78rem; color: var(--gris-suave);
+            margin-bottom: 0.9rem;
+        }
+        .ac-total-row b { color: var(--negro); font-size: 0.85rem; }
+        .ac-total-row.is-ok b { color: var(--verde-oscuro); }
+        .ac-total-row.is-bad b { color: #DC2626; }
+        #ac-total-error { color: #DC2626; font-weight: 600; font-size: 0.72rem; }
+        .ac-btn-calc {
+            width: 100%;
+            background: var(--azul-oscuro);
+            color: var(--blanco);
+            font-weight: 700;
+            font-size: 0.92rem;
+            padding: 0.75rem;
+            border-radius: 10px;
+            transition: background 0.15s, opacity 0.15s;
+        }
+        .ac-btn-calc:hover:not(:disabled) { background: var(--azul-medio); }
+        .ac-btn-calc:disabled { opacity: 0.45; cursor: not-allowed; }
+        .ac-btn-outline {
+            background: transparent;
+            border: 1.5px solid var(--azul-oscuro);
+            color: var(--azul-oscuro);
+        }
+        .ac-btn-outline:hover { background: rgba(1,88,201,0.06); }
+        .ac-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-bottom: 1.1rem; }
+        .ac-result-box {
+            background: var(--blanco);
+            border: 1.5px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 0.75rem 0.6rem;
+            text-align: center;
+        }
+        .ac-result-box .ac-emoji { font-size: 1.4rem; display: block; margin-bottom: 0.3rem; }
+        .ac-rlabel { font-size: 0.68rem; color: var(--gris-suave); font-weight: 600; margin-bottom: 0.15rem; }
+        .ac-ramount { font-size: 0.98rem; font-weight: 800; color: var(--azul-oscuro); letter-spacing: -0.01em; }
+
         /* Animación de entrada */
         @keyframes fade-up {
             from { opacity: 0; transform: translateY(12px); }
@@ -1005,6 +1105,9 @@ table { border-collapse: collapse; }
                     </div>
                     <h3 class="font-bold text-lg mb-2" style="color: var(--negro);">Plan de Autocontrol</h3>
                     <p class="text-gray-600 text-sm leading-relaxed">Reparte tu ingreso en Ahorro, Inversión, Necesidades y Resto. Calculado automáticamente sobre tus números reales.</p>
+                    <button id="abrir-autocontrol-modal" class="text-xs font-semibold mt-3 inline-flex items-center gap-1" style="color: var(--azul-oscuro);">
+                        Prueba esta función gratis <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></span>
+                    </button>
                 </div>
 
                 <div class="card-sharp p-6">
@@ -1410,6 +1513,81 @@ table { border-collapse: collapse; }
     </div>
 
     <!-- ════════════════════════════════════════════════════
+         MODAL: Calculadora Plan de Autocontrol
+         ════════════════════════════════════════════════════ -->
+    <div id="autocontrol-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center px-4">
+        <div class="relative">
+            <button id="cerrar-autocontrol-modal" class="ac-close-btn" aria-label="Cerrar">
+                <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+            </button>
+            <div class="install-phone">
+                <div class="ac-phone-screen">
+
+                    <!-- Vista 1: formulario -->
+                    <div id="ac-view-form">
+                        <div class="ac-header">
+                            <span class="ficon" style="color: var(--azul-oscuro);"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="12" y1="3" x2="12" y2="21"/><path d="M5 7h14"/><path d="M5 7l-3 7a3 3 0 0 0 6 0z"/><path d="M19 7l-3 7a3 3 0 0 0 6 0z"/><line x1="7" y1="21" x2="17" y2="21"/></svg></span>
+                            <div>
+                                <div class="ac-h-title">Plan de Autocontrol</div>
+                                <div class="ac-h-sub">Simulador gratuito</div>
+                            </div>
+                        </div>
+
+                        <label class="ac-label" for="ac-income">Ingreso a distribuir</label>
+                        <div class="ac-input-wrap">
+                            <input type="number" id="ac-income" class="ac-input-income" min="1" max="99999999999" step="1" placeholder="Ej. 2.500" inputmode="numeric">
+                            <span class="ac-input-suffix">€</span>
+                        </div>
+
+                        <div class="ac-groups">
+                            <div class="ac-group">
+                                <span class="ac-emoji">💰</span>
+                                <span class="ac-glabel">Ahorro</span>
+                                <div class="ac-pct-wrap"><input type="number" class="ac-pct" data-cat="ahorro" data-label="Ahorro" data-emoji="💰" min="0" max="100" step="1" value="20"><span>%</span></div>
+                            </div>
+                            <div class="ac-group">
+                                <span class="ac-emoji">📈</span>
+                                <span class="ac-glabel">Inversión</span>
+                                <div class="ac-pct-wrap"><input type="number" class="ac-pct" data-cat="inversion" data-label="Inversión" data-emoji="📈" min="0" max="100" step="1" value="10"><span>%</span></div>
+                            </div>
+                            <div class="ac-group">
+                                <span class="ac-emoji">🏠</span>
+                                <span class="ac-glabel">Necesidades</span>
+                                <div class="ac-pct-wrap"><input type="number" class="ac-pct" data-cat="necesidades" data-label="Necesidades" data-emoji="🏠" min="0" max="100" step="1" value="50"><span>%</span></div>
+                            </div>
+                            <div class="ac-group">
+                                <span class="ac-emoji">🎉</span>
+                                <span class="ac-glabel">Ocio/Resto</span>
+                                <div class="ac-pct-wrap"><input type="number" class="ac-pct" data-cat="resto" data-label="Ocio/Resto" data-emoji="🎉" min="0" max="100" step="1" value="20"><span>%</span></div>
+                            </div>
+                        </div>
+
+                        <div id="ac-total-row" class="ac-total-row is-ok">
+                            Total: <b id="ac-total">100%</b>
+                            <span id="ac-total-error" class="hidden">¡Debe sumar 100%!</span>
+                        </div>
+
+                        <button id="ac-calcular-btn" class="ac-btn-calc">Calcular reparto</button>
+                    </div>
+
+                    <!-- Vista 2: resultado -->
+                    <div id="ac-view-result" class="hidden">
+                        <div class="ac-header">
+                            <div>
+                                <div class="ac-h-title">Así deberías repartirlo</div>
+                                <div class="ac-h-sub" id="ac-result-income-lbl">Sobre 0 €</div>
+                            </div>
+                        </div>
+                        <div class="ac-result-grid" id="ac-result-grid"></div>
+                        <button id="ac-recalcular-btn" class="ac-btn-calc ac-btn-outline">Calcular de nuevo</button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════
          LÓGICA JS (compatible con el resto del producto)
          ════════════════════════════════════════════════════ -->
     <script>
@@ -1482,6 +1660,108 @@ table { border-collapse: collapse; }
             window.location.href = './register.html';
         });
 
+
+        // ===== Modal Calculadora Plan de Autocontrol =====
+        (function () {
+            const modal = document.getElementById('autocontrol-modal');
+            const openBtn = document.getElementById('abrir-autocontrol-modal');
+            const closeBtn = document.getElementById('cerrar-autocontrol-modal');
+            const incomeInput = document.getElementById('ac-income');
+            const pctInputs = Array.from(document.querySelectorAll('.ac-pct'));
+            const totalRow = document.getElementById('ac-total-row');
+            const totalEl = document.getElementById('ac-total');
+            const totalError = document.getElementById('ac-total-error');
+            const calcBtn = document.getElementById('ac-calcular-btn');
+            const recalcBtn = document.getElementById('ac-recalcular-btn');
+            const viewForm = document.getElementById('ac-view-form');
+            const viewResult = document.getElementById('ac-view-result');
+            const resultGrid = document.getElementById('ac-result-grid');
+            const resultIncomeLbl = document.getElementById('ac-result-income-lbl');
+
+            if (!modal || !openBtn) return;
+
+            const fmtEUR = (n) => new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(n) + ' €';
+
+            function clampPercent(input) {
+                let v = parseInt(input.value, 10);
+                if (isNaN(v)) v = 0;
+                v = Math.max(0, Math.min(100, v));
+                input.value = v;
+                return v;
+            }
+
+            function updateTotal() {
+                const total = pctInputs.reduce((sum, inp) => sum + clampPercent(inp), 0);
+                totalEl.textContent = total + '%';
+                const ok = total === 100;
+                totalRow.classList.toggle('is-ok', ok);
+                totalRow.classList.toggle('is-bad', !ok);
+                totalError.classList.toggle('hidden', ok);
+                calcBtn.disabled = !ok;
+                return ok;
+            }
+
+            function clampIncome() {
+                let v = parseInt(incomeInput.value, 10);
+                if (isNaN(v) || v < 1) return null;
+                if (v > 99999999999) v = 99999999999;
+                incomeInput.value = v;
+                return v;
+            }
+
+            function openModal() {
+                modal.classList.remove('hidden');
+                document.body.style.overflow = 'hidden';
+                updateTotal();
+            }
+            function closeModal() {
+                modal.classList.add('hidden');
+                document.body.style.overflow = '';
+            }
+
+            openBtn.addEventListener('click', openModal);
+            closeBtn.addEventListener('click', closeModal);
+            modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+            });
+
+            pctInputs.forEach((inp) => inp.addEventListener('input', updateTotal));
+
+            calcBtn.addEventListener('click', () => {
+                const income = clampIncome();
+                if (!income) {
+                    incomeInput.focus();
+                    incomeInput.style.borderColor = '#DC2626';
+                    setTimeout(() => { incomeInput.style.borderColor = ''; }, 1200);
+                    return;
+                }
+                if (!updateTotal()) return;
+
+                resultGrid.innerHTML = '';
+                pctInputs.forEach((inp) => {
+                    const pct = clampPercent(inp);
+                    const amount = Math.round(income * pct / 100);
+                    const box = document.createElement('div');
+                    box.className = 'ac-result-box';
+                    box.innerHTML = `
+                        <span class="ac-emoji">${inp.dataset.emoji}</span>
+                        <div class="ac-rlabel">${inp.dataset.label} · ${pct}%</div>
+                        <div class="ac-ramount">${fmtEUR(amount)}</div>
+                    `;
+                    resultGrid.appendChild(box);
+                });
+                resultIncomeLbl.textContent = 'Sobre ' + fmtEUR(income);
+
+                viewForm.classList.add('hidden');
+                viewResult.classList.remove('hidden');
+            });
+
+            recalcBtn.addEventListener('click', () => {
+                viewResult.classList.add('hidden');
+                viewForm.classList.remove('hidden');
+            });
+        })();
 
         // ===== Modal PWA =====
         const pwaModal = document.getElementById('pwa-modal');
