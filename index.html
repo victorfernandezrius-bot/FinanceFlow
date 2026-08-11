@@ -645,6 +645,25 @@ table { border-collapse: collapse; }
         .inst-t b { color: var(--negro); font-weight: 700; }
 
         /* ═══════════════ MODAL CALCULADORA PLAN DE AUTOCONTROL ═══════════════ */
+        /* Por defecto (móvil): mantiene el aspecto de teléfono, más grande y con bisel fino */
+        .ac-frame {
+            width: min(90vw, 380px);
+            background: #0A0E14;
+            border-radius: 36px;
+            padding: 4px;
+            box-shadow: 0 35px 70px -20px rgba(1,88,201,0.28);
+            position: relative;
+        }
+        .ac-frame::before {
+            content: '';
+            position: absolute;
+            top: 9px; left: 50%;
+            transform: translateX(-50%);
+            width: 46px; height: 4px;
+            background: rgba(255,255,255,0.25);
+            border-radius: 999px;
+            z-index: 3;
+        }
         .ac-close-btn {
             position: absolute;
             top: -14px; right: -14px;
@@ -655,51 +674,52 @@ table { border-collapse: collapse; }
             display: flex; align-items: center; justify-content: center;
             box-shadow: 0 6px 18px rgba(0,0,0,0.25);
             z-index: 5;
+            font-size: 0.85rem;
         }
         .ac-close-btn:hover { color: var(--negro); }
         .ac-phone-screen {
             background: var(--gris-papel);
-            border-radius: 26px;
-            padding: 1.5rem 1.1rem 1.15rem;
-            max-height: min(78vh, 660px);
+            border-radius: 32px;
+            padding: 1.65rem 1.1rem 1.25rem;
+            max-height: min(82vh, 700px);
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
         }
         .ac-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.1rem; }
         .ac-header .ficon { font-size: 1.3rem; }
-        .ac-h-title { font-size: 0.98rem; font-weight: 800; color: var(--negro); letter-spacing: -0.01em; }
-        .ac-h-sub { font-size: 0.7rem; color: var(--gris-suave); }
+        .ac-h-title { font-size: 1rem; font-weight: 800; color: var(--negro); letter-spacing: -0.01em; }
+        .ac-h-sub { font-size: 0.72rem; color: var(--gris-suave); }
         .ac-label { display: block; font-size: 0.7rem; font-weight: 600; color: var(--gris-suave); margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.04em; }
         .ac-input-wrap {
             display: flex; align-items: center; gap: 0.5rem;
             background: var(--blanco);
             border: 1.5px solid #E5E7EB;
             border-radius: 10px;
-            padding: 0.6rem 0.85rem;
-            margin-bottom: 1.2rem;
+            padding: 0.65rem 0.9rem;
+            margin-bottom: 1.25rem;
             transition: border-color 0.15s;
         }
         .ac-input-wrap:focus-within { border-color: var(--azul-oscuro); }
         .ac-input-income {
             border: none; outline: none; flex: 1; min-width: 0;
-            font-size: 1.05rem; font-weight: 700; color: var(--negro);
+            font-size: 1.1rem; font-weight: 700; color: var(--negro);
             background: transparent;
         }
         .ac-input-suffix { font-size: 0.95rem; font-weight: 600; color: var(--gris-suave); }
-        .ac-groups { display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.85rem; }
+        .ac-groups { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.9rem; }
         .ac-group {
             display: flex; align-items: center; gap: 0.6rem;
             background: var(--blanco);
             border: 1.5px solid #E5E7EB;
             border-radius: 10px;
-            padding: 0.5rem 0.7rem;
+            padding: 0.6rem 0.75rem;
         }
-        .ac-emoji { font-size: 1.15rem; line-height: 1; flex-shrink: 0; }
-        .ac-glabel { flex: 1; font-size: 0.82rem; font-weight: 600; color: var(--gris-tinta); }
-        .ac-pct-wrap { display: flex; align-items: center; gap: 0.2rem; }
+        .ac-emoji { font-size: 1.2rem; line-height: 1; flex-shrink: 0; }
+        .ac-glabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; font-weight: 600; color: var(--gris-tinta); }
+        .ac-pct-wrap { display: flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
         .ac-pct {
             width: 42px; border: none; outline: none;
-            font-size: 0.9rem; font-weight: 700; color: var(--negro);
+            font-size: 0.92rem; font-weight: 700; color: var(--negro);
             text-align: right; background: transparent;
             -moz-appearance: textfield;
         }
@@ -719,8 +739,8 @@ table { border-collapse: collapse; }
             background: var(--azul-oscuro);
             color: var(--blanco);
             font-weight: 700;
-            font-size: 0.92rem;
-            padding: 0.75rem;
+            font-size: 0.94rem;
+            padding: 0.8rem;
             border-radius: 10px;
             transition: background 0.15s, opacity 0.15s;
         }
@@ -732,17 +752,75 @@ table { border-collapse: collapse; }
             color: var(--azul-oscuro);
         }
         .ac-btn-outline:hover { background: rgba(1,88,201,0.06); }
-        .ac-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-bottom: 1.1rem; }
+        .ac-result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-bottom: 1.15rem; }
         .ac-result-box {
             background: var(--blanco);
             border: 1.5px solid #E5E7EB;
             border-radius: 12px;
-            padding: 0.75rem 0.6rem;
+            padding: 0.8rem 0.6rem;
             text-align: center;
         }
-        .ac-result-box .ac-emoji { font-size: 1.4rem; display: block; margin-bottom: 0.3rem; }
-        .ac-rlabel { font-size: 0.68rem; color: var(--gris-suave); font-weight: 600; margin-bottom: 0.15rem; }
-        .ac-ramount { font-size: 0.98rem; font-weight: 800; color: var(--azul-oscuro); letter-spacing: -0.01em; }
+        .ac-result-box .ac-emoji { font-size: 1.45rem; display: block; margin-bottom: 0.3rem; }
+        .ac-rlabel { font-size: 0.7rem; color: var(--gris-suave); font-weight: 600; margin-bottom: 0.15rem; }
+        .ac-ramount { font-size: 1rem; font-weight: 800; color: var(--azul-oscuro); letter-spacing: -0.01em; }
+
+        /* ═══ Escritorio (≥768px): deja de parecer un teléfono, se convierte en modal ancho horizontal ═══ */
+        @media (min-width: 768px) {
+            .ac-frame {
+                width: min(88vw, 760px);
+                background: var(--blanco);
+                border-radius: 24px;
+                padding: 0;
+                box-shadow: 0 40px 90px -20px rgba(10,14,20,0.35);
+            }
+            .ac-frame::before { display: none; }
+            .ac-close-btn {
+                top: 20px; right: 20px;
+                width: 38px; height: 38px;
+                background: var(--gris-papel);
+                box-shadow: none;
+                font-size: 0.95rem;
+            }
+            .ac-close-btn:hover { background: #E5E7EB; color: var(--negro); }
+            .ac-phone-screen {
+                background: var(--blanco);
+                border-radius: 24px;
+                padding: 2.5rem 3rem;
+                max-height: min(85vh, 640px);
+            }
+            .ac-header { margin-bottom: 1.6rem; }
+            .ac-header .ficon { font-size: 1.7rem; }
+            .ac-h-title { font-size: 1.35rem; }
+            .ac-h-sub { font-size: 0.85rem; }
+            .ac-label { font-size: 0.78rem; }
+            .ac-input-wrap { max-width: 340px; padding: 0.85rem 1.1rem; margin-bottom: 1.75rem; }
+            .ac-input-income { font-size: 1.3rem; }
+            .ac-groups {
+                flex-direction: row;
+                gap: 1rem;
+                margin-bottom: 1.4rem;
+            }
+            .ac-group {
+                flex: 1;
+                flex-direction: column;
+                align-items: center;
+                text-align: center;
+                gap: 0.55rem;
+                padding: 1.4rem 0.9rem;
+            }
+            .ac-emoji { font-size: 1.7rem; }
+            .ac-glabel { white-space: normal; overflow: visible; text-overflow: clip; font-size: 0.9rem; }
+            .ac-pct-wrap { justify-content: center; }
+            .ac-pct { font-size: 1.05rem; text-align: center; width: 46px; }
+            .ac-total-row { font-size: 0.88rem; margin-bottom: 1.5rem; }
+            .ac-total-row b { font-size: 0.98rem; }
+            .ac-btn-calc { max-width: 320px; margin: 0 auto; display: block; padding: 0.9rem; font-size: 1rem; }
+            .ac-result-grid { grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.6rem; }
+            .ac-result-box { padding: 1.3rem 0.9rem; }
+            .ac-result-box .ac-emoji { font-size: 1.8rem; margin-bottom: 0.5rem; }
+            .ac-rlabel { font-size: 0.78rem; }
+            .ac-ramount { font-size: 1.2rem; }
+        }
 
         /* Animación de entrada */
         @keyframes fade-up {
@@ -1520,7 +1598,7 @@ table { border-collapse: collapse; }
             <button id="cerrar-autocontrol-modal" class="ac-close-btn" aria-label="Cerrar">
                 <span class="ficon"><svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.125em;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
             </button>
-            <div class="install-phone">
+            <div class="ac-frame">
                 <div class="ac-phone-screen">
 
                     <!-- Vista 1: formulario -->
@@ -1709,10 +1787,23 @@ table { border-collapse: collapse; }
                 return v;
             }
 
+            const DEFAULT_PERCENTS = { ahorro: 20, inversion: 10, necesidades: 50, resto: 20 };
+
+            function resetForm() {
+                incomeInput.value = '';
+                incomeInput.style.borderColor = '';
+                pctInputs.forEach((inp) => {
+                    inp.value = DEFAULT_PERCENTS[inp.dataset.cat] ?? 0;
+                });
+                updateTotal();
+            }
+
             function openModal() {
                 modal.classList.remove('hidden');
                 document.body.style.overflow = 'hidden';
-                updateTotal();
+                viewResult.classList.add('hidden');
+                viewForm.classList.remove('hidden');
+                resetForm();
             }
             function closeModal() {
                 modal.classList.add('hidden');
@@ -1758,6 +1849,7 @@ table { border-collapse: collapse; }
             });
 
             recalcBtn.addEventListener('click', () => {
+                resetForm();
                 viewResult.classList.add('hidden');
                 viewForm.classList.remove('hidden');
             });
