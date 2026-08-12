@@ -108,9 +108,25 @@
             .sidebar-behavior {
                 position: static;
                 transform: none;
+                transition: width 0.3s ease-in-out;
+                overflow-x: hidden;
             }
+
+            /* Sidebar colapsado a franja de solo iconos (exclusivo de escritorio) */
+            #sidebar.sidebar-collapsed { width: 4.25rem; }
+            #sidebar.sidebar-collapsed .nav-item {
+                justify-content: center;
+                padding-left: 0;
+                padding-right: 0;
+            }
+            #sidebar.sidebar-collapsed .nav-item svg,
+            #sidebar.sidebar-collapsed .nav-item i { margin-right: 0; }
+            #sidebar.sidebar-collapsed .nav-label,
+            #sidebar.sidebar-collapsed .premium-badge,
+            #sidebar.sidebar-collapsed #sidebar-notifications-badge,
+            #sidebar.sidebar-collapsed #upgrade-section { display: none; }
         }
-        
+
         /* Componentes adaptativos */
         .card-mobile {
             background-color: var(--bg-elevated, var(--bg-primary));
@@ -682,46 +698,46 @@
                 <!-- Navegación -->
                 <nav class="flex-1" style="padding: var(--space-4); padding-top: var(--space-4);">
                     <div style="display: flex; flex-direction: column; gap: var(--space-2);">
-                    <a href="#" id="nav-dashboard" class="nav-item nav-item-active group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-dashboard" title="Dashboard" class="nav-item nav-item-active group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-tachometer-alt mr-3"></i>
-                        Dashboard
+                        <span class="nav-label">Dashboard</span>
                     </a>
                     
-                    <a href="#" id="nav-accounts" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-accounts" title="Cuentas" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-university mr-3"></i>
-                        Cuentas
+                        <span class="nav-label">Cuentas</span>
                     </a>
                     
-                    <a href="#" id="nav-movements" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-movements" title="Movimientos" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-exchange-alt mr-3"></i>
-                        Movimientos
+                        <span class="nav-label">Movimientos</span>
                     </a>
                     
-                    <a href="#" id="nav-reports" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-reports" title="Reportes" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-chart-bar mr-3"></i>
-                        Reportes
+                        <span class="nav-label">Reportes</span>
                     </a>
                     
-                    <a href="#" id="nav-scenarios" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-scenarios" title="Escenarios" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-flask mr-3"></i>
-                        Escenarios
+                        <span class="nav-label">Escenarios</span>
                     </a>
                     
-                    <a href="#" id="nav-autocontrol" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-autocontrol" title="Plan de Autocontrol" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-bullseye mr-3"></i>
-                        Plan de Autocontrol
+                        <span class="nav-label">Plan de Autocontrol</span>
                         <span class="premium-badge ml-2 px-2 py-1 text-xs text-white rounded">PREMIUM</span>
                     </a>
                     
-                    <a href="#" id="nav-categorization" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-categorization" title="Reglas de Registro Automático" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-tags mr-3"></i>
-                        Reglas de Registro Automático
+                        <span class="nav-label">Reglas de Registro Automático</span>
                         <span class="premium-badge ml-2 px-2 py-1 text-xs text-white rounded">PREMIUM</span>
                     </a>
                     
-                    <a href="#" id="nav-notifications" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                    <a href="#" id="nav-notifications" title="Notificaciones" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-bell mr-3"></i>
-                        Notificaciones
+                        <span class="nav-label">Notificaciones</span>
                         <span class="premium-badge ml-2 px-2 py-1 text-xs text-white rounded">PREMIUM</span>
                         <span id="sidebar-notifications-badge" class="ml-1 bg-red-500 text-white text-xs rounded-full px-2 py-1 hidden">0</span>
                     </a>
@@ -2614,13 +2630,16 @@
                 
                 // Sistema responsive inteligente
                 if (window.innerWidth >= 1025) {
-                    // Desktop: sidebar siempre visible
+                    // Desktop: sidebar siempre visible; aplicar estado colapsado guardado
                     sidebar.classList.remove('active');
                     sidebar.classList.add('sidebar-desktop');
                     overlay.classList.add('hidden');
+                    let collapsed = false;
+                    try { collapsed = localStorage.getItem('sidebarCollapsed') === '1'; } catch (e) {}
+                    sidebar.classList.toggle('sidebar-collapsed', collapsed);
                 } else {
-                    // Mobile/Tablet: sidebar oculto por defecto
-                    sidebar.classList.remove('active', 'sidebar-desktop');
+                    // Mobile/Tablet: sidebar oculto por defecto; el colapsado es exclusivo de escritorio
+                    sidebar.classList.remove('active', 'sidebar-desktop', 'sidebar-collapsed');
                     overlay.classList.add('hidden');
                 }
             }
@@ -2629,11 +2648,14 @@
                 const sidebar = document.getElementById('sidebar');
                 const overlay = document.getElementById('sidebar-overlay');
                 
-                // En desktop no hacer nada (sidebar siempre visible)
+                // En escritorio: colapsar/expandir a franja de solo iconos (no ocultar).
                 if (window.innerWidth >= 1025) {
+                    const collapsed = sidebar.classList.toggle('sidebar-collapsed');
+                    try { localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+                    this._afterSidebarResize();
                     return;
                 }
-                
+
                 console.log('🍔 Toggle sidebar - Estado actual:', sidebar.className);
                 
                 if (sidebar.classList.contains('active')) {
@@ -2668,6 +2690,15 @@
 
             handleResize() {
                 this.initializeSidebar();
+            }
+
+            // Tras la transición de ancho del sidebar (~300ms), reajusta lo que depende
+            // del ancho (gráficos) para que no queden cortados al colapsar/expandir.
+            _afterSidebarResize() {
+                setTimeout(() => {
+                    try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+                    try { if (this.chartIncomeExpenses && typeof this.chartIncomeExpenses.resize === 'function') this.chartIncomeExpenses.resize(); } catch (e) {}
+                }, 320);
             }
 
             renderUserInfo() {
