@@ -749,13 +749,18 @@
                     
                     <!-- Métricas principales -->
                     <div style="margin-bottom: var(--space-8);">
-                        <!-- Patrimonio Total - Destacado -->
-                        <div class="card-mobile text-white" style="background: linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-secondary) 100%); margin-bottom: var(--space-6);">
+                        <!-- Patrimonio Total - Destacado (clicable: abre desglose) -->
+                        <div class="card-mobile text-white" style="background: linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-secondary) 100%); margin-bottom: var(--space-6); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease;"
+                             role="button" tabindex="0" title="Ver desglose del Patrimonio Total"
+                             onclick="dashboard.showPatrimonioModal()"
+                             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();dashboard.showPatrimonioModal();}"
+                             onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 14px 30px -10px rgba(1,88,201,0.55)'"
+                             onmouseout="this.style.transform=''; this.style.boxShadow=''">
                             <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between" style="gap: var(--space-4);">
                                 <div>
-                                    <p class="opacity-80 text-sm font-medium">Patrimonio Total</p>
-                                    <p id="total-balance" class="text-4xl font-bold">€0.00</p>
-                                    <p class="opacity-80 text-sm">Balance general de tu economía</p>
+                                    <p class="opacity-80 text-sm font-medium">Patrimonio Total <i class="fas fa-info-circle ml-1" style="font-size: 0.85em;"></i></p>
+                                    <p id="total-balance" class="text-4xl font-bold" style="font-variant-numeric: tabular-nums;">€0.00</p>
+                                    <p class="opacity-80 text-sm">Toca para ver el desglose</p>
                                 </div>
                                 <div class="bg-white bg-opacity-20 p-4 rounded-lg">
                                     <i class="fas fa-chart-pie text-3xl"></i>
@@ -1691,6 +1696,46 @@
         
 
     
+    <!-- Modal: Desglose del Patrimonio Total -->
+    <div id="patrimonio-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center px-4" style="background: rgba(0,0,0,0.5);"
+         onclick="if(event.target===this) dashboard.closePatrimonioModal()">
+        <div class="w-full rounded-xl shadow-2xl" style="max-width: 26rem; background-color: var(--bg-primary); border: 1px solid var(--border-color);">
+            <div class="flex justify-between items-center" style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color);">
+                <h3 class="text-lg font-semibold" style="color: var(--text-primary);">Desglose del Patrimonio Total</h3>
+                <button type="button" onclick="dashboard.closePatrimonioModal()" style="color: var(--text-secondary);" aria-label="Cerrar" title="Cerrar">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div style="padding: 1.25rem 1.5rem;">
+                <div class="space-y-3" style="font-variant-numeric: tabular-nums;">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm" style="color: var(--text-secondary);">Total Activos</span>
+                        <span id="pat-activos" class="text-sm font-semibold" style="color: var(--text-primary);">€0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm" style="color: var(--text-secondary);">− Total Pasivos</span>
+                        <span id="pat-pasivos" class="text-sm font-semibold" style="color: var(--text-primary);">€0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm" style="color: var(--text-secondary);">+ Total Patrimonio</span>
+                        <span id="pat-patrimonio" class="text-sm font-semibold" style="color: var(--text-primary);">€0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm" style="color: var(--text-secondary);">+ Resultado (Ingresos − Gastos)</span>
+                        <span id="pat-resultado" class="text-sm font-semibold" style="color: var(--text-primary);">€0.00</span>
+                    </div>
+                    <div class="flex items-center justify-between" style="padding-top: 0.75rem; margin-top: 0.25rem; border-top: 1px solid var(--border-color);">
+                        <span class="text-base font-semibold" style="color: var(--text-primary);">Patrimonio Total</span>
+                        <span id="pat-total" class="text-lg font-bold" style="color: var(--brand-primary);">€0.00</span>
+                    </div>
+                </div>
+                <p class="text-xs mt-4" style="color: var(--text-secondary); line-height: 1.5;">
+                    Fórmula: <span style="font-weight:600;">Activos − Pasivos + Patrimonio + (Ingresos − Gastos)</span>. Es el balance general de tu economía e incluye el resultado acumulado de ingresos y gastos.
+                </p>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Nuevo Escenario -->
     <div id="new-scenario-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
         <div class="flex items-center justify-center min-h-screen p-4">
@@ -5571,6 +5616,34 @@
                 
                 // Widgets Premium de Saldo Real
                 this.updatePremiumWidgets();
+            }
+
+            // Modal de desglose del Patrimonio Total. Usa EXACTAMENTE la misma fuente
+            // que updateDashboardMetrics (calculateFinancialStats -> saldo_total), así
+            // que el total del modal cuadra al céntimo con el número del bloque.
+            showPatrimonioModal() {
+                const modal = document.getElementById('patrimonio-modal');
+                if (!modal) return;
+                const stats = this.accountingManager.calculateFinancialStats();
+                const fmtC = (v) => this.formatCurrency(v);
+                const resultado = (stats.ingresos_total || 0) - (stats.gastos_total || 0);
+                document.getElementById('pat-activos').textContent = fmtC(stats.activos_total || 0);
+                document.getElementById('pat-pasivos').textContent = fmtC(stats.pasivos_total || 0);
+                document.getElementById('pat-patrimonio').textContent = fmtC(stats.patrimonio_total || 0);
+                document.getElementById('pat-resultado').textContent = fmtC(resultado);
+                document.getElementById('pat-total').textContent = fmtC(stats.saldo_total || 0);
+                modal.classList.remove('hidden');
+                document.body.style.overflow = 'hidden';
+                if (!this._patEsc) this._patEsc = (e) => { if (e.key === 'Escape') this.closePatrimonioModal(); };
+                document.addEventListener('keydown', this._patEsc);
+            }
+
+            closePatrimonioModal() {
+                const modal = document.getElementById('patrimonio-modal');
+                if (!modal) return;
+                modal.classList.add('hidden');
+                document.body.style.overflow = '';
+                if (this._patEsc) document.removeEventListener('keydown', this._patEsc);
             }
 
             updatePremiumWidgets() {
