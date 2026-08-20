@@ -655,10 +655,10 @@
                                 Configuración
                             </button>
                             
-                            <a href="./pricing.html" class="block px-4 py-2 text-sm transition-colors duration-200" style="color: var(--text-primary);" onmouseover="this.style.backgroundColor='var(--bg-secondary)'" onmouseout="this.style.backgroundColor='transparent'">
+                            <button id="upgrade-plan-btn" type="button" onclick="document.getElementById('user-menu').classList.add('hidden'); dashboard.showPlanSelector();" class="w-full text-left block px-4 py-2 text-sm transition-colors duration-200" style="color: var(--text-primary);" onmouseover="this.style.backgroundColor='var(--bg-secondary)'" onmouseout="this.style.backgroundColor='transparent'">
                                 <i class="fas fa-crown mr-2" style="color: var(--success-color);"></i>
                                 Actualizar Plan
-                            </a>
+                            </button>
                             
                             <hr class="my-1">
                             
@@ -8826,8 +8826,14 @@
                                         </div>
                                     </div>
                                 </div>
+                                ${Auth.isPremium() ? `
+                                <div>
+                                    <button type="button" onclick="dashboard.openCustomerPortal(this)" class="btn-responsive" style="width:100%;background-color:transparent;color:var(--text-primary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;gap:0.5rem;">
+                                        <i class="fas fa-credit-card"></i>Gestionar suscripción
+                                    </button>
+                                </div>` : ''}
                             </div>
-                            
+
                             <div class="flex flex-col sm:flex-row justify-end gap-3 mt-8">
                                 <button type="button" onclick="document.getElementById('profile-modal').remove()" class="btn-responsive" style="background-color: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);">
                                     Cancelar
@@ -8848,7 +8854,26 @@
                     this.saveUserProfile();
                 });
             }
-            
+
+            async openCustomerPortal(btn) {
+                try {
+                    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.style.cursor = 'wait'; }
+                    const resp = await fetch(`${window.API_URL}/stripe/customer-portal`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${DataClient.getAuthToken()}`
+                        }
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.portal_url) throw new Error(data.error || 'Error');
+                    window.location.href = data.portal_url;
+                } catch (e) {
+                    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+                    this.showNotification('No se pudo abrir la gestión de suscripción, inténtalo de nuevo', 'error');
+                }
+            }
+
             getUserProfile() {
                 // Obtener perfil del localStorage o valores por defecto
                 const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
