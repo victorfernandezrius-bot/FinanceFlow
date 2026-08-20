@@ -10,7 +10,7 @@
 //   Rules:     GET/POST /api/rules, POST /api/rules/bulk, DELETE /api/rules/:id
 //   Autocontrol, scenarios, notifications, bank-connections, import-info
 //   Stripe:    POST /api/stripe/create-checkout, POST /api/stripe/webhook,
-//              POST /api/stripe/verify-session
+//              POST /api/stripe/verify-session, POST /api/stripe/customer-portal
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
 //
@@ -962,6 +962,28 @@ export default {
                 const session = await resp.json();
                 if (!resp.ok) return json({ error: session.error?.message || 'Error Stripe' }, 500, cors);
                 return json({ checkout_url: session.url, session_id: session.id }, 200, cors);
+            }
+
+            if (path === '/api/stripe/customer-portal' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const customerId = authUser.stripe_customer_id;
+                if (!customerId) return json({ error: 'No tienes una suscripción activa' }, 400, cors);
+
+                const params = new URLSearchParams();
+                params.append('customer', customerId);
+                params.append('return_url', `${env.APP_URL}/dashboard.html`);
+
+                const resp = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: params
+                });
+                const session = await resp.json();
+                if (!resp.ok) return json({ error: session.error?.message || 'No se pudo abrir el portal de gestión' }, 500, cors);
+                return json({ portal_url: session.url }, 200, cors);
             }
 
             if (path === '/api/stripe/webhook' && method === 'POST') {
