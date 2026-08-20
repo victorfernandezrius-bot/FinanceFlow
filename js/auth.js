@@ -508,7 +508,7 @@ class AuthSystem {
         const limits = this.getPlanLimits();
         const accounts = this._accountsCache || [];
 
-        // Mapear tipos a límites (debe coincidir con plan-limits.js)
+        // Mapear cada tipo de cuenta a su clave de límite en getPlanLimits()
         const typeMap = {
             'activo': 'max_activo_accounts',
             'ingreso': 'max_income_accounts', 

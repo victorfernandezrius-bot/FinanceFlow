@@ -379,7 +379,7 @@
         }
 
         /* ── Overrides de utilidades fijas en modo oscuro ─────────────────────
-           Muchos bloques (incluidos los modales inyectados por js/plan-limits.js)
+           Muchos bloques (incluidos algunos modales inyectados por JS)
            usan clases Tailwind fijas (bg-white, text-gray-900...). Este bloque
            las mapea a los tokens del tema para que el oscuro sea legible. */
         html.dark .bg-white { background-color: var(--bg-elevated); }
@@ -2131,7 +2131,6 @@
 
     <script type="module">
         import Auth from './js/auth.js';
-        import PlanLimits from './js/plan-limits.js';
         import AccountingManager from './js/accounting-manager.js';
         import DataClient from './src/services/data-client.js';
         

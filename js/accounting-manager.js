@@ -2,7 +2,6 @@
 // Modelo contable profesional sin simulaciones
 
 import Auth from './auth.js';
-import PlanLimits from './plan-limits.js';
 import DataClient from '../src/services/data-client.js';
 
 class AccountingManager {
