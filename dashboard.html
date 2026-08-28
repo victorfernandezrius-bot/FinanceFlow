@@ -865,7 +865,10 @@
                             </div>
 
                             <!-- Costes Fijos -->
-                            <div class="rounded-lg p-6 shadow-sm transition-colors duration-300" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);">
+                            <div class="rounded-lg p-6 shadow-sm transition-colors duration-300 cursor-pointer hover:shadow-md" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);"
+                                 role="button" tabindex="0" title="Ver desglose de costes fijos"
+                                 onclick="dashboard.showFixedCostsModal()"
+                                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();dashboard.showFixedCostsModal();}">
                                 <div class="flex flex-col items-center text-center">
                                     <div class="p-4 rounded-full mb-3" style="background-color: rgba(239, 68, 68, 0.1);">
                                         <i class="fas flow-fixed-cost text-2xl text-red-500"></i>
@@ -873,6 +876,7 @@
                                     <p class="text-sm font-medium mb-1" style="color: var(--text-secondary);">Costes Fijos</p>
                                     <p id="widget-costes-fijos" class="text-2xl font-bold text-red-500">€0.00</p>
                                     <p class="text-xs mt-1" style="color: var(--text-secondary);">Pendientes este mes</p>
+                                    <p class="text-xs mt-1" style="color: var(--brand-primary);">Toca para ver el desglose</p>
                                 </div>
                             </div>
 
@@ -1767,6 +1771,25 @@
             </div>
             <div id="flow-detail-body" style="padding: 1.25rem 1.5rem;">
                 <!-- Se llena dinámicamente por dashboard.renderFlowDetailContent() -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Desglose de Costes Fijos -->
+    <div id="fixed-costs-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center px-4" style="background: rgba(0,0,0,0.5); padding-top: 2rem; padding-bottom: 2rem;"
+         onclick="if(event.target===this) dashboard.closeFixedCostsModal()">
+        <div class="w-full rounded-xl shadow-2xl" style="max-width: 32rem; background-color: var(--bg-primary); border: 1px solid var(--border-color); max-height: 90vh; overflow-y: auto;">
+            <div class="flex justify-between items-center" style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); position: sticky; top: 0; background-color: var(--bg-primary); z-index: 1;">
+                <div>
+                    <h3 class="text-lg font-semibold" style="color: var(--text-primary);">Desglose de costes fijos</h3>
+                    <p class="text-xs" style="color: var(--text-secondary);">Estado de pago de este mes</p>
+                </div>
+                <button type="button" onclick="dashboard.closeFixedCostsModal()" style="color: var(--text-secondary);" aria-label="Cerrar" title="Cerrar">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="fixed-costs-body" style="padding: 1.25rem 1.5rem;">
+                <!-- Se llena dinámicamente por dashboard.renderFixedCostsContent() -->
             </div>
         </div>
     </div>
@@ -5859,6 +5882,82 @@
                     </div>`;
 
                 body.innerHTML = html;
+            }
+
+            // Modal de desglose de costes fijos. Usa las mismas funciones que el widget
+            // (getFixedCostAccounts / calculateTotalFixedCosts / calculatePaidFixedCosts)
+            // para que los totales cuadren con el número del dashboard.
+            showFixedCostsModal() {
+                const modal = document.getElementById('fixed-costs-modal');
+                if (!modal) return;
+                this.renderFixedCostsContent();
+                modal.classList.remove('hidden');
+                document.body.style.overflow = 'hidden';
+                if (!this._fixedEsc) this._fixedEsc = (e) => { if (e.key === 'Escape') this.closeFixedCostsModal(); };
+                document.addEventListener('keydown', this._fixedEsc);
+            }
+
+            closeFixedCostsModal() {
+                const modal = document.getElementById('fixed-costs-modal');
+                if (!modal) return;
+                modal.classList.add('hidden');
+                document.body.style.overflow = '';
+                if (this._fixedEsc) document.removeEventListener('keydown', this._fixedEsc);
+            }
+
+            renderFixedCostsContent() {
+                const body = document.getElementById('fixed-costs-body');
+                if (!body) return;
+
+                const am = this.accountingManager;
+                const cuentas = am.getFixedCostAccounts();
+                const fmtC = (v) => this.formatCurrency(v);
+
+                if (!cuentas.length) {
+                    body.innerHTML = `<p style="font-size:13px;color:var(--text-secondary);text-align:center;padding:24px 0;">No tienes costes fijos marcados todavía.</p>`;
+                    return;
+                }
+
+                // Gasto acumulado del mes en curso por cuenta destino (misma lógica que
+                // calculatePaidFixedCosts) para marcar cada coste como pagado/pendiente.
+                const now = new Date();
+                const mes = now.getMonth(), anio = now.getFullYear();
+                const pagadoPorCuenta = {};
+                am.getMovements().forEach(mov => {
+                    if (mov.tipo !== 'gasto') return;
+                    const d = new Date(mov.fecha);
+                    if (d.getMonth() === mes && d.getFullYear() === anio) {
+                        pagadoPorCuenta[mov.cuenta_destino_id] = (pagadoPorCuenta[mov.cuenta_destino_id] || 0) + mov.cantidad;
+                    }
+                });
+
+                const filas = cuentas.map(acc => {
+                    const importe = acc.fixed_monthly_amount || 0;
+                    const pagado = (pagadoPorCuenta[acc.id] || 0) > 0;
+                    const badge = pagado
+                        ? `<span style="font-size:11px;font-weight:600;color:var(--success-color);background:rgba(16,163,74,0.12);border-radius:999px;padding:2px 9px;white-space:nowrap;"><i class="fas fa-check" style="margin-right:4px;"></i>Pagado</span>`
+                        : `<span style="font-size:11px;font-weight:600;color:#EF4444;background:rgba(239,68,68,0.12);border-radius:999px;padding:2px 9px;white-space:nowrap;">Pendiente</span>`;
+                    return `
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-color);">
+                            <div style="min-width:0;">
+                                <p style="font-size:13.5px;font-weight:600;color:var(--text-primary);margin:0;overflow:hidden;text-overflow:ellipsis;">${acc.nombre}</p>
+                                <p style="font-size:11.5px;color:var(--text-secondary);margin:2px 0 0;">${fmtC(importe)}/mes${acc.fixed_due_day ? ` · vence el día ${acc.fixed_due_day}` : ''}</p>
+                            </div>
+                            <div style="text-align:right;flex-shrink:0;">${badge}</div>
+                        </div>`;
+                }).join('');
+
+                const total = am.calculateTotalFixedCosts();
+                const pagadoTotal = am.calculatePaidFixedCosts();
+                const pendiente = total - pagadoTotal;
+
+                body.innerHTML = `
+                    <div>${filas}</div>
+                    <div style="margin-top:14px;padding-top:12px;border-top:2px solid var(--border-color);display:flex;flex-direction:column;gap:6px;font-size:13px;">
+                        <div style="display:flex;justify-content:space-between;color:var(--text-secondary);"><span>Total mensual</span><span style="font-weight:600;color:var(--text-primary);">${fmtC(total)}</span></div>
+                        <div style="display:flex;justify-content:space-between;color:var(--text-secondary);"><span>Pagado este mes</span><span style="font-weight:600;color:var(--success-color);">${fmtC(pagadoTotal)}</span></div>
+                        <div style="display:flex;justify-content:space-between;align-items:baseline;padding-top:6px;border-top:1px solid var(--border-color);"><span style="font-weight:700;color:var(--text-primary);">Pendiente este mes</span><span style="font-weight:700;font-size:18px;color:#EF4444;">${fmtC(pendiente)}</span></div>
+                    </div>`;
             }
 
             updatePremiumWidgets() {
