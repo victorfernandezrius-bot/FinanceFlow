@@ -6302,14 +6302,16 @@
                                                 <i class="fas ${this.getAccountIcon(account.tipo)} text-blue-600"></i>
                                             </div>
                                             <div class="ml-4">
-                                                <h4 class="font-medium text-gray-900">
-                                                    <a href="javascript:void(0)" 
-                                                       onclick="dashboard.showAccountDetail('${account.id}', {})" 
+                                                <h4 class="font-medium text-gray-900 flex items-center">
+                                                    <a href="javascript:void(0)"
+                                                       onclick="dashboard.showAccountDetail('${account.id}', {})"
                                                        class="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer">
                                                         ${account.nombre}
                                                     </a>
+                                                    ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h4>
                                                 <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
+                                                ${account.is_fixed_cost ? `<p class="text-xs text-red-600">€${account.fixed_monthly_amount}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                         </div>
                                         <div class="text-right">
