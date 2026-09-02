@@ -7945,11 +7945,11 @@
                     case 'gasto':
                         accountsSection.innerHTML = `
                             <div>
-                                <label for="source-account" class="block text-sm font-medium text-gray-700">Cuenta Origen (Activo o Patrimonio)</label>
+                                <label for="source-account" class="block text-sm font-medium text-gray-700">Cuenta Origen (Activo, Pasivo o Patrimonio)</label>
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta origen...</option>
-                                    ${accounts.filter(acc => ['activo', 'patrimonio'].includes(acc.tipo)).map(acc =>
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                    ${accounts.filter(acc => ['activo', 'pasivo', 'patrimonio'].includes(acc.tipo)).map(acc =>
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>

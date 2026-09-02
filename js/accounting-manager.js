@@ -346,9 +346,10 @@ class AccountingManager {
                 break;
 
             case 'gasto':
-                // Origen: Activo (gasto normal) o Patrimonio (deterioro/pérdida de valor de un bien)
-                if (!['activo', 'patrimonio'].includes(cuentaOrigen.tipo)) {
-                    throw new Error('La cuenta origen debe ser de tipo Activo o Patrimonio');
+                // Origen: Activo (gasto normal), Pasivo (pago con tarjeta de crédito → aumenta
+                // la deuda) o Patrimonio (deterioro/pérdida de valor de un bien)
+                if (!['activo', 'pasivo', 'patrimonio'].includes(cuentaOrigen.tipo)) {
+                    throw new Error('La cuenta origen debe ser de tipo Activo, Pasivo o Patrimonio');
                 }
                 if (cuentaDestino.tipo !== 'gasto') {
                     throw new Error('La cuenta destino debe ser de tipo Gasto');
@@ -653,6 +654,15 @@ class AccountingManager {
             }
             if (origAcc?.tipo === 'pasivo') {
                 // Endeudamiento: pasivo aumenta (negativo para el usuario)
+                pasivosMov[m.cuenta_id] = pasivosMov[m.cuenta_id] || { nombre: origAcc.nombre, variacion: 0 };
+                pasivosMov[m.cuenta_id].variacion -= m.cantidad;
+            }
+        });
+        // Gasto pagado con tarjeta de crédito (origen pasivo): la deuda aumenta, igual
+        // convención que un endeudamiento (variación negativa para el usuario).
+        movsMonth.filter(m => m.tipo === 'gasto').forEach(m => {
+            const origAcc = accounts.find(a => a.id === m.cuenta_id);
+            if (origAcc?.tipo === 'pasivo') {
                 pasivosMov[m.cuenta_id] = pasivosMov[m.cuenta_id] || { nombre: origAcc.nombre, variacion: 0 };
                 pasivosMov[m.cuenta_id].variacion -= m.cantidad;
             }
