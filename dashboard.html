@@ -17,6 +17,23 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- flag-icons: banderas SVG (se ven bien en todos los SO, incluido Windows) para el selector de divisa -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css">
+    <style>
+        /* Dropdown custom de divisa (Mi Perfil). Respeta variables CSS y dark mode. */
+        .currency-select { position: relative; }
+        .currency-trigger { width: 100%; display: flex; align-items: center; gap: 8px; padding: var(--space-3); border-radius: 0.375rem; background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); cursor: pointer; text-align: left; font-size: 0.9rem; }
+        .currency-trigger .chev { margin-left: auto; color: var(--text-secondary); transition: transform .15s; }
+        .currency-select.open .currency-trigger .chev { transform: rotate(180deg); }
+        .currency-options { position: absolute; z-index: 60; left: 0; right: 0; margin-top: 4px; max-height: 260px; overflow-y: auto; padding: 4px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 0.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.18); list-style: none; }
+        .currency-option { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 0.375rem; cursor: pointer; color: var(--text-primary); font-size: 0.9rem; }
+        .currency-option:hover, .currency-option.focused { background-color: var(--bg-secondary); outline: none; }
+        .currency-option[aria-selected="true"] { background-color: var(--bg-secondary); font-weight: 600; }
+        .currency-option-code { font-weight: 600; }
+        .currency-option-sym { color: var(--text-secondary); }
+        .currency-option-name { color: var(--text-secondary); margin-left: auto; font-size: 0.82rem; }
+        .currency-flag.fi { width: 1.33em; height: 1em; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); flex-shrink: 0; }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://js.stripe.com/v3/"></script>
@@ -8262,6 +8279,134 @@
                 document.querySelectorAll('[data-currency-symbol]').forEach(el => { el.textContent = sym; });
             }
 
+            // ===== Selector de divisa con banderas (dropdown custom) =====
+            // Cada divisa se mapea a la bandera de su PAÍS (flag-icons). El valor elegido se
+            // escribe en <input hidden id="profile-currency"> para NO cambiar saveUserProfile().
+            _currencyData() {
+                return [
+                    { code: 'EUR', flag: 'eu', sym: '€',   name: 'Euro' },
+                    { code: 'USD', flag: 'us', sym: '$',   name: 'Dólar estadounidense' },
+                    { code: 'MXN', flag: 'mx', sym: '$',   name: 'Peso mexicano' },
+                    { code: 'COP', flag: 'co', sym: '$',   name: 'Peso colombiano' },
+                    { code: 'ARS', flag: 'ar', sym: '$',   name: 'Peso argentino' },
+                    { code: 'CLP', flag: 'cl', sym: '$',   name: 'Peso chileno' },
+                    { code: 'PEN', flag: 'pe', sym: 'S/',  name: 'Sol peruano' },
+                    { code: 'UYU', flag: 'uy', sym: '$',   name: 'Peso uruguayo' },
+                    { code: 'BOB', flag: 'bo', sym: 'Bs',  name: 'Boliviano' },
+                    { code: 'PYG', flag: 'py', sym: '₲',   name: 'Guaraní paraguayo' },
+                    { code: 'BRL', flag: 'br', sym: 'R$',  name: 'Real brasileño' },
+                    { code: 'GTQ', flag: 'gt', sym: 'Q',   name: 'Quetzal guatemalteco' },
+                    { code: 'CRC', flag: 'cr', sym: '₡',   name: 'Colón costarricense' },
+                    { code: 'DOP', flag: 'do', sym: '$',   name: 'Peso dominicano' },
+                    { code: 'HNL', flag: 'hn', sym: 'L',   name: 'Lempira hondureño' },
+                    { code: 'NIO', flag: 'ni', sym: 'C$',  name: 'Córdoba nicaragüense' },
+                    { code: 'PAB', flag: 'pa', sym: 'B/.', name: 'Balboa panameño' },
+                    { code: 'VES', flag: 've', sym: 'Bs',  name: 'Bolívar venezolano' }
+                ];
+            }
+
+            _currencyDropdownHTML() {
+                const data = this._currencyData();
+                const current = (this.currentUser && this.currentUser.currency) || 'EUR';
+                const cur = data.find(c => c.code === current) || data[0];
+                const options = data.map(c => `
+                    <li role="option" data-code="${c.code}" tabindex="-1" aria-selected="${c.code === cur.code}" class="currency-option${c.code === cur.code ? ' focused' : ''}" onclick="dashboard._selectCurrency('${c.code}')">
+                        <span class="fi fi-${c.flag} currency-flag"></span>
+                        <span class="currency-option-code">${c.code}</span>
+                        <span class="currency-option-sym">${c.sym}</span>
+                        <span class="currency-option-name">${c.name}</span>
+                    </li>`).join('');
+                return `
+                    <div class="currency-select" id="currency-select">
+                        <button type="button" id="currency-trigger" class="currency-trigger" aria-haspopup="listbox" aria-expanded="false" onclick="dashboard._toggleCurrencyDropdown()" onkeydown="dashboard._currencyTriggerKey(event)">
+                            <span class="fi fi-${cur.flag} currency-flag" id="currency-trigger-flag"></span>
+                            <span id="currency-trigger-code" class="currency-option-code">${cur.code}</span>
+                            <span id="currency-trigger-sym" class="currency-option-sym">${cur.sym}</span>
+                            <i class="fas fa-chevron-down chev"></i>
+                        </button>
+                        <ul class="currency-options" id="currency-options" role="listbox" aria-label="Divisa" tabindex="-1" hidden onkeydown="dashboard._currencyKeydown(event)">
+                            ${options}
+                        </ul>
+                    </div>
+                    <input type="hidden" id="profile-currency" value="${cur.code}">`;
+            }
+
+            _toggleCurrencyDropdown() {
+                const sel = document.getElementById('currency-select');
+                if (!sel) return;
+                sel.classList.contains('open') ? this._closeCurrencyDropdown() : this._openCurrencyDropdown();
+            }
+
+            _openCurrencyDropdown() {
+                const sel = document.getElementById('currency-select');
+                const list = document.getElementById('currency-options');
+                const trigger = document.getElementById('currency-trigger');
+                if (!sel || !list) return;
+                sel.classList.add('open');
+                list.hidden = false;
+                if (trigger) trigger.setAttribute('aria-expanded', 'true');
+                const selected = list.querySelector('[aria-selected="true"]') || list.querySelector('.currency-option');
+                list.querySelectorAll('.focused').forEach(e => e.classList.remove('focused'));
+                if (selected) { selected.classList.add('focused'); selected.focus(); }
+                this._currencyOutside = (e) => { if (!sel.contains(e.target)) this._closeCurrencyDropdown(); };
+                setTimeout(() => document.addEventListener('click', this._currencyOutside), 0);
+            }
+
+            _closeCurrencyDropdown() {
+                const sel = document.getElementById('currency-select');
+                const list = document.getElementById('currency-options');
+                const trigger = document.getElementById('currency-trigger');
+                if (!sel || !list) return;
+                sel.classList.remove('open');
+                list.hidden = true;
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                if (this._currencyOutside) { document.removeEventListener('click', this._currencyOutside); this._currencyOutside = null; }
+            }
+
+            _selectCurrency(code) {
+                const c = this._currencyData().find(x => x.code === code);
+                if (!c) return;
+                const hidden = document.getElementById('profile-currency');
+                if (hidden) hidden.value = code; // valor que lee saveUserProfile() → PUT sin cambios
+                const flag = document.getElementById('currency-trigger-flag');
+                if (flag) flag.className = `fi fi-${c.flag} currency-flag`;
+                const codeEl = document.getElementById('currency-trigger-code');
+                if (codeEl) codeEl.textContent = c.code;
+                const symEl = document.getElementById('currency-trigger-sym');
+                if (symEl) symEl.textContent = c.sym;
+                document.querySelectorAll('#currency-options .currency-option').forEach(li => {
+                    li.setAttribute('aria-selected', li.dataset.code === code ? 'true' : 'false');
+                });
+                this._closeCurrencyDropdown();
+                const trigger = document.getElementById('currency-trigger');
+                if (trigger) trigger.focus();
+            }
+
+            _currencyTriggerKey(event) {
+                if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    this._openCurrencyDropdown();
+                }
+            }
+
+            _currencyKeydown(event) {
+                const list = document.getElementById('currency-options');
+                if (!list) return;
+                const options = Array.from(list.querySelectorAll('.currency-option'));
+                const currentIdx = options.findIndex(o => o.classList.contains('focused'));
+                const move = (idx) => {
+                    options.forEach(o => o.classList.remove('focused'));
+                    const el = options[idx];
+                    if (el) { el.classList.add('focused'); el.focus(); }
+                };
+                if (event.key === 'ArrowDown') { event.preventDefault(); move(Math.min(currentIdx + 1, options.length - 1)); }
+                else if (event.key === 'ArrowUp') { event.preventDefault(); move(Math.max(currentIdx - 1, 0)); }
+                else if (event.key === 'Home') { event.preventDefault(); move(0); }
+                else if (event.key === 'End') { event.preventDefault(); move(options.length - 1); }
+                else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (options[currentIdx]) this._selectCurrency(options[currentIdx].dataset.code); }
+                else if (event.key === 'Escape') { event.preventDefault(); this._closeCurrencyDropdown(); const t = document.getElementById('currency-trigger'); if (t) t.focus(); }
+            }
+
             formatDate(dateString) {
                 const date = new Date(dateString);
                 return date.toLocaleDateString('es-ES');
@@ -9148,11 +9293,7 @@
                                 </div>` : ''}
                                 <div class="pt-2" style="border-top: 1px solid var(--border-color);">
                                     <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Divisa</label>
-                                    <select id="profile-currency" class="w-full rounded-md form-input" style="padding: var(--space-3); background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);">
-                                        ${[['EUR','€'],['USD','$'],['MXN','$'],['COP','$'],['ARS','$'],['CLP','$'],['PEN','S/'],['UYU','$'],['BOB','Bs'],['PYG','₲'],['BRL','R$'],['GTQ','Q'],['CRC','₡'],['DOP','$'],['HNL','L'],['NIO','C$'],['PAB','B/.'],['VES','Bs']].map(([code, sym]) =>
-                                            `<option value="${code}"${(this.currentUser.currency || 'EUR') === code ? ' selected' : ''}>${code} ${sym}</option>`
-                                        ).join('')}
-                                    </select>
+                                    ${this._currencyDropdownHTML()}
                                     <p class="small-text" style="margin-top: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; background-color: var(--bg-secondary); color: var(--text-secondary); line-height: 1.5; border: 1px solid var(--border-color);">
                                         <i class="fas fa-circle-info" style="margin-right: 4px; color: var(--brand-primary);"></i>
                                         El cambio de divisa solo modifica el símbolo y el formato de los importes. <strong style="color: var(--text-primary);">No se aplica ningún tipo de cambio</strong>: los valores que introduzcas deben estar ya expresados en la moneda seleccionada.
