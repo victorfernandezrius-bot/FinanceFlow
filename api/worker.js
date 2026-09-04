@@ -393,7 +393,7 @@ export default {
                     .bind(id, email.toLowerCase(), name, pwHash, plan, planExp, now).run();
 
                 const token = await signJWT({ sub: id, exp: Math.floor(Date.now() / 1e3) + 30 * 86400 }, env.JWT_SECRET);
-        const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, created_at: now };
+        const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, currency: 'EUR', created_at: now };
         // Enviar email de bienvenida (sin bloquear la respuesta)
         ctx.waitUntil(sendEmail(env, {
           to: email.toLowerCase(),
@@ -559,11 +559,20 @@ export default {
                     // plan y plan_expires_at NUNCA se aceptan del cliente: solo el webhook
                     // de Stripe y verify-session pueden cambiarlos.
                     const newName = u.name ?? authUser.name;
+                    // Divisa: solo cambia el formato/símbolo mostrado (no hay conversión de
+                    // importes ni afecta al cobro de Stripe, que sigue en EUR). Validar contra
+                    // la lista permitida (EUR + principales de LATAM).
+                    const ALLOWED_CURRENCIES = ['EUR','USD','MXN','COP','ARS','CLP','PEN','UYU','BOB','PYG','BRL','GTQ','CRC','DOP','HNL','NIO','PAB','VES'];
+                    let newCurrency = authUser.currency || 'EUR';
+                    if (u.currency !== undefined) {
+                        if (!ALLOWED_CURRENCIES.includes(u.currency)) return json({ error: 'Divisa no permitida' }, 400, cors);
+                        newCurrency = u.currency;
+                    }
                     await env.DB.prepare(
-                        `UPDATE users SET name=?, updated_at=? WHERE id=?`)
-                        .bind(newName, now, authUser.id).run();
+                        `UPDATE users SET name=?, currency=?, updated_at=? WHERE id=?`)
+                        .bind(newName, newCurrency, now, authUser.id).run();
                     delete authUser.password_hash;
-                    return json({ ...authUser, name: newName, updated_at: now }, 200, cors);
+                    return json({ ...authUser, name: newName, currency: newCurrency, updated_at: now }, 200, cors);
                 }
                if (method === "DELETE") {
           const delId = authUser.id;
