@@ -19,6 +19,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- flag-icons: banderas SVG (se ven bien en todos los SO, incluido Windows) para el selector de divisa -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css">
+    <!-- SimpleWebAuthn (browser) para activar el login biométrico Face ID / Touch ID -->
+    <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13/dist/bundle/index.umd.min.js"></script>
     <style>
         /* Dropdown custom de divisa (Mi Perfil). Respeta variables CSS y dark mode. */
         .currency-select { position: relative; }
@@ -9299,6 +9301,13 @@
                                         El cambio de divisa solo modifica el símbolo y el formato de los importes. <strong style="color: var(--text-primary);">No se aplica ningún tipo de cambio</strong>: los valores que introduzcas deben estar ya expresados en la moneda seleccionada.
                                     </p>
                                 </div>
+                                <div id="biometric-profile-section" class="pt-2 hidden" style="border-top: 1px solid var(--border-color);">
+                                    <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Acceso biométrico</label>
+                                    <button type="button" id="biometric-enable-btn" onclick="dashboard.enableBiometric(this)" class="btn-responsive" style="width:100%;background-color:transparent;color:var(--text-primary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;gap:0.5rem;">
+                                        <i class="fas fa-fingerprint" style="color:var(--brand-primary);"></i>Activar Face ID / Touch ID
+                                    </button>
+                                    <p id="biometric-status" class="small-text" style="margin-top:0.5rem;color:var(--text-secondary);line-height:1.5;"></p>
+                                </div>
                             </div>
 
                             <div class="flex flex-col sm:flex-row justify-end gap-3 mt-8">
@@ -9320,6 +9329,68 @@
                     e.preventDefault();
                     this.saveUserProfile();
                 });
+
+                // Mostrar el bloque de acceso biométrico si el dispositivo lo soporta
+                this._setupProfileBiometric();
+            }
+
+            // Revela el bloque biométrico del perfil solo si hay autenticador de plataforma
+            // (Face ID / Touch ID) y la librería está cargada. Si no, se queda oculto.
+            async _setupProfileBiometric() {
+                try {
+                    if (!window.PublicKeyCredential || !window.SimpleWebAuthnBrowser) return;
+                    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+                    if (!available) return;
+                    const section = document.getElementById('biometric-profile-section');
+                    if (section) section.classList.remove('hidden');
+                } catch (e) { /* si falla la detección, se queda oculto */ }
+            }
+
+            // Registra una passkey (Face ID / Touch ID) para el usuario en sesión.
+            async enableBiometric(btn) {
+                const status = document.getElementById('biometric-status');
+                const setStatus = (msg, color) => { if (status) { status.textContent = msg; status.style.color = color || 'var(--text-secondary)'; } };
+                try {
+                    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; btn.style.cursor = 'wait'; }
+                    setStatus('Preparando...', 'var(--text-secondary)');
+                    const token = DataClient.getAuthToken();
+                    const optRes = await fetch(`${window.API_URL}/auth/webauthn/register-options`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+                    });
+                    if (!optRes.ok) throw new Error('options');
+                    const options = await optRes.json();
+
+                    let attResp;
+                    try {
+                        attResp = await window.SimpleWebAuthnBrowser.startRegistration({ optionsJSON: options });
+                    } catch (err) {
+                        if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+                        if (err && err.name === 'InvalidStateError') {
+                            setStatus('Ya tienes Face ID / Touch ID activado en este dispositivo.', 'var(--success-color)');
+                        } else {
+                            setStatus('Registro cancelado o no disponible en este dispositivo.', '#EF4444');
+                        }
+                        return;
+                    }
+
+                    const verRes = await fetch(`${window.API_URL}/auth/webauthn/register-verify`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify(attResp)
+                    });
+                    const data = await verRes.json();
+                    if (!verRes.ok || !data.success) {
+                        if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+                        setStatus(data.error || 'No se pudo activar el acceso biométrico.', '#EF4444');
+                        return;
+                    }
+                    if (btn) { btn.hidden = true; }
+                    setStatus('✓ Activado en este dispositivo. La próxima vez podrás entrar con Face ID / Touch ID.', 'var(--success-color)');
+                } catch (e) {
+                    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+                    setStatus('No se pudo activar el acceso biométrico. Inténtalo de nuevo.', '#EF4444');
+                }
             }
 
             async openCustomerPortal(btn) {

@@ -20,6 +20,12 @@
 // ============================================================
 
 import { buildPushPayload } from '@block65/webcrypto-web-push';
+import {
+    generateRegistrationOptions,
+    verifyRegistrationResponse,
+    generateAuthenticationOptions,
+    verifyAuthenticationResponse
+} from '@simplewebauthn/server';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -99,6 +105,27 @@ async function verifyPassword(password, stored) {
     const salt = Uint8Array.from(saltHex.match(/.{2}/g).map(h => parseInt(h, 16)));
     const recomputed = await hashPassword(password, salt);
     return timingSafeEqual(recomputed, stored);
+}
+
+// ---------- WebAuthn / Passkeys (Face ID / Touch ID) ----------
+// base64url <-> bytes para guardar/leer la clave pública de la credencial.
+function bufToB64url(buf) {
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function b64urlToBuf(s) {
+    const bin = atob(String(s).replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
+// rpID = dominio de APP_URL sin protocolo; expectedOrigin = APP_URL sin barra final.
+function webauthnConfig(env) {
+    let rpID = 'localhost';
+    try { rpID = new URL(env.APP_URL).hostname; } catch (_) {}
+    return { rpName: 'FinanceFlow', rpID, expectedOrigin: (env.APP_URL || '').replace(/\/$/, '') };
 }
 
 async function getAuthUser(request, env) {
@@ -419,6 +446,76 @@ export default {
                 return json({ success: true, token, currentUser: user }, 200, cors);
             }
 
+            // ---------- WebAuthn: LOGIN (sin sesión previa) ----------
+            // Flujo "usernameless"/discoverable: sin allowCredentials, el dispositivo
+            // elige entre las passkeys guardadas. El reto se cachea por un id temporal.
+            if (path === '/api/auth/webauthn/login-options' && method === 'POST') {
+                const { rpID } = webauthnConfig(env);
+                const options = await generateAuthenticationOptions({
+                    rpID,
+                    userVerification: 'required'
+                });
+                const loginId = crypto.randomUUID();
+                await env.CACHE.put(`webauthn_login:${loginId}`, options.challenge, { expirationTtl: 300 });
+                return json({ options, loginId }, 200, cors);
+            }
+
+            if (path === '/api/auth/webauthn/login-verify' && method === 'POST') {
+                // Mismo rate limit por IP que /api/auth/login (anti fuerza bruta)
+                const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+
+                const { loginId, response } = await request.json();
+                if (!loginId || !response || !response.id)
+                    return json({ error: 'Solicitud inválida' }, 400, cors);
+
+                const expectedChallenge = await env.CACHE.get(`webauthn_login:${loginId}`);
+                if (!expectedChallenge)
+                    return json({ error: 'La sesión de login ha expirado, vuelve a intentarlo.' }, 400, cors);
+
+                // response.id = credential_id (base64url) que el dispositivo eligió
+                const cred = await env.DB.prepare('SELECT * FROM webauthn_credentials WHERE credential_id = ?')
+                    .bind(response.id).first();
+                if (!cred)
+                    return json({ error: 'No hay credenciales registradas en este dispositivo.' }, 401, cors);
+
+                const { rpID, expectedOrigin } = webauthnConfig(env);
+                let verification;
+                try {
+                    verification = await verifyAuthenticationResponse({
+                        response,
+                        expectedChallenge,
+                        expectedOrigin,
+                        expectedRPID: rpID,
+                        requireUserVerification: true,
+                        credential: {
+                            id: cred.credential_id,
+                            publicKey: b64urlToBuf(cred.public_key),
+                            counter: cred.counter
+                        }
+                    });
+                } catch (e) {
+                    return json({ error: 'No se pudo verificar la credencial.' }, 401, cors);
+                }
+                if (!verification.verified)
+                    return json({ error: 'No se pudo verificar la credencial.' }, 401, cors);
+
+                // Actualizar counter (detección de clonado) y last_used_at
+                const now = new Date().toISOString();
+                await env.DB.prepare('UPDATE webauthn_credentials SET counter = ?, last_used_at = ? WHERE id = ?')
+                    .bind(verification.authenticationInfo.newCounter, now, cred.id).run();
+                await env.CACHE.delete(`webauthn_login:${loginId}`);
+
+                const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(cred.user_id).first();
+                if (!user) return json({ error: 'Usuario no encontrado' }, 404, cors);
+
+                // Mismo JWT y mismo shape de respuesta que /api/auth/login
+                const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
+                delete user.password_hash;
+                return json({ success: true, token, currentUser: user }, 200, cors);
+            }
+
             if (path === '/api/auth/google' && method === 'POST') {
                 const { credential } = await request.json();
                 if (!credential) return json({ error: 'Falta credential' }, 400, cors);
@@ -541,6 +638,75 @@ export default {
             const authUser = await getAuthUser(request, env);
             const uid = authUser?.id;
 
+            // ---------- WebAuthn: REGISTRO de credencial (requiere sesión activa) ----------
+            if (path === '/api/auth/webauthn/register-options' && method === 'POST') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                const { rpName, rpID } = webauthnConfig(env);
+                // Excluir las passkeys que este usuario ya tenga registradas
+                const existing = await env.DB.prepare('SELECT credential_id FROM webauthn_credentials WHERE user_id = ?')
+                    .bind(authUser.id).all();
+                const options = await generateRegistrationOptions({
+                    rpName,
+                    rpID,
+                    userID: new TextEncoder().encode(authUser.id),
+                    userName: authUser.email,
+                    userDisplayName: authUser.name || authUser.email,
+                    attestationType: 'none',
+                    authenticatorSelection: {
+                        authenticatorAttachment: 'platform',
+                        userVerification: 'required',
+                        residentKey: 'preferred'
+                    },
+                    excludeCredentials: (existing.results || []).map(r => ({ id: r.credential_id }))
+                });
+                await env.CACHE.put(`webauthn_challenge:${authUser.id}`, options.challenge, { expirationTtl: 300 });
+                return json(options, 200, cors);
+            }
+
+            if (path === '/api/auth/webauthn/register-verify' && method === 'POST') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `rl:wa-reg:${authUser.id}`, 10, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+
+                const body = await request.json();
+                const expectedChallenge = await env.CACHE.get(`webauthn_challenge:${authUser.id}`);
+                if (!expectedChallenge)
+                    return json({ error: 'El reto ha expirado, vuelve a intentarlo.' }, 400, cors);
+
+                const { rpID, expectedOrigin } = webauthnConfig(env);
+                let verification;
+                try {
+                    verification = await verifyRegistrationResponse({
+                        response: body,
+                        expectedChallenge,
+                        expectedOrigin,
+                        expectedRPID: rpID,
+                        requireUserVerification: true
+                    });
+                } catch (e) {
+                    return json({ error: 'Verificación fallida: ' + e.message }, 400, cors);
+                }
+                if (!verification.verified || !verification.registrationInfo)
+                    return json({ error: 'No se pudo verificar la credencial.' }, 400, cors);
+
+                const { credential } = verification.registrationInfo;
+                const now = new Date().toISOString();
+                await env.DB.prepare(
+                    `INSERT INTO webauthn_credentials (id, user_id, credential_id, public_key, counter, device_name, created_at)
+                     VALUES (?,?,?,?,?,?,?)`)
+                    .bind(
+                        crypto.randomUUID(),
+                        authUser.id,
+                        credential.id,
+                        bufToB64url(credential.publicKey),
+                        credential.counter || 0,
+                        (request.headers.get('User-Agent') || '').slice(0, 120),
+                        now
+                    ).run();
+                await env.CACHE.delete(`webauthn_challenge:${authUser.id}`);
+                return json({ success: true }, 200, cors);
+            }
+
             // ---------- USERS ----------
             if (path === '/api/users' && method === 'GET') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
@@ -586,6 +752,7 @@ export default {
             env.DB.prepare("DELETE FROM notifications WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM bank_connections WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM import_info WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM webauthn_credentials WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM users WHERE id=?").bind(delId)
           ]);
           return json({ success: true }, 200, cors);

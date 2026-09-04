@@ -15,6 +15,8 @@
     <script src="./public/config.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SimpleWebAuthn (browser) para login biométrico Face ID / Touch ID -->
+    <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13/dist/bundle/index.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* Paleta de marca Contabilidad Personal */
@@ -64,6 +66,19 @@
                     </div>
                 </div>
                 
+                <!-- Login biométrico (Face ID / Touch ID) — solo si el dispositivo lo soporta -->
+                <div id="biometric-section" class="hidden mb-4">
+                    <button type="button" id="biometric-login-btn"
+                            class="w-full flex justify-center items-center gap-2 py-3 px-4 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                        <i class="fas fa-fingerprint text-blue-600"></i>
+                        Iniciar sesión con Face ID / Touch ID
+                    </button>
+                    <div class="relative my-4">
+                        <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                        <div class="relative flex justify-center text-xs"><span class="px-2 bg-white text-gray-400">o con tu email</span></div>
+                    </div>
+                </div>
+
                 <form id="login-form" class="space-y-6">
                     <div>
                         <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
@@ -180,7 +195,8 @@
 
     <script type="module">
         import Auth from './js/auth.js';
-        
+        import DataClient from './src/services/data-client.js';
+
         class LoginPage {
             constructor() {
                 this.init();
@@ -194,6 +210,71 @@
                 }
 
                 this.setupEventListeners();
+                this.setupBiometric();
+            }
+
+            // Muestra el botón biométrico solo si el dispositivo tiene un autenticador
+            // de plataforma (Face ID / Touch ID). Si no, se queda oculto (fallback a email).
+            async setupBiometric() {
+                try {
+                    if (!window.PublicKeyCredential || !window.SimpleWebAuthnBrowser) return;
+                    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+                    if (!available) return;
+                    const section = document.getElementById('biometric-section');
+                    const btn = document.getElementById('biometric-login-btn');
+                    if (!section || !btn) return;
+                    section.classList.remove('hidden');
+                    btn.addEventListener('click', () => this.handleBiometricLogin());
+                } catch (e) {
+                    // Ante cualquier fallo de detección, dejamos el login por email como método.
+                }
+            }
+
+            async handleBiometricLogin() {
+                const API = window.API_URL || 'https://financeflow.victor-a97.workers.dev/api';
+                this.showLoading(true);
+                this.hideMessages();
+                try {
+                    const optRes = await fetch(`${API}/auth/webauthn/login-options`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include'
+                    });
+                    if (!optRes.ok) throw new Error('options');
+                    const { options, loginId } = await optRes.json();
+
+                    let asseResp;
+                    try {
+                        asseResp = await window.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON: options });
+                    } catch (err) {
+                        // Cancelado por el usuario o sin passkeys en este dispositivo
+                        this.showLoading(false);
+                        this.showError('No hay credenciales biométricas en este dispositivo o se canceló el acceso. Usa tu email y contraseña.');
+                        return;
+                    }
+
+                    const verRes = await fetch(`${API}/auth/webauthn/login-verify`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ loginId, response: asseResp })
+                    });
+                    const data = await verRes.json();
+                    if (!verRes.ok || !data.success) {
+                        this.showLoading(false);
+                        this.showError(data.error || 'No se pudo iniciar sesión con biometría.');
+                        return;
+                    }
+
+                    // Persistir la sesión EXACTAMENTE igual que el login por email
+                    DataClient.setAuthToken(data.token);
+                    await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                    this.showSuccess('¡Login exitoso! Redirigiendo...');
+                    setTimeout(() => { window.location.href = './dashboard.html'; }, 800);
+                } catch (e) {
+                    this.showLoading(false);
+                    this.showError('No se pudo iniciar sesión con biometría. Inténtalo de nuevo o usa tu email.');
+                }
             }
 
             setupEventListeners() {

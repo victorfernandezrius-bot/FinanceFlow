@@ -168,3 +168,17 @@ CREATE TABLE IF NOT EXISTS stripe_events (
 CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, device_id TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 CREATE TABLE IF NOT EXISTS push_log (user_id TEXT NOT NULL, notif_key TEXT NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY (user_id, notif_key));
+
+-- WebAuthn / Passkeys (login biométrico Face ID / Touch ID)
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  credential_id TEXT NOT NULL UNIQUE,
+  public_key TEXT NOT NULL,
+  counter INTEGER NOT NULL DEFAULT 0,
+  device_name TEXT,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
