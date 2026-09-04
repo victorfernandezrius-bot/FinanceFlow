@@ -1,0 +1,16 @@
+# Excluye del subido de assets (staging) todo lo que NO es frontend.
+# El frontend servido: *.html, js/, src/, public/, sw.js, offline.html, manifest, iconos.
+node_modules
+.git
+.github
+api
+db
+wrangler.toml
+package.json
+package-lock.json
+.dev.vars
+.dev.vars.example
+.gitignore
+.assetsignore
+README.md
+_routes.json

@@ -33,3 +33,35 @@ crons = ["0 8 * * *"]
 #   wrangler secret put GOCARDLESS_SECRET_ID
 #   wrangler secret put GOCARDLESS_SECRET_KEY
 # ---------------------------------------------------------
+
+# =========================================================
+# STAGING — para probar el login biométrico (Face ID / Touch ID) sobre HTTPS real.
+# Despliega con:  wrangler deploy --env staging
+# Sirve la app estática (login.html, dashboard.html, js/, public/, ...) Y la API
+# desde el mismo origen, para que rpID de WebAuthn = el dominio del Worker.
+# D1 y KV son PROPIOS de staging (no tocan producción).
+# Secretos de staging (mínimo JWT_SECRET):  wrangler secret put JWT_SECRET --env staging
+# =========================================================
+[env.staging]
+name = "financeflow-staging"
+
+[env.staging.assets]
+directory = "./"
+
+# Sin cron en staging
+[env.staging.triggers]
+crons = []
+
+[env.staging.vars]
+APP_URL = "https://financeflow-staging.victor-a97.workers.dev"
+GOOGLE_CLIENT_ID = "1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleusercontent.com"
+VAPID_PUBLIC_KEY = "BP6sAnJPgQWmT4963pl7rWZBLt55TP3NX1m0VKc_jf9rDI8tfOhmYuOT8CmAZsxxJHTO2jHuYh31sS3hVzihFUc"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "cp-db-staging"
+database_id = "35eb259c-f8e2-43bb-bce5-bf81377870c1"
+
+[[env.staging.kv_namespaces]]
+binding = "CACHE"
+id = "52d3707b1c2b4cb1800a00d4a4303e94"
