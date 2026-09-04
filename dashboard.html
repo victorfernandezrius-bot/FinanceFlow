@@ -1447,7 +1447,7 @@
                                             </select>
                                         </div>
                                         <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1">Importe (€)</label>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Importe (<span data-currency-symbol>€</span>)</label>
                                             <input type="number" id="scenario-mov-amount" step="0.01" min="0.01" class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="0.00" required>
                                         </div>
                                         <div>
@@ -3008,7 +3008,7 @@
                     const opts = opciones.map(a =>
                         `<option value="${a.id}"${a.id === preselectValue ? ' selected' : ''}>${this._escapeHtml(a.nombre)}</option>`).join('');
                     const sinAsignar = `<option value=""${preselectValue === '' ? ' selected' : ''}>— Sin asignar —</option>`;
-                    const importeFmt = (row.importe < 0 ? '-' : '+') + Math.abs(row.importe).toFixed(2) + ' €';
+                    const importeFmt = (row.importe < 0 ? '-' : '+') + this.formatCurrency(Math.abs(row.importe));
                     const tipoBadge = tipo === 'gasto'
                         ? '<span class="text-red-600">Gasto</span>'
                         : '<span class="text-green-600">Ingreso</span>';
@@ -5036,6 +5036,7 @@
                     try { const assoc = await DataClient.getAutocontrolAssociations(uid); this.accountAssociations = this._normalizeAssociations(assoc); } catch (e) { console.error('assoc:', e); }
                     try { this._scenariosCache = await DataClient.getScenarios(uid); } catch (e) { console.error('scenarios:', e); }
                 }
+                try { this._refreshCurrencySymbols(); } catch (e) { console.error('refreshCurrencySymbols:', e); }
                 try { this.updateDashboardMetrics(); } catch (e) { console.error('updateDashboardMetrics:', e); }
                 try { this.renderIncomeExpensesChart(); } catch (e) { console.error('renderIncomeExpensesChart:', e); }
                 try { this.renderRecentMovements(); } catch (e) { console.error('renderRecentMovements:', e); }
@@ -6311,7 +6312,7 @@
                                                     ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h4>
                                                 <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
-                                                ${account.is_fixed_cost ? `<p class="text-xs text-red-600">€${account.fixed_monthly_amount}/mes - Día ${account.fixed_due_day}</p>` : ''}
+                                                ${account.is_fixed_cost ? `<p class="text-xs text-red-600">${this.formatCurrency(account.fixed_monthly_amount)}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                         </div>
                                         <div class="text-right">
@@ -7145,7 +7146,7 @@
                                                     ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h5>
                                                 <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
-                                                ${account.is_fixed_cost ? `<p class="text-xs text-red-600">€${account.fixed_monthly_amount}/mes - Día ${account.fixed_due_day}</p>` : ''}
+                                                ${account.is_fixed_cost ? `<p class="text-xs text-red-600">${this.formatCurrency(account.fixed_monthly_amount)}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                             <div class="text-right">
                                                 <p class="text-lg font-semibold ${this.getAccountBalanceColor(account)}">
@@ -8003,11 +8004,11 @@
                                 <div id="desglose-fields" class="hidden space-y-3">
                                     <div class="grid grid-cols-2 gap-3">
                                         <div>
-                                            <label for="importe-capital" class="block text-xs font-medium text-gray-700">Amortización capital (€)</label>
+                                            <label for="importe-capital" class="block text-xs font-medium text-gray-700">Amortización capital (${this.currencySymbol()})</label>
                                             <input type="number" id="importe-capital" name="importe_capital" step="0.01" min="0" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="0.00" oninput="dashboard._syncDesgloseTotal()">
                                         </div>
                                         <div>
-                                            <label for="importe-interes" class="block text-xs font-medium text-gray-700">Intereses (€)</label>
+                                            <label for="importe-interes" class="block text-xs font-medium text-gray-700">Intereses (${this.currencySymbol()})</label>
                                             <input type="number" id="importe-interes" name="importe_interes" step="0.01" min="0" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm" placeholder="0.00" oninput="dashboard._syncDesgloseTotal()">
                                         </div>
                                     </div>
@@ -8167,7 +8168,7 @@
                         ) {
                             // Validar que capital + intereses ≈ total
                             if (Math.abs((importeCapital + importeInteres) - movementData.cantidad) > 0.01) {
-                                throw new Error(`La suma de capital (${importeCapital}€) + intereses (${importeInteres}€) debe ser igual al total (${movementData.cantidad}€)`);
+                                throw new Error(`La suma de capital (${this.formatCurrency(importeCapital)}) + intereses (${this.formatCurrency(importeInteres)}) debe ser igual al total (${this.formatCurrency(movementData.cantidad)})`);
                             }
                             
                             // Movimiento 1: Gasto de intereses (activo → cuenta gasto intereses)
@@ -8191,7 +8192,7 @@
                             });
                             
                             this.movementBeingEdited = null;
-                            this.showToast(`Pago registrado: ${importeCapital}€ capital + ${importeInteres}€ intereses`, 'success');
+                            this.showToast(`Pago registrado: ${this.formatCurrency(importeCapital)} capital + ${this.formatCurrency(importeInteres)} intereses`, 'success');
                         } else {
                             // Comportamiento normal sin desglose
                             await this.accountingManager.createMovement(movementData);
@@ -8243,6 +8244,22 @@
                 } catch (e) {
                     return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount || 0);
                 }
+            }
+
+            // Símbolo de la divisa del usuario (para etiquetas de formulario). No convierte nada.
+            currencySymbol() {
+                const currency = (window.Auth && Auth.currentUser && Auth.currentUser.currency) || 'EUR';
+                try {
+                    const parts = new Intl.NumberFormat('es-ES', { style: 'currency', currency, minimumFractionDigits: 0 }).formatToParts(0);
+                    const sym = parts.find(p => p.type === 'currency');
+                    return sym ? sym.value : '€';
+                } catch (e) { return '€'; }
+            }
+
+            // Rellena todos los <span data-currency-symbol> del DOM estático con el símbolo actual.
+            _refreshCurrencySymbols() {
+                const sym = this.currencySymbol();
+                document.querySelectorAll('[data-currency-symbol]').forEach(el => { el.textContent = sym; });
             }
 
             formatDate(dateString) {
@@ -8754,13 +8771,13 @@
                         if (actualAmount >= targetAmount) {
                             status = '✅ Objetivo cumplido';
                             statusClass = 'text-green-600 font-semibold';
-                            differenceText = difference > 0 ? `+€${difference.toFixed(2)} (extra)` : `€0.00`;
+                            differenceText = difference > 0 ? `+${this.formatCurrency(difference)} (extra)` : this.formatCurrency(0);
                         } else {
                             // ✅ CAMBIO: Usar verbo correcto según categoría
                             const verbo = category.key === 'savings' ? 'ahorrar' : 'invertir';
-                            status = `⚠️ Falta ${verbo} €${Math.abs(difference).toFixed(2)}`;
+                            status = `⚠️ Falta ${verbo} ${this.formatCurrency(Math.abs(difference))}`;
                             statusClass = 'text-red-600';
-                            differenceText = `-€${Math.abs(difference).toFixed(2)}`;
+                            differenceText = `-${this.formatCurrency(Math.abs(difference))}`;
                         }
                     } else {
                         // Necesidades/Ocio: diferencia = objetivo - actual (positivo = disponible)
@@ -8768,11 +8785,11 @@
                         if (actualAmount <= targetAmount) {
                             status = '✅ Dentro del plan';
                             statusClass = 'text-green-600 font-semibold';
-                            differenceText = `€${difference.toFixed(2)} disponible`;
+                            differenceText = `${this.formatCurrency(difference)} disponible`;
                         } else {
-                            status = `❌ Excedido en €${Math.abs(difference).toFixed(2)}`;
+                            status = `❌ Excedido en ${this.formatCurrency(Math.abs(difference))}`;
                             statusClass = 'text-red-600 font-semibold';
-                            differenceText = `-€${Math.abs(difference).toFixed(2)}`;
+                            differenceText = `-${this.formatCurrency(Math.abs(difference))}`;
                         }
                     }
                     
@@ -8783,10 +8800,10 @@
                                 ${category.name}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                €${targetAmount.toFixed(2)}
+                                ${this.formatCurrency(targetAmount)}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                €${actualAmount.toFixed(2)}
+                                ${this.formatCurrency(actualAmount)}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 ${differenceText}
