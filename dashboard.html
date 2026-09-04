@@ -9146,6 +9146,18 @@
                                         <i class="fas fa-credit-card"></i>Gestionar suscripción
                                     </button>
                                 </div>` : ''}
+                                <div class="pt-2" style="border-top: 1px solid var(--border-color);">
+                                    <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Divisa</label>
+                                    <select id="profile-currency" class="w-full rounded-md form-input" style="padding: var(--space-3); background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);">
+                                        ${[['EUR','€'],['USD','$'],['MXN','$'],['COP','$'],['ARS','$'],['CLP','$'],['PEN','S/'],['UYU','$'],['BOB','Bs'],['PYG','₲'],['BRL','R$'],['GTQ','Q'],['CRC','₡'],['DOP','$'],['HNL','L'],['NIO','C$'],['PAB','B/.'],['VES','Bs']].map(([code, sym]) =>
+                                            `<option value="${code}"${(this.currentUser.currency || 'EUR') === code ? ' selected' : ''}>${code} ${sym}</option>`
+                                        ).join('')}
+                                    </select>
+                                    <p class="small-text" style="margin-top: 0.5rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; background-color: var(--bg-secondary); color: var(--text-secondary); line-height: 1.5; border: 1px solid var(--border-color);">
+                                        <i class="fas fa-circle-info" style="margin-right: 4px; color: var(--brand-primary);"></i>
+                                        El cambio de divisa solo modifica el símbolo y el formato de los importes. <strong style="color: var(--text-primary);">No se aplica ningún tipo de cambio</strong>: los valores que introduzcas deben estar ya expresados en la moneda seleccionada.
+                                    </p>
+                                </div>
                             </div>
 
                             <div class="flex flex-col sm:flex-row justify-end gap-3 mt-8">
@@ -9204,7 +9216,9 @@
                     const name = document.getElementById('profile-name').value.trim();
                     const mainBank = document.getElementById('profile-bank').value.trim();
                     const accountsCount = parseInt(document.getElementById('profile-accounts-count').value) || 1;
-                    
+                    const currencyEl = document.getElementById('profile-currency');
+                    const currency = currencyEl ? currencyEl.value : (this.currentUser.currency || 'EUR');
+
                     // Validaciones básicas
                     if (!name) {
                         this.showNotification('El nombre de usuario es requerido', 'error');
@@ -9226,12 +9240,14 @@
 
                     localStorage.setItem('userProfile', JSON.stringify(userProfile));
 
-                    // Persistir el NOMBRE en la base de datos (mismo mecanismo autenticado que el
-                    // resto de la app: DataClient.saveUser -> PUT /api/users/:id con Bearer).
-                    // El worker solo aplica 'name'; email y plan no se tocan.
+                    // Persistir NOMBRE y DIVISA en la base de datos (mismo mecanismo autenticado:
+                    // DataClient.saveUser -> PUT /api/users/:id con Bearer). El worker solo aplica
+                    // 'name' y 'currency' (validada); email y plan no se tocan. La divisa NO
+                    // convierte importes: solo cambia el símbolo/formato mostrado.
                     this.currentUser.name = name;
-                    await DataClient.saveUser({ ...this.currentUser, name });
-                    // Actualizar sesión y Auth en memoria para que el nombre persista tras F5
+                    this.currentUser.currency = currency;
+                    await DataClient.saveUser({ ...this.currentUser, name, currency });
+                    // Actualizar sesión y Auth en memoria para que persistan tras F5
                     await DataClient.saveSession({ currentUser: this.currentUser });
                     if (window.Auth) Auth.currentUser = this.currentUser;
 
@@ -9243,7 +9259,12 @@
 
                     // Cerrar modal
                     document.getElementById('profile-modal').remove();
-                    
+
+                    // Re-renderizar la app para que todos los importes se muestren con el nuevo
+                    // símbolo sin recargar. No hay conversión: los números no cambian, solo el símbolo.
+                    try { await this.loadDashboardData(); } catch (e) { console.error('reload tras divisa:', e); }
+                    try { this.renderAccountsList(); } catch (e) { console.error('renderAccountsList tras divisa:', e); }
+
                     // Mostrar éxito
                     this.showNotification('Perfil actualizado correctamente', 'success');
                     
