@@ -8228,10 +8228,21 @@
 
             // Utilidades de formato
             formatCurrency(amount) {
-                return new Intl.NumberFormat('es-ES', {
-                    style: 'currency',
-                    currency: 'EUR'
-                }).format(amount || 0);
+                // La divisa solo cambia el formato/símbolo mostrado; el importe NO se convierte.
+                // Retrocompatibilidad: si el usuario no tiene divisa, se usa EUR.
+                const currency = (window.Auth && Auth.currentUser && Auth.currentUser.currency) || 'EUR';
+                const localeMap = {
+                    EUR: 'es-ES', USD: 'en-US', MXN: 'es-MX', COP: 'es-CO', ARS: 'es-AR',
+                    CLP: 'es-CL', PEN: 'es-PE', UYU: 'es-UY', BOB: 'es-BO', PYG: 'es-PY',
+                    BRL: 'pt-BR', GTQ: 'es-GT', CRC: 'es-CR', DOP: 'es-DO', HNL: 'es-HN',
+                    NIO: 'es-NI', PAB: 'es-PA', VES: 'es-VE'
+                };
+                const locale = localeMap[currency] || 'es-ES';
+                try {
+                    return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(amount || 0);
+                } catch (e) {
+                    return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(amount || 0);
+                }
             }
 
             formatDate(dateString) {
