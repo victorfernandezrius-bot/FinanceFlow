@@ -913,8 +913,8 @@
                         </div>
                     </div>
                     
-                    <!-- Panel de Insights Financieros -->
-                    <div id="insights-panel" style="margin-bottom: var(--space-6);">
+                    <!-- Panel de Insights Financieros (solo Premium; se muestra en updatePremiumWidgets) -->
+                    <div id="insights-panel" class="hidden" style="margin-bottom: var(--space-6);">
                         <div class="flex items-center justify-between mb-3">
                             <h3 class="font-semibold" style="color: var(--text-primary); font-size: var(--text-base);">
                                 <i class="fas fa-lightbulb mr-2" style="color: #F59E0B;"></i>
@@ -930,8 +930,8 @@
                         </div>
                     </div>
 
-                    <!-- Salud financiera (Índice Flow) -->
-                    <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200" style="margin-bottom: var(--space-6);">
+                    <!-- Salud financiera (Índice Flow) (solo Premium; se muestra en updatePremiumWidgets) -->
+                    <div id="financial-health-card" class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 hidden" style="margin-bottom: var(--space-6);">
                         <div id="financial-health-body">
                             <!-- Se llenará dinámicamente -->
                         </div>
@@ -5983,10 +5983,18 @@
             updatePremiumWidgets() {
                 const currentUser = Auth.getCurrentUser();
                 const premiumWidgets = document.getElementById('premium-saldo-real-widgets');
-                
+                // Bloques solo-Premium que se ocultan por completo a los free (mismo patrón
+                // 'hidden'). Sus títulos van dentro del contenedor, así que no queda ningún
+                // título huérfano, y al ser display:none tampoco dejan hueco en el layout.
+                const premiumBlocks = [
+                    document.getElementById('insights-panel'),       // Resumen inteligente
+                    document.getElementById('financial-health-card') // Salud financiera (Índice Flow)
+                ];
+
                 if (currentUser && Auth.isPremium()) {
                     // Mostrar widgets Premium
                     premiumWidgets.classList.remove('hidden');
+                    premiumBlocks.forEach(el => el && el.classList.remove('hidden'));
                     
                     // Calcular datos de Saldo Real
                     const saldoRealData = this.accountingManager.calculateSaldoReal();
@@ -6006,6 +6014,7 @@
                 } else {
                     // Ocultar widgets Premium
                     premiumWidgets.classList.add('hidden');
+                    premiumBlocks.forEach(el => el && el.classList.add('hidden'));
                 }
             }
 
