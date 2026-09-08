@@ -9875,39 +9875,28 @@
             // ===== NAVEGACIÓN ESPECÍFICA =====
             
             openBankAccountMajorBook() {
-                // Buscar la primera cuenta bancaria (tipo activo)
-                const bankAccounts = this.accountingManager.getAccounts('activo');
-                
-                if (bankAccounts.length === 0) {
+                const activos = this.accountingManager.getAccounts('activo');
+                if (activos.length === 0) {
                     this.showErrorMessage('No tienes cuentas bancarias creadas');
                     return;
                 }
-                
-                // Usar la primera cuenta bancaria
-                const primaryBankAccount = bankAccounts[0];
-                
-                // Navegar a reportes
-                this.navigateToSection('reports', 'libro-mayor');
-                
-                // Después de un pequeño delay, filtrar por la cuenta específica
-                setTimeout(() => {
-                    // Activar el tab de Libro Mayor
-                    const libroMayorTab = document.querySelector('[data-report="libro-mayor"]');
-                    if (libroMayorTab) {
-                        libroMayorTab.click();
-                        
-                        // Después de activar el tab, aplicar filtro de cuenta
-                        setTimeout(() => {
-                            this.filterLibroMayorByAccount(primaryBankAccount.id);
-                        }, 200);
-                    }
-                }, 100);
-            }
-            
-            filterLibroMayorByAccount(accountId) {
-                // Esta función filtrará el Libro Mayor por una cuenta específica
-                // Se implementará cuando tengamos los filtros de reportes listos
-                console.log('Filtrar Libro Mayor por cuenta:', accountId);
+
+                // Cuenta bancaria principal: la marcada como tal. Se aceptan true y 1
+                // (D1 devuelve enteros), misma comprobación que calculateBankBalance().
+                const bankAccounts = activos.filter(acc => acc.is_bank_account === true || acc.is_bank_account === 1);
+
+                // Reportes → Libro Mayor reutilizando la navegación y los tabs existentes:
+                // handleReportTab marca el tab activo y renderiza el listado del mayor.
+                if (this.currentSection !== 'reports') {
+                    this.handleNavigation('reports');
+                }
+                this.handleReportTab('libro-mayor');
+
+                // Si hay cuenta bancaria marcada, abrir directamente su detalle (mayor).
+                // Si no hay ninguna marcada, se queda en el listado del Libro Mayor.
+                if (bankAccounts.length > 0) {
+                    this.showAccountDetail(bankAccounts[0].id, this.getReportFilters());
+                }
             }
         }
 
