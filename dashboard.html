@@ -7458,23 +7458,60 @@
                 const modal = document.createElement('div');
                 modal.id = 'account-limit-modal';
                 modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:1rem;';
-                modal.innerHTML = `
-                    <div style="background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:1rem;max-width:26rem;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
-                        <div style="padding:1.5rem 1.5rem 0;display:flex;align-items:flex-start;gap:0.85rem;">
-                            <div style="flex-shrink:0;width:2.75rem;height:2.75rem;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(245,179,1,0.15);">
-                                <i class="fas fa-crown" style="color:var(--premium-accent, #F5B301);font-size:1.15rem;"></i>
+
+                if (Auth.isPremium()) {
+                    // El usuario ya es Premium: no tiene sentido ofrecerle mejorar de plan.
+                    // Se le ofrecen alternativas reales: reorganizar cuentas o pedir ampliación.
+                    const asunto = encodeURIComponent('Solicitud de ampliación de límite de cuentas');
+                    modal.innerHTML = `
+                        <div style="background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:1rem;max-width:28rem;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
+                            <div style="padding:1.5rem 1.5rem 0;display:flex;align-items:flex-start;gap:0.85rem;">
+                                <div style="flex-shrink:0;width:2.75rem;height:2.75rem;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(245,179,1,0.15);">
+                                    <i class="fas fa-crown" style="color:var(--premium-accent, #F5B301);font-size:1.15rem;"></i>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 0.35rem;">Límite de tu plan Premium</h3>
+                                    <p style="font-size:0.9rem;line-height:1.5;color:var(--text-secondary);margin:0;">Has alcanzado el máximo de <strong style="color:var(--text-primary);">${n} ${nombre}</strong> de tu plan Premium.</p>
+                                </div>
                             </div>
-                            <div style="flex:1;min-width:0;">
-                                <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 0.35rem;">Límite del plan gratuito</h3>
-                                <p style="font-size:0.9rem;line-height:1.5;color:var(--text-secondary);margin:0;">Has alcanzado el límite de <strong style="color:var(--text-primary);">${n} ${nombre}</strong> del plan gratuito. Para crear más cuentas necesitas el plan Premium.</p>
+                            <div style="padding:1.1rem 1.5rem 0;">
+                                <p style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin:0 0 0.6rem;">¿Qué puedes hacer?</p>
+                                <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.6rem;">
+                                    <li style="display:flex;gap:0.6rem;font-size:0.86rem;line-height:1.5;color:var(--text-secondary);">
+                                        <i class="fas fa-sliders" style="color:var(--brand-primary);margin-top:0.15rem;flex-shrink:0;"></i>
+                                        <span>Reorganiza o reutiliza las cuentas que ya tienes; por ejemplo, marcando cuentas de gasto como <strong style="color:var(--text-primary);">coste fijo</strong> para agruparlas mejor.</span>
+                                    </li>
+                                    <li style="display:flex;gap:0.6rem;font-size:0.86rem;line-height:1.5;color:var(--text-secondary);">
+                                        <i class="fas fa-envelope" style="color:var(--brand-primary);margin-top:0.15rem;flex-shrink:0;"></i>
+                                        <span>Solicita una <strong style="color:var(--text-primary);">ampliación del límite</strong> escribiéndonos por correo.</span>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div style="padding:1.25rem 1.5rem 1.5rem;display:flex;flex-direction:column;gap:0.6rem;">
+                                <a href="mailto:clientes@contabilidadpersonal.com?subject=${asunto}" onclick="dashboard.closeAccountLimitModal();" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;padding:0.75rem;border-radius:0.6rem;font-weight:700;font-size:0.92rem;background:var(--premium-accent, #F5B301);color:#0B2A55;">Solicitar ampliación</a>
+                                <button type="button" onclick="dashboard.closeAccountLimitModal();" style="width:100%;padding:0.7rem;border:1px solid var(--border-color);border-radius:0.6rem;font-weight:600;font-size:0.9rem;cursor:pointer;background:transparent;color:var(--text-secondary);">Entendido</button>
                             </div>
                         </div>
-                        <div style="padding:1.25rem 1.5rem 1.5rem;display:flex;flex-direction:column;gap:0.6rem;">
-                            <button type="button" onclick="dashboard.closeAccountLimitModal(); dashboard.showPlanSelector();" style="width:100%;padding:0.75rem;border:none;border-radius:0.6rem;font-weight:700;font-size:0.92rem;cursor:pointer;background:var(--premium-accent, #F5B301);color:#0B2A55;">Mejorar a Premium</button>
-                            <button type="button" onclick="dashboard.closeAccountLimitModal();" style="width:100%;padding:0.7rem;border:1px solid var(--border-color);border-radius:0.6rem;font-weight:600;font-size:0.9rem;cursor:pointer;background:transparent;color:var(--text-secondary);">En otro momento</button>
+                    `;
+                } else {
+                    modal.innerHTML = `
+                        <div style="background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:1rem;max-width:26rem;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
+                            <div style="padding:1.5rem 1.5rem 0;display:flex;align-items:flex-start;gap:0.85rem;">
+                                <div style="flex-shrink:0;width:2.75rem;height:2.75rem;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(245,179,1,0.15);">
+                                    <i class="fas fa-crown" style="color:var(--premium-accent, #F5B301);font-size:1.15rem;"></i>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 0.35rem;">Límite del plan gratuito</h3>
+                                    <p style="font-size:0.9rem;line-height:1.5;color:var(--text-secondary);margin:0;">Has alcanzado el límite de <strong style="color:var(--text-primary);">${n} ${nombre}</strong> del plan gratuito. Para crear más cuentas necesitas el plan Premium.</p>
+                                </div>
+                            </div>
+                            <div style="padding:1.25rem 1.5rem 1.5rem;display:flex;flex-direction:column;gap:0.6rem;">
+                                <button type="button" onclick="dashboard.closeAccountLimitModal(); dashboard.showPlanSelector();" style="width:100%;padding:0.75rem;border:none;border-radius:0.6rem;font-weight:700;font-size:0.92rem;cursor:pointer;background:var(--premium-accent, #F5B301);color:#0B2A55;">Mejorar a Premium</button>
+                                <button type="button" onclick="dashboard.closeAccountLimitModal();" style="width:100%;padding:0.7rem;border:1px solid var(--border-color);border-radius:0.6rem;font-weight:600;font-size:0.9rem;cursor:pointer;background:transparent;color:var(--text-secondary);">En otro momento</button>
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                }
                 modal.addEventListener('click', (e) => { if (e.target === modal) this.closeAccountLimitModal(); });
                 if (!this._accLimitEsc) this._accLimitEsc = (e) => { if (e.key === 'Escape') this.closeAccountLimitModal(); };
                 document.addEventListener('keydown', this._accLimitEsc);
