@@ -477,7 +477,7 @@ class AuthSystem {
             return {
                 max_activo_accounts: 10,
                 max_income_accounts: 8,
-                max_expense_accounts: 15,
+                max_expense_accounts: 25,
                 max_pasivo_accounts: 10,
                 max_patrimonio_accounts: 3,
                 features: [
