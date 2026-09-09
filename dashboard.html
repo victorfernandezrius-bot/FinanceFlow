@@ -1190,7 +1190,7 @@
                     
                     <!-- Filtros de fecha para reportes -->
                     <div class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Período</label>
                                 <select id="report-period-filter" class="border border-gray-300 rounded-md px-3 py-2 w-full">
@@ -1210,7 +1210,17 @@
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Hasta</label>
                                 <input type="date" id="report-date-to" class="border border-gray-300 rounded-md px-3 py-2 w-full" disabled>
                             </div>
-                            
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                                <select id="report-type-filter" class="border border-gray-300 rounded-md px-3 py-2 w-full">
+                                    <option value="">Todos</option>
+                                    <option value="ingreso">Ingreso</option>
+                                    <option value="gasto">Gasto</option>
+                                    <option value="transferencia">Transferencia</option>
+                                </select>
+                            </div>
+
                             <div class="flex items-end">
                                 <button id="apply-report-filters-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 w-full">
                                     Aplicar Filtros
@@ -2458,7 +2468,12 @@
                 document.getElementById('report-period-filter')?.addEventListener('change', (e) => {
                     this.handleReportPeriodChange(e.target.value);
                 });
-                
+
+                // Filtro por tipo: re-renderiza el informe activo al cambiarlo
+                document.getElementById('report-type-filter')?.addEventListener('change', () => {
+                    this.applyReportFilters();
+                });
+
                 document.getElementById('apply-report-filters-btn')?.addEventListener('click', () => {
                     this.applyReportFilters();
                 });
@@ -6682,11 +6697,14 @@
                 const period = document.getElementById('report-period-filter').value;
                 const dateFrom = document.getElementById('report-date-from').value;
                 const dateTo = document.getElementById('report-date-to').value;
-                
+                // Tipo de movimiento (solo lo usa el Libro Diario). '' = Todos.
+                const type = document.getElementById('report-type-filter')?.value || '';
+
                 return {
                     period,
                     dateFrom,
-                    dateTo
+                    dateTo,
+                    type
                 };
             }
 
@@ -6969,7 +6987,13 @@
                 if (filters.dateFrom || filters.dateTo) {
                     movements = this.applyDateFiltersToMovements(movements, filters);
                 }
-                
+
+                // Filtro por tipo de movimiento ('ingreso' | 'gasto' | 'transferencia').
+                // Se combina con el rango de fechas activo; '' o ausente = Todos.
+                if (filters.type) {
+                    movements = movements.filter(mov => mov.tipo === filters.type);
+                }
+
                 if (movements.length === 0) {
                     return `
                         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
