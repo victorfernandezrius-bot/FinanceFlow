@@ -223,23 +223,33 @@ export function sampleCovariance(a, b) {
 // Alinea series por FECHA (intersección de fechas) y devuelve los rendimientos
 // logarítmicos de cada clave sobre el conjunto de fechas común, en orden.
 // seriesByKey: { clave: [{fecha, close}] } (fechas ascendentes).
-export function alignedReturns(seriesByKey, keys) {
-    // Fechas comunes a todas las claves con serie no vacía.
-    let common = null;
+//
+// `minLen` (opcional): las claves con menos de `minLen` cierres se EXCLUYEN de la
+// intersección y se devuelven en `excluidos`. Sin esto, una sola serie corta (una
+// cripto recién comprada, un ticker con 20 días de histórico) reduce la ventana
+// común de TODOS los activos por debajo del mínimo y vacía la matriz entera.
+// Las claves vacías o ausentes también van a `excluidos` (antes abortaban todo).
+export function alignedReturns(seriesByKey, keys, minLen = 0) {
+    const excluidos = [];
+    const usables = [];
     for (const k of keys) {
         const s = seriesByKey[k];
-        if (!s || !s.length) { return { dates: [], returns: {} }; }
-        const set = new Set(s.map(p => p.fecha));
+        if (!s || !s.length || s.length < minLen) excluidos.push(k);
+        else usables.push(k);
+    }
+    let common = null;
+    for (const k of usables) {
+        const set = new Set(seriesByKey[k].map(p => p.fecha));
         common = common == null ? set : new Set([...common].filter(f => set.has(f)));
     }
     const dates = [...(common || [])].sort();
     const returns = {};
-    for (const k of keys) {
+    for (const k of usables) {
         const map = new Map(seriesByKey[k].map(p => [p.fecha, Number(p.close)]));
         const closes = dates.map(f => map.get(f));
         returns[k] = dailyLogReturns(closes);
     }
-    return { dates, returns };
+    return { dates, returns, excluidos };
 }
 
 export function beta(rAsset, rBench) {

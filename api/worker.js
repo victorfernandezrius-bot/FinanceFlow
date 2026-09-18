@@ -511,39 +511,19 @@ function periodoToStartDate(periodo, refDate) {
     return d.toISOString().slice(0, 10);
 }
 
-// Serie del benchmark alineada a las fechas de la cartera. Cache-first en KV
-// (`benchmark:{symbol}:{fecha}`, sin TTL: un cierre histórico ya no cambia).
-// Best-effort: si la API externa falla, se sirve lo que haya en caché.
-async function getBenchmarkSeries(env, symbol, fechas) {
-    if (!fechas || !fechas.length) return [];
-    const start = fechas[0], end = fechas[fechas.length - 1];
-    try {
-        const apiKey = env.TWELVE_DATA_API_KEY;
-        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
-        const u = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}`
-            + `&interval=1day&start_date=${start}&end_date=${end}&order=ASC&apikey=${apiKey}`;
-        const r = await fetch(u);
-        const d = await r.json();
-        if (d && d.status !== 'error' && Array.isArray(d.values)) {
-            for (const v of d.values) {
-                const fecha = (v.datetime || '').slice(0, 10);
-                const close = parseFloat(v.close);
-                if (fecha && isFinite(close)) {
-                    await env.CACHE.put(`benchmark:${symbol}:${fecha}`, String(close));
-                }
-            }
-        }
-    } catch (e) { /* best-effort: caemos a lo cacheado */ }
-
-    const serie = [];
+// Alinea una serie diaria de cierres [{fecha, close}] a las fechas de la cartera:
+// para cada fecha toma el último cierre disponible en esa fecha o anterior (los
+// snapshots de cartera pueden caer en fin de semana; el índice no cotiza).
+function alignSeriesToDates(serie, fechas) {
+    if (!serie || !serie.length || !fechas || !fechas.length) return [];
+    const sorted = [...serie].sort((a, b) => a.fecha < b.fecha ? -1 : 1);
+    const out = [];
+    let i = 0, last = null;
     for (const fecha of fechas) {
-        const raw = await env.CACHE.get(`benchmark:${symbol}:${fecha}`);
-        if (raw != null) {
-            const val = parseFloat(raw);
-            if (isFinite(val)) serie.push({ fecha, valor: val });
-        }
+        while (i < sorted.length && sorted[i].fecha <= fecha) { last = sorted[i].close; i++; }
+        if (last != null) out.push({ fecha, valor: last });
     }
-    return serie;
+    return out;
 }
 
 // ============================================================
@@ -553,90 +533,164 @@ async function getBenchmarkSeries(env, symbol, fechas) {
 // Series diarias de cierres por ticker con cache-first en KV (`series:{ticker}:{fecha}`,
 // TTL 24h: la serie diaria solo cambia una vez al día). UNA sola llamada batch a
 // Twelve Data para todos los que falten (misma técnica que getTickerPrices).
+// Devuelve { series: {ticker: [{fecha,close}]}, errores: {ticker: 'motivo'} }.
+// Un fallo del proveedor se recuerda SERIES_FAIL_TTL segundos en KV (`series_fail:{t}`)
+// para no volver a pegar a Twelve Data en cada recarga de página (con el plan
+// gratuito, 8 llamadas/min: sin esto, el propio usuario agota el minuto recargando
+// y todo falla en cascada). El motivo del fallo viaja hasta la UI: nunca se traga.
+const SERIES_FAIL_TTL = 300;
 async function getSeriesBatch(env, tickers) {
     const today = new Date().toISOString().slice(0, 10);
-    const result = {};
+    const series = {}, errores = {};
     const misses = [];
     for (const t of tickers) {
         const raw = await env.CACHE.get(`series:${t}:${today}`);
-        if (raw) { try { result[t] = JSON.parse(raw); continue; } catch { /* refetch */ } }
+        if (raw) { try { series[t] = JSON.parse(raw); continue; } catch { /* refetch */ } }
+        const fail = await env.CACHE.get(`series_fail:${t}`);
+        if (fail) { errores[t] = fail + ' (se reintenta en unos minutos)'; continue; }
         misses.push(t);
     }
-    if (!misses.length) return result;
+    if (!misses.length) return { series, errores };
+    const remember = async (t, msg) => {
+        errores[t] = msg;
+        try { await env.CACHE.put(`series_fail:${t}`, msg, { expirationTtl: SERIES_FAIL_TTL }); } catch { /* ignore */ }
+    };
     try {
         const apiKey = env.TWELVE_DATA_API_KEY;
-        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
+        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada en este entorno');
         const sym = misses.map(encodeURIComponent).join(',');
         const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${sym}`
             + `&interval=1day&outputsize=${RISK_WINDOW}&order=ASC&apikey=${apiKey}`);
         const d = await r.json();
+        if (d && d.status === 'error') throw new Error(`Twelve Data: ${d.message || d.code || 'error'}`);
         for (const t of misses) {
-            let values = null;
+            let values = null, msg = null;
             if (misses.length === 1 && Array.isArray(d.values)) values = d.values;
             else if (d[t] && Array.isArray(d[t].values)) values = d[t].values;
+            else if (d[t] && d[t].status === 'error') msg = `Twelve Data: ${d[t].message || 'símbolo no disponible'}`;
+            else msg = 'Twelve Data no devolvió serie para este símbolo';
             if (values) {
                 const serie = values
                     .map(v => ({ fecha: (v.datetime || '').slice(0, 10), close: parseFloat(v.close) }))
                     .filter(x => x.fecha && isFinite(x.close));
-                result[t] = serie;
+                series[t] = serie;
                 await env.CACHE.put(`series:${t}:${today}`, JSON.stringify(serie), { expirationTtl: 86400 });
+            } else {
+                await remember(t, msg);
             }
         }
-    } catch (e) { /* best-effort: se devuelve lo cacheado */ }
-    return result;
+    } catch (e) {
+        const msg = String(e && e.message || e);
+        for (const t of misses) await remember(t, msg);
+    }
+    return { series, errores };
 }
 
-// Símbolos de benchmark en Stooq (CSV, sin API key). Fuente AISLADA a propósito
-// para poder cambiarla (Twelve Data anuncia sus índices como "coming soon").
+// Símbolos de benchmark en Stooq (CSV, sin API key). Fuente de RESERVA cuando
+// Twelve Data no sirve el índice (los anuncia como "coming soon").
+// Nota: en Stooq `^ndq` es el Nasdaq Composite y `^ndx` el Nasdaq 100; se usa
+// `^ndx` para que el benchmark coincida con su nombre. `^ukx` = FTSE 100.
 const STOOQ_SYMBOLS = {
-    SP500: '^spx', NASDAQ100: '^ndq', DOWJONES: '^dji',
+    SP500: '^spx', NASDAQ100: '^ndx', DOWJONES: '^dji',
     IBEX35: '^ibex', CAC40: '^cac', DAX: '^dax', FTSE100: '^ukx'
 };
 
-// Cierres diarios del benchmark [{fecha, close}] desde Stooq, con cache-first en KV.
-async function getBenchmarkDailySeries(env, benchKey) {
-    const today = new Date().toISOString().slice(0, 10);
-    const cacheKey = `series:BENCH_${benchKey}:${today}`;
-    const cached = await env.CACHE.get(cacheKey);
-    if (cached) { try { return JSON.parse(cached); } catch { /* refetch */ } }
-    const serie = await fetchBenchmarkClosesStooq(benchKey);
-    if (serie && serie.length) await env.CACHE.put(cacheKey, JSON.stringify(serie), { expirationTtl: 86400 });
-    return serie || [];
+// Cierres diarios del benchmark desde Twelve Data. Devuelve { serie, error }.
+async function fetchBenchmarkClosesTwelveData(env, benchKey) {
+    const b = BENCHMARKS[benchKey];
+    if (!b) return { serie: [], error: 'benchmark no soportado' };
+    const apiKey = env.TWELVE_DATA_API_KEY;
+    if (!apiKey) return { serie: [], error: 'TWELVE_DATA_API_KEY no configurada en este entorno' };
+    try {
+        const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(b.symbol)}`
+            + `&interval=1day&outputsize=${RISK_WINDOW}&order=ASC&apikey=${apiKey}`);
+        const d = await r.json();
+        if (!d || d.status === 'error' || !Array.isArray(d.values)) {
+            return { serie: [], error: `Twelve Data (${b.symbol}): ${(d && d.message) || 'sin datos'}` };
+        }
+        const serie = d.values.map(v => ({ fecha: (v.datetime || '').slice(0, 10), close: parseFloat(v.close) }))
+            .filter(x => x.fecha && isFinite(x.close));
+        return serie.length ? { serie, error: null } : { serie: [], error: `Twelve Data (${b.symbol}): serie vacía` };
+    } catch (e) { return { serie: [], error: `Twelve Data (${b.symbol}): ${e.message || e}` }; }
 }
 
+// Cierres diarios del benchmark desde Stooq (CSV). Devuelve { serie, error }.
+// Si Stooq contesta con HTML o con "Exceeded the daily hits limit", se reporta
+// tal cual en vez de devolver una serie vacía en silencio.
 async function fetchBenchmarkClosesStooq(benchKey) {
     const sym = STOOQ_SYMBOLS[benchKey];
-    if (!sym) return [];
+    if (!sym) return { serie: [], error: 'benchmark no soportado en Stooq' };
     try {
-        const r = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&i=d`);
-        if (!r.ok) return [];
+        const r = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&i=d`,
+            { headers: { 'User-Agent': 'Mozilla/5.0 (FinanceFlow cartera)', 'Accept': 'text/csv,*/*' } });
         const csv = await r.text();
+        if (!r.ok) return { serie: [], error: `Stooq (${sym}): HTTP ${r.status}` };
         const lines = csv.trim().split('\n');
-        if (lines.length < 2) return [];
+        if (lines.length < 2 || !/^date,open,high,low,close/i.test(lines[0])) {
+            const snippet = csv.trim().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+            return { serie: [], error: `Stooq (${sym}): respuesta sin CSV — "${snippet || 'vacía'}"` };
+        }
         const out = [];
         for (let i = 1; i < lines.length; i++) {
             const c = lines[i].split(',');           // Date,Open,High,Low,Close,Volume
             const fecha = c[0], close = parseFloat(c[4]);
             if (fecha && isFinite(close)) out.push({ fecha, close });
         }
-        return out.slice(-RISK_WINDOW);
-    } catch (e) { return []; }
+        return out.length ? { serie: out.slice(-RISK_WINDOW), error: null } : { serie: [], error: `Stooq (${sym}): CSV sin filas` };
+    } catch (e) { return { serie: [], error: `Stooq (${sym}): ${e.message || e}` }; }
+}
+
+// Serie diaria del benchmark [{fecha, close}] con cache-first en KV (24h, solo si
+// hubo datos). Orden de proveedores: Twelve Data (si hay key) y, si no sirve el
+// índice, Stooq. Devuelve { serie, fuente: 'twelvedata'|'stooq'|null, errores: [] }
+// para que la UI pueda decir exactamente por qué no hay benchmark.
+async function getBenchmarkDailySeries(env, benchKey) {
+    const today = new Date().toISOString().slice(0, 10);
+    const cacheKey = `series:BENCH_${benchKey}:${today}`;
+    const cached = await env.CACHE.get(cacheKey);
+    if (cached) {
+        try { const c = JSON.parse(cached); if (c && Array.isArray(c.serie) && c.serie.length) return { ...c, errores: [] }; } catch { /* refetch */ }
+    }
+    const errores = [];
+    const td = await fetchBenchmarkClosesTwelveData(env, benchKey);
+    if (td.serie.length) {
+        await env.CACHE.put(cacheKey, JSON.stringify({ serie: td.serie, fuente: 'twelvedata' }), { expirationTtl: 86400 });
+        return { serie: td.serie, fuente: 'twelvedata', errores };
+    }
+    errores.push(td.error);
+    const st = await fetchBenchmarkClosesStooq(benchKey);
+    if (st.serie.length) {
+        await env.CACHE.put(cacheKey, JSON.stringify({ serie: st.serie, fuente: 'stooq' }), { expirationTtl: 86400 });
+        return { serie: st.serie, fuente: 'stooq', errores };
+    }
+    errores.push(st.error);
+    return { serie: [], fuente: null, errores };
 }
 
 // Construye el payload de riesgo (matriz var-cov, betas, volatilidades, clasificación,
 // beta y volatilidad de cartera) a partir de las series y los pesos (tanto por uno).
 async function computeRiskPayload(env, benchKey, positions, weightsByTicker) {
     const tickers = positions.map(p => p.ticker);
-    const seriesAssets = tickers.length ? await getSeriesBatch(env, tickers) : {};
-    const benchSerie = await getBenchmarkDailySeries(env, benchKey);
-    const hasBench = benchSerie && benchSerie.length > 0;
+    // Solo se piden series a Twelve Data para renta variable y cripto: un derivado
+    // ("SOLARIA" como futuro), un bono ("BONO FRANCES") o la liquidez no tienen
+    // símbolo cotizado y solo gastaban cuota para fallar.
+    const conSerie = positions.filter(p => TIPOS_RENTA_VARIABLE.includes(p.tipo_activo) || p.tipo_activo === 'cripto').map(p => p.ticker);
+    const no_aplica = tickers.filter(t => !conSerie.includes(t));
+    const { series: seriesAssets, errores: seriesErrores } = conSerie.length ? await getSeriesBatch(env, conSerie) : { series: {}, errores: {} };
+    const bench = await getBenchmarkDailySeries(env, benchKey);
+    const benchSerie = bench.serie;
+    const hasBench = benchSerie.length > 0;
 
-    const withData = tickers.filter(t => seriesAssets[t] && seriesAssets[t].length);
+    const withData = conSerie.filter(t => seriesAssets[t] && seriesAssets[t].length);
+    const sin_serie = conSerie.filter(t => !withData.includes(t));
     const seriesByKey = {};
     withData.forEach(t => { seriesByKey[t] = seriesAssets[t]; });
     if (hasBench) seriesByKey['__BENCH__'] = benchSerie;
     const keys = hasBench ? [...withData, '__BENCH__'] : [...withData];
-    const { dates, returns } = keys.length ? alignedReturns(seriesByKey, keys) : { dates: [], returns: {} };
+    // MIN_SESSIONS + 1 cierres para que queden >= MIN_SESSIONS rendimientos.
+    const { dates, returns, excluidos } = keys.length ? alignedReturns(seriesByKey, keys, MIN_SESSIONS + 1) : { dates: [], returns: {}, excluidos: [] };
+    const sesiones_por_ticker = {};
+    withData.forEach(t => { sesiones_por_ticker[t] = (seriesAssets[t] || []).length; });
 
     const betas = {}, volatilidades = {}, clasificacion = {};
     const benchReturns = returns['__BENCH__'] || [];
@@ -651,15 +705,23 @@ async function computeRiskPayload(env, benchKey, positions, weightsByTicker) {
     const returnsByTicker = {};
     withData.forEach(t => { returnsByTicker[t] = returns[t] || []; });
     const { tickers: sufTickers, matriz } = covarianceMatrix(returnsByTicker, withData);
-    const insuficientes = tickers.filter(t => !sufTickers.includes(t)); // incluye los sin serie
+    // insuficientes: con serie pero por debajo del mínimo (distinto de "sin serie").
+    const insuficientes = withData.filter(t => !sufTickers.includes(t));
     const portfolio_volatilidad = portfolioVolatility(weightsByTicker, matriz, sufTickers);
     const portfolio_beta = portfolioBeta(weightsByTicker, betas);
 
+    const errores = [];
+    for (const t of sin_serie) errores.push(`${t}: ${seriesErrores[t] || 'sin serie de precios'}`);
+    if (!hasBench) for (const e of bench.errores) errores.push(`Benchmark ${benchKey}: ${e}`);
+    if (excluidos.includes('__BENCH__')) errores.push(`Benchmark ${benchKey}: serie demasiado corta (${benchSerie.length} sesiones)`);
+
     return {
         benchmark: benchKey, fecha_calculo: new Date().toISOString().slice(0, 10),
-        sesiones: dates.length, benchmark_disponible: hasBench,
-        tickers: sufTickers, insuficientes, matriz, betas, volatilidades, clasificacion,
-        portfolio_beta, portfolio_volatilidad
+        calculado_en: new Date().toISOString(),
+        sesiones: dates.length, benchmark_disponible: hasBench, fuente_benchmark: bench.fuente,
+        tickers: sufTickers, insuficientes, sin_serie, no_aplica, sesiones_por_ticker, min_sesiones: MIN_SESSIONS,
+        matriz, betas, volatilidades, clasificacion,
+        portfolio_beta, portfolio_volatilidad, errores
     };
 }
 
@@ -741,14 +803,92 @@ async function _carteraContext(env, uid) {
     return { ops, positions: posValues, prices, cash, cashTotal, instrMap, marketValue, totalValue, weightsTotal, weightsInvested };
 }
 
+// Snapshot del valor total de la cartera de un usuario en `fecha` (YYYY-MM-DD):
+// valor de las posiciones a mercado (a coste si no hay precio) + liquidez. Lo usa
+// el cron diario y POST /api/portfolio/snapshot (para probar sin cron). Devuelve
+// { guardado, fecha, valor_total, sin_precio } y NO guarda un 0 engañoso si no hay
+// ninguna posición valorada.
+async function snapshotCartera(env, uid, fecha) {
+    const ctx = await _carteraContext(env, uid);
+    const sin_precio = ctx.positions.filter(p => p.precio_actual == null).map(p => p.ticker);
+    const valorados = ctx.positions.filter(p => p.precio_actual != null).length;
+    if (!ctx.positions.length && ctx.cashTotal <= 0) {
+        return { guardado: false, fecha, valor_total: 0, sin_precio, motivo: 'No hay posiciones abiertas ni liquidez que valorar.' };
+    }
+    if (ctx.positions.length && !valorados) {
+        return { guardado: false, fecha, valor_total: ctx.totalValue, sin_precio,
+                 motivo: 'Ninguna posición tiene precio de mercado; no se guarda un valor a coste como si fuera de mercado.' };
+    }
+    await env.DB.prepare(
+        `INSERT INTO cartera_valor_diario (usuario_id, fecha, valor_total) VALUES (?,?,?)
+         ON CONFLICT(usuario_id, fecha) DO UPDATE SET valor_total = excluded.valor_total`)
+        .bind(uid, fecha, ctx.totalValue).run();
+    return { guardado: true, fecha, valor_total: ctx.totalValue, sin_precio, motivo: null };
+}
+
+// Diagnóstico de proveedores DESDE el Worker (con su red y su key reales): qué
+// símbolos de índice responden en Twelve Data y en Stooq, y si /profile está
+// disponible en el plan. Cuesta hasta 8 créditos de Twelve Data (1 batch de 7
+// índices + 1 profile): se limita a una ejecución por minuto y usuario.
+async function providerDiagnostics(env, opts = {}) {
+    const out = { fecha: new Date().toISOString(), twelve_data: { key_configurada: !!env.TWELVE_DATA_API_KEY, indices: {}, profile_AAPL: null }, stooq: {} };
+    const apiKey = env.TWELVE_DATA_API_KEY;
+    if (opts.td !== false && apiKey) {
+        try {
+            const keys = Object.keys(BENCHMARKS);
+            const sym = keys.map(k => BENCHMARKS[k].symbol).join(',');
+            const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1day&outputsize=3&apikey=${apiKey}`);
+            const d = await r.json();
+            for (const k of keys) {
+                const s = BENCHMARKS[k].symbol;
+                const node = keys.length === 1 ? d : d[s];
+                if (d && d.status === 'error') out.twelve_data.indices[k] = { symbol: s, ok: false, error: d.message || d.code };
+                else if (node && Array.isArray(node.values) && node.values.length) out.twelve_data.indices[k] = { symbol: s, ok: true, n: node.values.length, ultima_fecha: node.values[0].datetime };
+                else out.twelve_data.indices[k] = { symbol: s, ok: false, error: (node && node.message) || 'sin datos' };
+            }
+        } catch (e) { out.twelve_data.error = String(e.message || e); }
+        try {
+            const r = await fetch(`https://api.twelvedata.com/profile?symbol=AAPL&apikey=${apiKey}`);
+            const d = await r.json();
+            const ok = !!(d && d.status !== 'error' && (d.sector || d.industry || d.name));
+            out.twelve_data.profile_AAPL = { ok, http: r.status, disponible_en_plan: ok, sector: ok ? (d.sector || null) : null,
+                error: ok ? null : ((d && d.message) || `HTTP ${r.status}`), code: d && d.code };
+        } catch (e) { out.twelve_data.profile_AAPL = { ok: false, error: String(e.message || e) }; }
+    } else if (opts.td !== false) {
+        out.twelve_data.error = 'TWELVE_DATA_API_KEY no configurada en este entorno';
+    }
+    if (opts.stooq !== false) {
+        for (const k of Object.keys(STOOQ_SYMBOLS)) {
+            const r = await fetchBenchmarkClosesStooq(k);
+            out.stooq[k] = { symbol: STOOQ_SYMBOLS[k], ok: r.serie.length > 0, n: r.serie.length,
+                ultima_fecha: r.serie.length ? r.serie[r.serie.length - 1].fecha : null, error: r.error };
+        }
+    }
+    return out;
+}
+
 // Riesgo desde caché (si es de hoy) o recalculado y guardado.
-async function _riskCachedOrCompute(env, uid, benchKey, ctx) {
+// - Un cálculo con errores de proveedor (parcial) solo se reutiliza RISK_PARTIAL_TTL_MS:
+//   antes, un fallo transitorio a primera hora dejaba la matriz vacía todo el día.
+// - La caché se borra al registrar/cerrar operaciones (_invalidateRisk): antes,
+//   añadir posiciones no cambiaba nada hasta el día siguiente.
+// - `refresh=true` fuerza el recálculo (botón "Recalcular" de la UI).
+const RISK_PARTIAL_TTL_MS = 10 * 60 * 1000;
+async function _invalidateRisk(env, uid) {
+    try { await env.DB.prepare('DELETE FROM cartera_riesgo_cache WHERE usuario_id=?').bind(uid).run(); } catch { /* ignore */ }
+}
+async function _riskCachedOrCompute(env, uid, benchKey, ctx, refresh = false) {
     const today = new Date().toISOString().slice(0, 10);
-    const cached = await env.DB.prepare(
+    const cached = refresh ? null : await env.DB.prepare(
         'SELECT payload, fecha_calculo FROM cartera_riesgo_cache WHERE usuario_id=? AND benchmark=?')
         .bind(uid, benchKey).first();
     if (cached && cached.fecha_calculo === today) {
-        try { return JSON.parse(cached.payload); } catch { /* recompute */ }
+        try {
+            const p = JSON.parse(cached.payload);
+            const parcial = (p.errores && p.errores.length) || !p.benchmark_disponible;
+            const edad = Date.now() - new Date(p.calculado_en || 0).getTime();
+            if (!parcial || edad < RISK_PARTIAL_TTL_MS) return { ...p, desde_cache: true };
+        } catch { /* recompute */ }
     }
     const payload = await computeRiskPayload(env, benchKey, ctx.positions, ctx.weightsTotal);
     await env.DB.prepare(
@@ -1781,6 +1921,7 @@ export default {
                     .bind(uid, ticker, o.tipo_activo, o.tipo_operacion, o.fecha, cantidad, precio, comision,
                           o.moneda || 'EUR', o.broker_origen ?? null, new Date().toISOString()).run();
                 const newId = res.meta && res.meta.last_row_id;
+                await _invalidateRisk(env, uid);
                 // Devolver la operación creada + la posición recalculada del ticker.
                 const { results: all } = await env.DB.prepare(
                     'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
@@ -1830,6 +1971,7 @@ export default {
                      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
                     .bind(uid, ticker, cl.tipo_activo, 'venta', b.fecha_cierre, cl.cantidad, precioCierre, comSalida,
                           cl.moneda, b.broker_origen ?? null, new Date().toISOString()).run();
+                await _invalidateRisk(env, uid);
 
                 return json({
                     ticker, cantidad_cerrada: cl.cantidad, precio_medio: cl.precio_medio, precio_cierre: precioCierre,
@@ -1883,7 +2025,15 @@ export default {
                 const tickers = [...new Set(pos.map(p => p.ticker))];
                 const prices = tickers.length ? await getTickerPrices(tickers, env) : {};
                 const { items, total } = computeAllocation(pos, prices);
-                return json({ items, total }, 200, cors);
+                // Nunca en silencio: decir qué tickers no tienen precio y por qué.
+                const sin_precio = items.filter(i => i.valor == null).map(i => i.ticker);
+                const errores = [];
+                if (sin_precio.length) {
+                    errores.push(env.TWELVE_DATA_API_KEY
+                        ? `El proveedor de precios (Twelve Data) no devolvió cotización para: ${sin_precio.join(', ')}`
+                        : 'TWELVE_DATA_API_KEY no configurada en este entorno: no hay precios de mercado');
+                }
+                return json({ items, total, sin_precio, errores }, 200, cors);
             }
 
             // GET /api/portfolio/history — serie diaria de valor de cartera + benchmark.
@@ -1901,14 +2051,18 @@ export default {
                 if (benchKey) {
                     const bench = BENCHMARKS[benchKey];
                     if (!bench) {
-                        benchmark = { key: benchKey, error: 'benchmark no soportado', soportados: Object.keys(BENCHMARKS) };
+                        benchmark = { key: benchKey, error: 'benchmark no soportado', soportados: Object.keys(BENCHMARKS), serie: [] };
                     } else {
-                        const serie = portfolio.length
-                            ? await getBenchmarkSeries(env, bench.symbol, portfolio.map(p => p.fecha)) : [];
-                        benchmark = { key: benchKey, symbol: bench.symbol, nombre: bench.nombre, serie };
+                        // Misma fuente (Twelve Data -> Stooq) que /risk, alineada a las fechas de la cartera.
+                        const b = await getBenchmarkDailySeries(env, benchKey);
+                        const serie = portfolio.length ? alignSeriesToDates(b.serie, portfolio.map(p => p.fecha)) : [];
+                        benchmark = { key: benchKey, symbol: bench.symbol, nombre: bench.nombre, serie,
+                                      fuente: b.fuente, errores: b.errores, sesiones_disponibles: b.serie.length };
                     }
                 }
-                return json({ periodo, desde: start, portfolio, benchmark }, 200, cors);
+                const motivo = portfolio.length ? null
+                    : 'Aún no hay snapshots diarios de tu cartera. En producción los genera el cron cada día; aquí puedes generar el de hoy con "Generar snapshot".';
+                return json({ periodo, desde: start, portfolio, benchmark, motivo }, 200, cors);
             }
 
             // GET /api/portfolio/daily-return — rentabilidad diaria y acumulada del periodo.
@@ -2011,8 +2165,9 @@ export default {
             if (path === '/api/portfolio/risk' && method === 'GET') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const refresh = url.searchParams.get('refresh') === '1';
                 const ctx = await _carteraContext(env, uid);
-                const payload = await _riskCachedOrCompute(env, uid, benchKey, ctx);
+                const payload = await _riskCachedOrCompute(env, uid, benchKey, ctx, refresh);
                 return json(payload, 200, cors);
             }
 
@@ -2036,6 +2191,24 @@ export default {
                     'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
                 const journal = buildJournal(allOps);
                 return json(_buildKpis(ctx, risk, journal), 200, cors);
+            }
+
+            // POST /api/portfolio/snapshot — genera el snapshot de HOY bajo demanda (staging sin cron).
+            if (path === '/api/portfolio/snapshot' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const today = new Date().toISOString().slice(0, 10);
+                const r = await snapshotCartera(env, uid, today);
+                return json(r, r.guardado ? 200 : 409, cors);
+            }
+
+            // GET /api/portfolio/diagnostics — prueba proveedores desde el Worker (1/min por usuario).
+            if (path === '/api/portfolio/diagnostics' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `diag:${uid}`, 1, 60)) {
+                    return json({ error: 'Diagnóstico ya ejecutado hace menos de un minuto; espera antes de repetir (gasta cuota de Twelve Data).' }, 429, cors);
+                }
+                const d = await providerDiagnostics(env, { td: url.searchParams.get('td') !== '0', stooq: url.searchParams.get('stooq') !== '0' });
+                return json(d, 200, cors);
             }
 
             if (path === '/api/portfolio/prices' && method === 'GET') {
@@ -2130,32 +2303,14 @@ export default {
 
         // ── Snapshot diario del valor de cartera (cartera_valor_diario) ──
         // Requisito clave: sin esto no hay serie para el gráfico de evolución ni
-        // para la rentabilidad acumulada. Para cada usuario con posiciones abiertas,
-        // valor_total = Σ cantidad_abierta × precio_actual.
+        // para la rentabilidad acumulada. Misma función que POST /api/portfolio/snapshot.
         try {
             const today = now.toISOString().slice(0, 10);
             const { results: carteraUsers } = await env.DB.prepare(
                 'SELECT DISTINCT usuario_id FROM cartera_operaciones').all();
             for (const cu of carteraUsers) {
-                try {
-                    const { results: ops } = await env.DB.prepare(
-                        'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(cu.usuario_id).all();
-                    const pos = openPositions(ops);
-                    if (!pos.length) continue;
-                    const prices = await getTickerPrices([...new Set(pos.map(p => p.ticker))], env);
-                    let valor = 0, hasPrice = false;
-                    for (const p of pos) {
-                        const pr = prices[p.ticker];
-                        if (pr && pr.price != null && isFinite(pr.price)) { valor += pr.price * p.cantidad_abierta; hasPrice = true; }
-                    }
-                    if (!hasPrice) continue; // sin ningún precio no guardamos un 0 engañoso
-                    await env.DB.prepare(
-                        `INSERT INTO cartera_valor_diario (usuario_id, fecha, valor_total) VALUES (?,?,?)
-                         ON CONFLICT(usuario_id, fecha) DO UPDATE SET valor_total = excluded.valor_total`)
-                        .bind(cu.usuario_id, today, valor).run();
-                } catch (e) {
-                    console.error('Cron cartera snapshot, usuario', cu.usuario_id, ':', e);
-                }
+                try { await snapshotCartera(env, cu.usuario_id, today); }
+                catch (e) { console.error('Cron cartera snapshot, usuario', cu.usuario_id, ':', e); }
             }
         } catch (e) {
             console.error('Cron cartera snapshot:', e);

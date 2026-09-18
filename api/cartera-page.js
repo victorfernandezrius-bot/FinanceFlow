@@ -55,6 +55,12 @@ export const CARTERA_HTML = `<!doctype html>
   .btn:hover{background:var(--brand-2)} .btn.sm{padding:6px 11px;font-size:.85rem}
   .btn.ghost{background:transparent;color:var(--brand);border:1px solid var(--line)} .btn.ghost:hover{background:var(--tag-bg)}
   .btn.danger{background:transparent;color:var(--neg);border:1px solid var(--line)} .btn.danger:hover{background:#FDECEC;border-color:var(--neg)}
+  .why{background:var(--warn-bg);color:var(--warn);border:1px solid #F0D9A8;border-radius:8px;padding:10px 12px;font-size:.86rem;line-height:1.45;margin:6px 0}
+  .why ul{margin:6px 0 0 18px;padding:0}
+  .why.err{background:#FDECEC;color:var(--neg);border-color:#F3B4B4}
+  .diag{font-size:.8rem;margin-top:8px;border-collapse:collapse;width:100%}
+  .diag td,.diag th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  .ok{color:var(--pos);font-weight:700}.ko{color:var(--neg);font-weight:700}
   .aviso{grid-column:1/-1;font-size:.85rem;background:var(--warn-bg);color:var(--warn);border:1px solid #F0D9A8;border-radius:8px;padding:8px 12px;display:none;}
 
   .table-scroll{overflow-x:auto}
@@ -173,7 +179,9 @@ export const CARTERA_HTML = `<!doctype html>
 
   <!-- 6. Matriz var-cov -->
   <section class="card panel">
-    <h2>Matriz de varianzas-covarianzas (anualizada)</h2>
+    <div class="sect-head"><h2>Matriz de varianzas-covarianzas (anualizada)</h2>
+      <div style="display:flex;gap:8px"><button class="btn ghost sm" id="riskRefresh" type="button">Recalcular</button><button class="btn ghost sm" id="diagBtn" type="button">Diagnóstico de proveedores</button></div></div>
+    <div id="diagWrap"></div>
     <div class="table-scroll" id="matrixWrap"></div>
     <p class="foot-note" id="matrixNote"></p>
     <p class="foot-note">Esta matriz mide cómo se mueven tus activos entre sí. La diagonal es la varianza de cada activo (cuánto oscila por sí solo). El resto son covarianzas: un valor positivo significa que los dos activos tienden a subir y bajar a la vez; uno negativo, que se compensan. Cuanto más cerca de cero o negativos, más diversificada está tu cartera y menos riesgo total asumes para la misma rentabilidad esperada.</p>
@@ -207,6 +215,7 @@ export const CARTERA_HTML = `<!doctype html>
         </select>
       </div>
       <div id="lineWrap"></div><div class="legend" id="lineLegend" style="flex-direction:row;gap:18px"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn ghost sm" id="snapBtn" type="button">Generar snapshot de hoy</button><span class="muted" style="font-size:.8rem">En producción lo genera el cron diario; aquí se dispara a mano para probar la evolución.</span></div>
     </div>
   </section>
 </div>
@@ -238,6 +247,8 @@ export const CARTERA_HTML = `<!doctype html>
   function pct0(n){if(n==null||!isFinite(n))return '—';return Number(n).toFixed(2)+'%';}
   function num(n,d){if(n==null||!isFinite(n))return '—';return Number(n).toFixed(d==null?2:d);}
   function cls(n){return n==null?'':(n>=0?'pos':'neg');}
+  // Caja "por qué no hay datos": una sección sin datos SIEMPRE explica el motivo.
+  function why(title,items,isErr){var h='<div class="why'+(isErr?' err':'')+'"><strong>'+esc(title)+'</strong>';if(items&&items.length){h+='<ul>'+items.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>';}return h+'</div>';}
   function today(){return new Date().toISOString().slice(0,10);}
   function bench(){return $('benchSel').value;}
   function showMsg(t,e){$('msg').innerHTML=t?'<div class="notice '+(e?'err':'')+'">'+t+'</div>':'';}
@@ -249,7 +260,7 @@ export const CARTERA_HTML = `<!doctype html>
   function kpiCard(label,value,klass){return '<div class="kpi"><span class="label">'+label+'</span><span class="value num '+(klass||'')+'">'+value+'</span></div>';}
   function refreshKpis(){
     return api('/portfolio/kpis?benchmark='+bench()).then(function(r){return r.ok?r.json():null;}).then(function(k){
-      if(!k)return;
+      if(!k){$('kpiGrid').innerHTML=why('No se pudieron cargar los KPIs (el servidor devolvió un error).',[],true);return;}
       $('marketValue').textContent=money(k.valor_mercado_total,'EUR');
       var h='';
       h+=kpiCard('Valor de mercado',money(k.valor_mercado_total,'EUR'));
@@ -320,7 +331,7 @@ export const CARTERA_HTML = `<!doctype html>
     ]).then(function(res){ renderClassTables(res[0]); renderMatrix(res[1]); });
   }
   function renderClassTables(b){
-    var host=$('classTables'); if(!b){host.innerHTML='';return;}
+    var host=$('classTables'); if(!b){host.innerHTML='<div class="card panel"><h2>Tablas por clase de activo</h2>'+why('No se pudieron cargar las tablas por clase (el servidor devolvió un error).',[],true)+'</div>';return;}
     var out=''; var c=b.clases||{};
     // Renta variable
     if(c.renta_variable&&c.renta_variable.length){
@@ -375,10 +386,21 @@ export const CARTERA_HTML = `<!doctype html>
   }
 
   function shade(v,maxAbs){ if(v==null||!isFinite(v)||maxAbs<=0) return 'transparent'; var a=Math.min(1,Math.abs(v)/maxAbs)*0.5; return 'rgba(1,88,201,'+a.toFixed(3)+')'; }
+  function riskReasons(r){
+    var items=[]; var min=(r&&r.min_sesiones)||60;
+    if(r.insuficientes&&r.insuficientes.length){ items.push('Necesitas al menos '+min+' sesiones de histórico común. Sin llegar: '+r.insuficientes.map(function(t){var n=r.sesiones_por_ticker&&r.sesiones_por_ticker[t];return t+(n!=null?' ('+n+' sesiones)':'');}).join(', ')+'.'); }
+    if(r.sin_serie&&r.sin_serie.length){ items.push('El proveedor no devolvió serie de precios para: '+r.sin_serie.join(', ')+'.'); }
+    if(r.no_aplica&&r.no_aplica.length){ items.push('Sin serie cotizada por su tipo (renta fija, derivados, liquidez): '+r.no_aplica.join(', ')+'.'); }
+    if(r.benchmark_disponible===false){ items.push('El proveedor no devuelve datos para el índice '+(BENCH_NAME[r.benchmark]||r.benchmark)+', así que no hay betas.'); }
+    (r.errores||[]).forEach(function(e){ items.push('Detalle: '+e); });
+    return items;
+  }
   function renderMatrix(r){
     var wrap=$('matrixWrap'),note=$('matrixNote');
-    if(!r||!r.tickers||!r.tickers.length){ wrap.innerHTML='<div class="empty">Sin activos con histórico suficiente para la matriz.</div>';
-      note.textContent=(r&&r.insuficientes&&r.insuficientes.length)?('Sin histórico suficiente (mín. 60 sesiones): '+r.insuficientes.join(', ')+'.'):''; return; }
+    if(!r){ wrap.innerHTML=why('No se pudo calcular la matriz (el servidor devolvió un error).',[],true); note.textContent=''; return; }
+    if(!r.tickers||!r.tickers.length){
+      var its=riskReasons(r); if(!its.length) its.push('No hay posiciones de renta variable o cripto con las que calcularla.');
+      wrap.innerHTML=why('Sin matriz todavía. Motivos:',its,false); note.textContent=(r.fuente_benchmark?'Fuente del benchmark: '+r.fuente_benchmark+'. ':'')+(r.desde_cache?'Resultado en caché de hoy; pulsa Recalcular para forzar.':''); return; }
     var tk=r.tickers, M=r.matriz, maxAbs=0;
     M.forEach(function(row){row.forEach(function(v){if(isFinite(v))maxAbs=Math.max(maxAbs,Math.abs(v));});});
     var h='<table class="matrix"><thead><tr><th></th>'+tk.map(function(t){return '<th>'+esc(t)+'</th>';}).join('')+'</tr></thead><tbody>';
@@ -386,22 +408,23 @@ export const CARTERA_HTML = `<!doctype html>
       for(var j=0;j<tk.length;j++){ var v=M[i][j]; h+='<td class="'+(i===j?'diag':'')+'" style="background:'+shade(v,maxAbs)+'">'+(v!=null&&isFinite(v)?v.toFixed(4):'—')+'</td>'; }
       h+='</tr>'; }
     h+='</tbody></table>'; wrap.innerHTML=h;
-    var extra=[]; if(!r.benchmark_disponible) extra.push('el benchmark ('+esc(BENCH_NAME[bench()])+') no devolvió datos, por lo que no hay betas');
-    if(r.insuficientes&&r.insuficientes.length) extra.push('sin histórico suficiente: '+r.insuficientes.join(', '));
-    note.textContent=(r.sesiones?('Calculado con '+r.sesiones+' sesiones comunes. '):'')+(extra.length?'('+extra.join('; ')+').':'');
+    var its2=riskReasons(r); if(its2.length) wrap.innerHTML+=why('Activos fuera de la matriz:',its2,false);
+    note.textContent=(r.sesiones?('Calculado con '+r.sesiones+' sesiones comunes. '):'')+(r.fuente_benchmark?'Benchmark vía '+r.fuente_benchmark+'. ':'')+(r.desde_cache?'(caché de hoy)':'');
   }
 
   // ---------- Tarta ----------
   function polar(cx,cy,r,a){var t=(a-90)*Math.PI/180;return [cx+r*Math.cos(t),cy+r*Math.sin(t)];}
   function arc(cx,cy,r,a0,a1){var p0=polar(cx,cy,r,a1),p1=polar(cx,cy,r,a0),big=(a1-a0)>180?1:0;return 'M '+p0[0]+' '+p0[1]+' A '+r+' '+r+' 0 '+big+' 0 '+p1[0]+' '+p1[1];}
   function refreshPie(){
-    return api('/portfolio/allocation').then(function(r){return r.ok?r.json():{items:[],total:0};}).then(function(d){
+    return api('/portfolio/allocation').then(function(r){return r.ok?r.json():{items:[],total:0,errores:['El servidor devolvió un error al calcular el reparto.']};}).then(function(d){
       var its=(d.items||[]).filter(function(i){return i.valor!=null&&i.valor>0;}),wrap=$('pieWrap'),legend=$('pieLegend');
-      if(!its.length){wrap.innerHTML='<div class="empty">Sin datos de mercado.</div>';legend.innerHTML='';return;}
+      var reasons=(d.errores||[]).slice(); if(!(d.items||[]).length&&!reasons.length) reasons.push('No hay posiciones abiertas.');
+      if(!its.length){wrap.innerHTML=why('Sin reparto que mostrar. Motivos:',reasons,false);legend.innerHTML='';return;}
+      legend.setAttribute('data-extra',reasons.length?why('Posiciones sin precio de mercado (excluidas de la tarta):',reasons,false):'');
       var ang=0,svg='<svg viewBox="0 0 220 220" width="100%" style="max-width:250px;display:block;margin:0 auto">';
       its.forEach(function(it,i){var sw=it.peso_pct/100*360,col=PALETTE[i%PALETTE.length];svg+=sw>=359.99?'<circle cx="110" cy="110" r="92" fill="none" stroke="'+col+'" stroke-width="30"/>':'<path d="'+arc(110,110,92,ang,ang+sw)+'" fill="none" stroke="'+col+'" stroke-width="30"/>';ang+=sw;});
       svg+='</svg>';wrap.innerHTML=svg;
-      legend.innerHTML=its.map(function(it,i){return '<div class="row"><span class="dot" style="background:'+PALETTE[i%PALETTE.length]+'"></span>'+esc(it.ticker)+'<span class="pct">'+it.peso_pct.toFixed(1)+'%</span></div>';}).join('');
+      legend.innerHTML=its.map(function(it,i){return '<div class="row"><span class="dot" style="background:'+PALETTE[i%PALETTE.length]+'"></span>'+esc(it.ticker)+'<span class="pct">'+it.peso_pct.toFixed(1)+'%</span></div>';}).join('')+(legend.getAttribute('data-extra')||'');
     });
   }
 
@@ -409,9 +432,10 @@ export const CARTERA_HTML = `<!doctype html>
   function rebase(s){if(!s.length)return [];var b=s[0].valor;return s.map(function(p){return {t:new Date(p.fecha).getTime(),v:b>0?p.valor/b*100:100,fecha:p.fecha};});}
   function refreshLine(){
     return api('/portfolio/history?periodo=1A&benchmark='+bench()).then(function(r){return r.ok?r.json():null;}).then(function(d){
-      var wrap=$('lineWrap'),legend=$('lineLegend');if(!d){wrap.innerHTML='<div class="empty">—</div>';return;}
+      var wrap=$('lineWrap'),legend=$('lineLegend');if(!d){wrap.innerHTML=why('No se pudo cargar la evolución (el servidor devolvió un error).',[],true);legend.innerHTML='';return;}
       var pf=rebase(d.portfolio||[]),bs=(d.benchmark&&d.benchmark.serie)?rebase(d.benchmark.serie):[];
-      if(pf.length<1){wrap.innerHTML='<div class="empty">Aún no hay histórico de valor de cartera (se genera con el cron diario).</div>';legend.innerHTML='';return;}
+      var bErr=(d.benchmark&&d.benchmark.errores)||[];
+      if(pf.length<1){var its=[d.motivo||'Aún no hay snapshots diarios de tu cartera.'];bErr.forEach(function(e){its.push('Benchmark: '+e);});wrap.innerHTML=why('Sin evolución todavía. Motivos:',its,false);legend.innerHTML='';return;}
       var all=pf.concat(bs),tMin=Math.min.apply(null,all.map(function(p){return p.t;})),tMax=Math.max.apply(null,all.map(function(p){return p.t;}));
       var vMin=Math.min.apply(null,all.map(function(p){return p.v;})),vMax=Math.max.apply(null,all.map(function(p){return p.v;}));
       if(tMax===tMin)tMax=tMin+1;var pad=(vMax-vMin)*0.1||1;vMin-=pad;vMax+=pad;
@@ -424,7 +448,7 @@ export const CARTERA_HTML = `<!doctype html>
       svg+='<path d="'+path(pf)+'" fill="none" stroke="#0158C9" stroke-width="2.5"/>';
       svg+='<text x="'+mL+'" y="'+(H-6)+'" font-size="9" fill="#8A98B0">'+esc(pf[0].fecha)+'</text><text x="'+(W-mR)+'" y="'+(H-6)+'" text-anchor="end" font-size="9" fill="#8A98B0">'+esc(pf[pf.length-1].fecha)+'</text></svg>';
       wrap.innerHTML=svg;
-      legend.innerHTML='<div class="row"><span class="dot" style="background:#0158C9"></span>Cartera</div><div class="row"><span class="dot" style="background:#5B6B85"></span>'+esc((d.benchmark&&d.benchmark.nombre)||bench())+(bs.length?'':' (sin datos)')+'</div>';
+      legend.innerHTML='<div class="row"><span class="dot" style="background:#0158C9"></span>Cartera ('+pf.length+' snapshots)</div><div class="row"><span class="dot" style="background:#5B6B85"></span>'+esc((d.benchmark&&d.benchmark.nombre)||bench())+(bs.length?(d.benchmark.fuente?' (vía '+esc(d.benchmark.fuente)+')':''):' (sin datos)')+'</div>'+(bs.length?'':why('El proveedor no devuelve datos para este índice:',bErr,false));
     });
   }
 
@@ -454,8 +478,22 @@ export const CARTERA_HTML = `<!doctype html>
 
   // ---------- Orquestación ----------
   function reloadData(){ $('benchNote').textContent='Benchmark: '+BENCH_NAME[bench()];
-    return Promise.all([refreshKpis(),refreshPositions(),refreshJournal(),refreshAnalysis(),refreshPie(),refreshLine()]); }
+    var jobs=[refreshKpis(),refreshPositions(),refreshJournal(),refreshAnalysis(),refreshPie(),refreshLine()];
+    return Promise.allSettled(jobs).then(function(rs){ var fails=rs.filter(function(r){return r.status==='rejected';});
+      var auth=fails.some(function(r){return String(r.reason&&r.reason.message)==='401';}); if(auth) throw new Error('401');
+      if(fails.length) showMsg('Alguna sección no se pudo cargar ('+fails.length+' error'+(fails.length>1?'es':'')+' de red). Revisa la consola.',true); }); }
   function loadAll(){ if(!TOKEN){showTokenBox();return;} $('f_fecha').value=today(); toggleFields(); reloadData().then(updateAviso).catch(function(e){if(String(e.message)!=='401')showMsg('Error cargando la cartera.',true);}); }
+  function refreshRisk(force){ return api('/portfolio/risk?benchmark='+bench()+(force?'&refresh=1':'')).then(function(r){return r.ok?r.json():null;}).then(renderMatrix); }
+  function runDiagnostics(){ var w=$('diagWrap'); w.innerHTML='<div class="empty">Probando proveedores desde el Worker…</div>';
+    return api('/portfolio/diagnostics').then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});}).then(function(res){
+      if(!res.ok){w.innerHTML=why(res.d&&res.d.error||'Error en el diagnóstico.',[],true);return;}
+      var d=res.d,h='<table class="diag"><thead><tr><th>Proveedor</th><th>Índice</th><th>Símbolo</th><th>Estado</th><th>Detalle</th></tr></thead><tbody>';
+      var td=d.twelve_data||{}; h+='<tr><td>Twelve Data</td><td colspan="2">API key</td><td class="'+(td.key_configurada?'ok':'ko')+'">'+(td.key_configurada?'configurada':'NO configurada')+'</td><td>'+esc(td.error||'')+'</td></tr>';
+      Object.keys(td.indices||{}).forEach(function(k){var x=td.indices[k];h+='<tr><td>Twelve Data</td><td>'+esc(BENCH_NAME[k]||k)+'</td><td>'+esc(x.symbol)+'</td><td class="'+(x.ok?'ok':'ko')+'">'+(x.ok?'responde':'no')+'</td><td>'+esc(x.ok?(x.n+' velas, última '+x.ultima_fecha):(x.error||''))+'</td></tr>';});
+      Object.keys(d.stooq||{}).forEach(function(k){var x=d.stooq[k];h+='<tr><td>Stooq</td><td>'+esc(BENCH_NAME[k]||k)+'</td><td>'+esc(x.symbol)+'</td><td class="'+(x.ok?'ok':'ko')+'">'+(x.ok?'responde':'no')+'</td><td>'+esc(x.ok?(x.n+' cierres, último '+x.ultima_fecha):(x.error||''))+'</td></tr>';});
+      var p=td.profile_AAPL; if(p) h+='<tr><td>Twelve Data</td><td colspan="2">/profile (sector automático)</td><td class="'+(p.ok?'ok':'ko')+'">'+(p.ok?'disponible en el plan':'no disponible')+'</td><td>'+esc(p.ok?('sector AAPL: '+p.sector):(p.error||''))+'</td></tr>';
+      w.innerHTML=h+'</tbody></table>';
+    }).catch(function(){w.innerHTML=why('Error de red en el diagnóstico.',[],true);}); }
 
   // ---------- Eventos ----------
   $('opForm').addEventListener('submit',function(ev){ev.preventDefault();
@@ -481,6 +519,14 @@ export const CARTERA_HTML = `<!doctype html>
   $('benchSel').addEventListener('change',function(){ $('benchNote').textContent='Benchmark: '+BENCH_NAME[bench()]; refreshKpis(); refreshAnalysis(); refreshLine(); });
   $('flApply').addEventListener('click',function(e){e.preventDefault();refreshJournal();});
   $('flClear').addEventListener('click',function(e){e.preventDefault();$('fl_desde').value='';$('fl_hasta').value='';$('fl_ticker').value='';$('fl_tipo').value='';refreshJournal();});
+  $('riskRefresh').addEventListener('click',function(){ $('matrixWrap').innerHTML='<div class="empty">Recalculando…</div>'; refreshRisk(true).then(refreshKpis); });
+  $('diagBtn').addEventListener('click',runDiagnostics);
+  $('snapBtn').addEventListener('click',function(){ $('snapBtn').disabled=true;
+    api('/portfolio/snapshot',{method:'POST'}).then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});}).then(function(res){
+      $('snapBtn').disabled=false; var d=res.d||{};
+      if(res.ok&&d.guardado){ showMsg('Snapshot guardado para '+esc(d.fecha)+': '+money(d.valor_total)+(d.sin_precio&&d.sin_precio.length?' (sin precio de mercado, valorados a coste: '+esc(d.sin_precio.join(', '))+')':'')+'.'); refreshLine(); }
+      else showMsg('No se guardó el snapshot: '+esc(d.motivo||d.error||'error'),true);
+    }).catch(function(){$('snapBtn').disabled=false;showMsg('Error de red al generar el snapshot.',true);}); });
   $('cCancel').addEventListener('click',hideCloseModal);
   $('closeModal').addEventListener('click',function(e){if(e.target===$('closeModal'))hideCloseModal();});
   $('cConfirm').addEventListener('click',function(){var precio=parseFloat($('c_precio').value);if(!(precio>0)){$('c_precio').focus();return;}
