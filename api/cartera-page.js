@@ -111,6 +111,7 @@ export const CARTERA_HTML = `<!doctype html>
     </div>
   </div>
   <div id="msg"></div>
+  <div id="carteraAvisos"></div>
 
   <!-- 2. KPIs agregados -->
   <section class="card panel">
@@ -279,6 +280,9 @@ export const CARTERA_HTML = `<!doctype html>
       $('kpiGrid').innerHTML=h;
       state.tieneAportaciones=!!k.tiene_aportaciones;
       $('firstCash').style.display=state.tieneAportaciones?'none':'block';
+      // Aviso de cabecera cuando los pesos no son representativos (típico al migrar
+      // datos v3: hay compras pero ninguna aportación registrada).
+      $('carteraAvisos').innerHTML=(k.avisos&&k.avisos.length)?why(k.pesos_fiables?'Aviso sobre tu liquidez:':'Los pesos de esta página no son representativos todavía:',k.avisos,!k.pesos_fiables):'';
       if(!state.tieneAportaciones&&!$('f_tipoop').getAttribute('data-touched')){$('f_tipoop').value='aportacion';toggleFields();}
       // barra de pesos por clase
       var pc=k.peso_por_clase||{}; var bar='',leg='';

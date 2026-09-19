@@ -964,6 +964,26 @@ async function providerDiagnostics(env, opts = {}) {
     return out;
 }
 
+// Señales sobre la salud del modelo de liquidez: si el usuario nunca registró una
+// aportación, su efectivo sale negativo por exactamente lo invertido y el valor
+// total de la cartera queda cerca de cero, con lo que los pesos dejan de ser
+// representativos. Se reporta para explicarlo en pantalla, no se disimula.
+function _avisosCartera(ctx) {
+    const falta_aportacion_inicial = ctx.cashTotal < -EPS && !ctx.tiene_aportaciones;
+    const pesos_fiables = ctx.totalValue > EPS && (ctx.marketValue <= EPS || ctx.totalValue >= ctx.marketValue * 0.05);
+    const avisos = [];
+    if (falta_aportacion_inicial) {
+        avisos.push('No has registrado ninguna aportación de efectivo, así que la liquidez sale negativa por todo lo invertido '
+            + `(${ctx.cashTotal.toFixed(2)}). Registra una aportación por el capital con el que empezaste y los pesos cuadrarán.`);
+    } else if (ctx.cash.some(c => c.negativo)) {
+        avisos.push('El saldo de liquidez es negativo: has invertido más de lo aportado (cuenta con margen o falta registrar una aportación).');
+    }
+    if (!pesos_fiables) {
+        avisos.push('El valor total de la cartera (posiciones + liquidez) es casi cero o negativo, así que los porcentajes de peso no son representativos.');
+    }
+    return { falta_aportacion_inicial, pesos_fiables, avisos };
+}
+
 // Riesgo desde caché (si es de hoy) o recalculado y guardado.
 // - Un cálculo con errores de proveedor (parcial) solo se reutiliza RISK_PARTIAL_TTL_MS:
 //   antes, un fallo transitorio a primera hora dejaba la matriz vacía todo el día.
@@ -1062,7 +1082,7 @@ function _buildBreakdown(ctx, risk) {
     };
     totales.suma_pesos = Object.values(totales).reduce((a, t) => a + (Number(t.peso_sobre_cartera) || 0), 0);
     return { benchmark: risk ? risk.benchmark : null, total, valor_posiciones: ctx.marketValue,
-             cashTotal: ctx.cashTotal, clases, totales };
+             cashTotal: ctx.cashTotal, clases, totales, ..._avisosCartera(ctx) };
 }
 
 // KPIs agregados de la cartera.
@@ -1098,6 +1118,7 @@ function _buildKpis(ctx, risk, journal) {
         saldo_liquidez: cashTotal,
         liquidez_negativa: ctx.cash.some(c => c.negativo),
         tiene_aportaciones: !!ctx.tiene_aportaciones,
+        ..._avisosCartera(ctx),
         peso_por_clase: clsW
     };
 }
