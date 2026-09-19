@@ -202,3 +202,152 @@ test('buildJournal: los totales ya NO traen un peso_total tautológico del 100%'
     assert.equal(totales.coste_abierto, 500);        // quedan 5 a coste medio 100
     assert.equal(totales.capital_invertido_bruto, 1000);
 });
+
+// ---------- Bloque 3: tiempo abierto ----------
+import { formatDuration, diffYMD, positionFrom, aggregate as agg2 } from './cartera-logic.js';
+
+test('formatDuration: formatos del enunciado', () => {
+    assert.equal(formatDuration('2025-01-01', '2025-01-19'), '18 días');
+    assert.equal(formatDuration('2025-01-01', '2025-02-05'), '1 mes y 4 días');
+    assert.equal(formatDuration('2025-01-01', '2025-07-18'), '6 meses y 17 días');
+    assert.equal(formatDuration('2023-01-01', '2025-05-15'), '2 años, 4 meses y 14 días');
+});
+
+test('formatDuration: omite las unidades a cero', () => {
+    assert.equal(formatDuration('2023-01-01', '2025-01-15'), '2 años y 14 días');   // no "2 años, 0 meses y 14 días"
+    assert.equal(formatDuration('2023-01-01', '2025-01-01'), '2 años');
+    assert.equal(formatDuration('2025-01-01', '2025-03-01'), '2 meses');
+});
+
+test('formatDuration: singular y plural correctos', () => {
+    assert.equal(formatDuration('2025-01-01', '2025-01-02'), '1 día');
+    assert.equal(formatDuration('2025-01-01', '2025-01-03'), '2 días');
+    assert.equal(formatDuration('2025-01-01', '2025-02-01'), '1 mes');
+    assert.equal(formatDuration('2025-01-01', '2025-03-01'), '2 meses');
+    assert.equal(formatDuration('2024-01-01', '2025-01-01'), '1 año');
+    assert.equal(formatDuration('2023-01-01', '2025-01-01'), '2 años');
+});
+
+test('formatDuration: borde 0 días y fecha final anterior', () => {
+    assert.equal(formatDuration('2025-05-10', '2025-05-10'), '0 días');
+    assert.equal(formatDuration('2025-05-10', '2025-05-01'), '0 días');  // no negativos
+});
+
+test('formatDuration: cambio de año', () => {
+    assert.equal(formatDuration('2024-12-28', '2025-01-03'), '6 días');
+    assert.equal(formatDuration('2024-11-30', '2025-01-01'), '1 mes y 2 días');
+    assert.equal(formatDuration('2024-12-31', '2025-01-01'), '1 día');
+});
+
+test('formatDuration: 29 de febrero (año bisiesto)', () => {
+    assert.equal(formatDuration('2024-02-29', '2024-03-01'), '1 día');
+    assert.equal(formatDuration('2024-02-28', '2024-02-29'), '1 día');
+    assert.equal(formatDuration('2024-02-29', '2025-03-01'), '1 año');
+    // 2024-02-29 + 11 meses = 2025-01-29; + 30 días = 2025-02-28 (el año no se cumple
+    // porque el 29 de febrero no existe en 2025).
+    assert.equal(formatDuration('2024-02-29', '2025-02-28'), '11 meses y 30 días');
+    assert.equal(diffYMD('2024-02-29', '2025-02-28').total_dias, 365);
+});
+
+test('buildJournal: tiempo abierto de una posición aún abierta va hasta hoy', () => {
+    const { rows } = buildJournal([buy('A', 10, 100, 0, '2025-01-01')], '2025-01-19');
+    assert.equal(rows[0].tiempo_abierto, '18 días');
+    assert.equal(rows[0].sigue_abierta, true);
+    assert.equal(rows[0].cerrada_en, null);
+});
+
+test('buildJournal: posición cerrada cuenta hasta la fecha de cierre, no hasta hoy', () => {
+    const ops = [buy('A', 10, 100, 0, '2025-01-01'), sell('A', 10, 120, 0, '2025-03-05')];
+    const { rows } = buildJournal(ops, '2026-01-01');
+    assert.equal(rows[0].tiempo_abierto, '2 meses y 4 días');   // compra -> cierre
+    assert.equal(rows[0].sigue_abierta, false);
+    assert.equal(rows[0].cerrada_en, '2025-03-05');
+    assert.equal(rows[1].tiempo_abierto, '2 meses y 4 días');   // la venta, lo mismo
+});
+
+test('buildJournal: venta parcial mantiene la racha abierta; reabrir crea una racha nueva', () => {
+    const ops = [buy('A', 10, 100, 0, '2025-01-01'), sell('A', 5, 120, 0, '2025-02-01'),
+                 sell('A', 5, 130, 0, '2025-03-01'), buy('A', 3, 90, 0, '2025-06-01')];
+    const { rows } = buildJournal(ops, '2025-06-20');
+    assert.equal(rows[0].tiempo_abierto, '2 meses');          // 01-01 -> cierre 03-01
+    assert.equal(rows[0].sigue_abierta, false);
+    assert.equal(rows[1].tiempo_abierto, '1 mes');            // venta parcial: 01-01 -> 02-01
+    assert.equal(rows[3].tiempo_abierto, '19 días');          // racha nueva -> hoy
+    assert.equal(rows[3].sigue_abierta, true);
+});
+
+// ---------- Bloque 4: total invertido de la posición ----------
+test('positionFrom: total_invertido = cantidad × precio medio + comisiones de entrada', () => {
+    const ops = [buy('A', 10, 100, 5, '2025-01-01'), buy('A', 10, 120, 5, '2025-02-01')];
+    const p = positionFrom(agg2(ops).get('A'));
+    assert.equal(p.precio_medio, 110);
+    assert.equal(p.comision_entrada_total, 10);
+    assert.equal(p.total_invertido, 20 * 110 + 10);
+    assert.equal(p.primera_compra, '2025-01-01');
+});
+
+test('positionFrom: tras vender, el total invertido refleja solo lo que sigue abierto', () => {
+    const ops = [buy('A', 10, 100, 5, '2025-01-01'), sell('A', 6, 150, 2, '2025-03-01')];
+    const p = positionFrom(agg2(ops).get('A'));
+    assert.equal(p.cantidad_abierta, 4);
+    assert.equal(p.total_invertido, 4 * 100 + 5);
+    assert.equal(p.ultima_venta, '2025-03-01');
+});
+
+// ---------- Escenario completo exigido en la verificación ----------
+// aportación → dos compras del mismo activo → compra de otro → venta parcial.
+test('escenario completo: liquidez, pesos al 100%, pie del diario real y tiempo abierto', () => {
+    const HOY = '2025-04-20';
+    const ops = [
+        cashOp('aportacion', 10000, '2025-01-01'),
+        buy('AAPL', 10, 100, 5, '2025-01-10'),
+        buy('AAPL', 10, 120, 5, '2025-02-10'),
+        buy('MSFT', 5, 200, 5, '2025-03-01'),
+        sell('AAPL', 8, 150, 5, '2025-04-15')
+    ];
+
+    // 1) Liquidez: baja con cada compra (importe + comisión) y sube con la venta.
+    const bal = computeCashBalance(ops);
+    // 10000 − 1005 − 1205 − 1005 + 1195 = 7980
+    assert.equal(bal.por_moneda.EUR.saldo, 7980);
+    assert.equal(bal.tiene_aportaciones, true);
+
+    // 2) Precio medio recalculado con las dos compras: (1000+1200)/20 = 110.
+    const pos = openPositions(ops);
+    const aapl = pos.find(p => p.ticker === 'AAPL');
+    assert.equal(aapl.precio_medio, 110);
+    assert.equal(aapl.cantidad_abierta, 12);          // 20 − 8
+    assert.equal(aapl.total_invertido, 12 * 110 + 10); // + comisiones de entrada
+
+    // 3) Pesos con liquidez incluida: suman exactamente 100%.
+    const valoradas = [{ ...aapl, valor: 12 * 150 }, { ...pos.find(p => p.ticker === 'MSFT'), valor: 5 * 220 }];
+    const w = computePortfolioWeights(valoradas, bal.por_moneda.EUR.saldo);
+    assert.equal(w.invertido, 1800 + 1100);
+    assert.equal(w.total, 2900 + 7980);
+    const suma = w.items.reduce((a, i) => a + i.peso_sobre_cartera, 0) + w.peso_liquidez;
+    assert.ok(Math.abs(suma - 100) < 1e-9, `los pesos suman ${suma}`);
+    // La liquidez es la mayor partida de esta cartera (73,3%).
+    assert.ok(Math.abs(w.peso_liquidez - 7980 / 10880 * 100) < 1e-9);
+
+    // 4) El pie del diario ya NO es 100% fijo: lo abierto pesa 26,65% de la cartera.
+    const pesoAbierto = weightPct(w.invertido, w.total);
+    assert.ok(Math.abs(pesoAbierto - 26.6544) < 0.001, `peso abierto ${pesoAbierto}`);
+    assert.notEqual(Math.round(pesoAbierto), 100);
+
+    // 5) Diario: tiempo abierto bien formateado y sin peso_total tautológico.
+    const { rows, totales } = buildJournal(ops, HOY);
+    assert.equal(totales.peso_total, undefined);
+    assert.equal(rows[0].tipo_operacion, 'aportacion');
+    assert.equal(rows[0].importe, 1000 * 10);
+    assert.equal(rows[1].tiempo_abierto, '3 meses y 10 días');  // 01-10 -> 04-20, sigue abierta
+    assert.equal(rows[1].sigue_abierta, true);
+    assert.equal(rows[4].tipo_operacion, 'venta');
+    assert.equal(rows[4].tiempo_abierto, '3 meses y 5 días');   // 01-10 -> venta 04-15
+    // Beneficio de la venta parcial: (150 − 110) × 8 − comisión entrada prop. − 5
+    assert.ok(Math.abs(rows[4].beneficio - ((150 - 110) * 8 - 10 * (8 / 20) - 5)) < 1e-9);
+
+    // 6) Reparto: la tarta (posiciones + liquidez) suma 100%.
+    const alloc = computeAllocation(pos, { AAPL: { price: 150 }, MSFT: { price: 220 } }, bal.por_moneda.EUR.saldo);
+    assert.ok(Math.abs(alloc.items.reduce((a, i) => a + i.peso_sobre_cartera, 0) - 100) < 1e-9);
+    assert.equal(alloc.items.find(i => i.es_liquidez).valor, 7980);
+});

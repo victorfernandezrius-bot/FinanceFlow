@@ -114,6 +114,46 @@ export function adjustTo100(items, key = 'peso_sobre_cartera') {
     return out;
 }
 
+// ---------- v4 Bloque 3: duración en formato humano ----------
+// Diferencia de calendario entre dos fechas YYYY-MM-DD (UTC, a>b devuelve ceros).
+// Convención de préstamo: si faltan días se toma prestado del mes ANTERIOR a la
+// fecha final, que es como se cuenta un "mes" en lenguaje natural. Por eso
+// 2024-02-29 → 2025-02-28 son "11 meses y 30 días" (2024-02-29 + 11 meses =
+// 2025-01-29, + 30 días = 2025-02-28) y no "1 año": el 29 de febrero no existe
+// en 2025, así que el año aún no se ha cumplido.
+export function diffYMD(desde, hasta) {
+    const a = new Date(`${desde}T00:00:00Z`), b = new Date(`${hasta}T00:00:00Z`);
+    if (isNaN(a) || isNaN(b) || b < a) return { anios: 0, meses: 0, dias: 0, total_dias: 0 };
+    let y = b.getUTCFullYear() - a.getUTCFullYear();
+    let m = b.getUTCMonth() - a.getUTCMonth();
+    let d = b.getUTCDate() - a.getUTCDate();
+    if (d < 0) {
+        m--;
+        // Días del mes inmediatamente anterior al de la fecha final.
+        d += new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), 0)).getUTCDate();
+    }
+    if (m < 0) { m += 12; y--; }
+    return { anios: y, meses: m, dias: d, total_dias: Math.round((b - a) / 86400000) };
+}
+
+// Plural correcto en español para las tres unidades.
+function _unidad(n, singular, plural) { return `${n} ${n === 1 ? singular : plural}`; }
+
+// Duración humana con desglose, omitiendo las unidades a cero:
+//   "18 días" · "1 mes y 4 días" · "6 meses y 17 días" · "2 años, 4 meses y 14 días"
+//   "2 años y 14 días" (no "2 años, 0 meses y 14 días")
+// Devuelve "0 días" cuando ambas fechas son la misma (posición abierta hoy).
+export function formatDuration(desde, hasta) {
+    const { anios, meses, dias } = diffYMD(desde, hasta);
+    const partes = [];
+    if (anios > 0) partes.push(_unidad(anios, 'año', 'años'));
+    if (meses > 0) partes.push(_unidad(meses, 'mes', 'meses'));
+    if (dias > 0) partes.push(_unidad(dias, 'día', 'días'));
+    if (!partes.length) return '0 días';
+    if (partes.length === 1) return partes[0];
+    return `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
+}
+
 // Agrega todas las operaciones por ticker sumando compras/ventas. Las operaciones
 // de efectivo (aportación/retirada) NO son posiciones y se ignoran aquí.
 // Devuelve un Map<ticker, {buyQty,buyCost,buyComision,sellQty,sellComision,...}>.
@@ -125,12 +165,19 @@ export function aggregate(ops) {
         let a = m.get(t);
         if (!a) {
             a = { ticker: t, tipo_activo: op.tipo_activo, moneda: op.moneda || 'EUR',
-                  buyQty: 0, buyCost: 0, buyComision: 0, sellQty: 0, sellComision: 0 };
+                  buyQty: 0, buyCost: 0, buyComision: 0, sellQty: 0, sellComision: 0,
+                  primera_compra: null, ultima_venta: null };
             m.set(t, a);
         }
         const q = Number(op.cantidad) || 0, p = Number(op.precio) || 0, c = Number(op.comision) || 0;
-        if (op.tipo_operacion === 'compra') { a.buyQty += q; a.buyCost += q * p; a.buyComision += c; }
-        else if (op.tipo_operacion === 'venta') { a.sellQty += q; a.sellComision += c; }
+        if (op.tipo_operacion === 'compra') {
+            a.buyQty += q; a.buyCost += q * p; a.buyComision += c;
+            if (!a.primera_compra || (op.fecha && op.fecha < a.primera_compra)) a.primera_compra = op.fecha || null;
+        }
+        else if (op.tipo_operacion === 'venta') {
+            a.sellQty += q; a.sellComision += c;
+            if (!a.ultima_venta || (op.fecha && op.fecha > a.ultima_venta)) a.ultima_venta = op.fecha || null;
+        }
         if (op.tipo_activo) a.tipo_activo = op.tipo_activo;
         if (op.moneda) a.moneda = op.moneda;
     }
@@ -147,7 +194,13 @@ export function positionFrom(a) {
         moneda: a.moneda,
         cantidad_abierta,
         precio_medio,
-        comision_total_pagada: a.buyComision + a.sellComision
+        comision_total_pagada: a.buyComision + a.sellComision,
+        // Comisiones de ENTRADA acumuladas (Bloque 4: total invertido).
+        comision_entrada_total: a.buyComision,
+        // Total invertido = cantidad abierta × precio medio + comisiones de entrada.
+        total_invertido: cantidad_abierta * precio_medio + a.buyComision,
+        primera_compra: a.primera_compra || null,
+        ultima_venta: a.ultima_venta || null
     };
 }
 
@@ -193,14 +246,15 @@ export function computeClose(ops, ticker, precioCierre, comisionSalida) {
 // Diario de operaciones + totales. `ops` debe venir ya filtrado y ordenado
 // cronológicamente (fecha asc, luego id asc). Procesa en orden manteniendo un
 // "pool" por ticker (coste medio) para calcular P&L realizado en cada venta.
-export function buildJournal(ops) {
+export function buildJournal(ops, hoy = new Date().toISOString().slice(0, 10)) {
     // Agregado global por ticker (todas las compras) como red de seguridad: si una
     // venta aparece antes que sus compras en orden cronológico —p. ej. datos v1
     // migrados con fecha "hoy" y ventas manuales con fecha anterior— el pool
     // corriente estaría vacío; en ese caso usamos el coste medio global del ticker
     // en lugar de un precio medio 0 falso.
     const glob = aggregate(ops);
-    const pool = new Map(); // ticker -> { qty, cost, com }
+    const pool = new Map(); // ticker -> { qty, cost, com, racha, abierta_desde }
+    const cierres = new Map(); // "TICKER#racha" -> fecha en que se cerró del todo
     // Capital invertido acumulado hasta cada operación (compras: cantidad×precio +
     // comisión). Es el denominador del peso HISTÓRICO de cada fila: la foto del
     // momento en que se ejecutó, no la de hoy.
@@ -225,10 +279,16 @@ export function buildJournal(ops) {
             id: op.id, fecha: op.fecha, tipo_operacion: op.tipo_operacion,
             ticker: op.ticker, tipo_activo: op.tipo_activo, precio: p,
             comision_entrada: null, comision_salida: null,
-            peso_historico_pct: null, beneficio: null, rentabilidad_pct: null
+            peso_historico_pct: null, beneficio: null, rentabilidad_pct: null,
+            abierta_desde: null, cerrada_en: null, tiempo_abierto: null, sigue_abierta: null
         };
 
         if (op.tipo_operacion === 'compra') {
+            // Una "racha" es un periodo con posición abierta continua en el ticker.
+            // Si el pool estaba vacío, esta compra abre una racha nueva.
+            if (s.qty <= EPS) { s.racha = (s.racha || 0) + 1; s.abierta_desde = op.fecha; }
+            row._racha = `${op.ticker}#${s.racha}`;
+            row.abierta_desde = op.fecha;
             s.qty += q; s.cost += q * p; s.com += c;
             capitalBruto += q * p + c;
             row.comision_entrada = c;
@@ -257,10 +317,29 @@ export function buildJournal(ops) {
             // En una venta el "peso" es el importe desinvertido sobre el capital
             // invertido acumulado en ese momento.
             row.peso_historico_pct = weightPct(p * q, capitalBruto);
+            // Tiempo que estuvo abierto lo que se vende: desde que se abrió la racha
+            // hasta la fecha de esta venta.
+            row.abierta_desde = s.abierta_desde || null;
+            row.cerrada_en = op.fecha;
+            if (row.abierta_desde) row.tiempo_abierto = formatDuration(row.abierta_desde, op.fecha);
+            if (s.qty <= EPS) { cierres.set(`${op.ticker}#${s.racha}`, op.fecha); s.abierta_desde = null; }
             beneficioTotal += beneficio; baseVentas += base;
         }
         rows.push(row);
     }
+
+    // Segunda pasada: las filas de COMPRA ya saben cuándo se abrió su racha, pero
+    // no si esa racha llegó a cerrarse (puede cerrarse en una venta posterior). Si
+    // se cerró, el tiempo abierto va hasta la fecha de cierre; si sigue abierta,
+    // hasta hoy.
+    for (const r of rows) {
+        if (r.tipo_operacion !== 'compra' || !r.abierta_desde) continue;
+        const cierre = cierres.get(r._racha);
+        r.cerrada_en = cierre || null;
+        r.tiempo_abierto = formatDuration(r.abierta_desde, cierre || hoy);
+        r.sigue_abierta = !cierre;
+    }
+    for (const r of rows) delete r._racha;
 
     // Coste (base) de las posiciones que siguen abiertas. NO se convierte en un
     // "peso total" del 100%: ese era el bug — un total normalizado sobre sí mismo

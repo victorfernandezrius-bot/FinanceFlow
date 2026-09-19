@@ -37,7 +37,7 @@ import {
 import { CARTERA_HTML } from './cartera-page.js';
 import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS,
     computeCashBalance, accruedInterest, isCashOp, CASH_TICKER, CASH_OPS,
-    weightPct, computePortfolioWeights, adjustTo100 } from './cartera-logic.js';
+    weightPct, computePortfolioWeights, adjustTo100, formatDuration } from './cartera-logic.js';
 import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
     portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 
@@ -497,6 +497,96 @@ const BENCHMARKS = {
     DAX:       { symbol: 'DAX',  nombre: 'DAX' },
     FTSE100:   { symbol: 'FTSE', nombre: 'FTSE 100' }
 };
+
+// ---------- v4 Bloque 6: sector del instrumento ----------
+// Tabla LOCAL y curada de sectores para los valores más comunes del IBEX 35 y del
+// S&P 500. Es un fallback honesto: no adivina nada: si el ticker no está, el campo
+// se deja manual. Nunca se usa un LLM para inventar el sector.
+const SECTORES_LOCALES = {
+    // IBEX 35 (tickers de Madrid)
+    SAN: 'Finanzas', BBVA: 'Finanzas', CABK: 'Finanzas', SAB: 'Finanzas', BKT: 'Finanzas',
+    UNI: 'Finanzas', MAP: 'Seguros', ITX: 'Consumo discrecional', PUIG: 'Consumo básico',
+    IBE: 'Utilities', ELE: 'Utilities', NTGY: 'Utilities', ANA: 'Utilities', ENG: 'Utilities',
+    RED: 'Utilities', REE: 'Utilities', SLR: 'Utilities', SOLARIA: 'Utilities',
+    REP: 'Energía', TEF: 'Telecomunicaciones', CLNX: 'Telecomunicaciones',
+    AMS: 'Tecnología', IDR: 'Tecnología', GRF: 'Salud', ROVI: 'Salud',
+    FER: 'Industrial', ACS: 'Industrial', AENA: 'Industrial', IAG: 'Industrial',
+    SCYR: 'Industrial', LOG: 'Industrial', ACX: 'Materiales', MTS: 'Materiales',
+    COL: 'Inmobiliario', MRL: 'Inmobiliario', MEL: 'Consumo discrecional', FDR: 'Consumo discrecional',
+    ENA: 'Utilities',
+    // S&P 500 (principales)
+    AAPL: 'Tecnología', MSFT: 'Tecnología', NVDA: 'Tecnología', AVGO: 'Tecnología', ORCL: 'Tecnología',
+    CRM: 'Tecnología', ADBE: 'Tecnología', AMD: 'Tecnología', INTC: 'Tecnología', CSCO: 'Tecnología',
+    TXN: 'Tecnología', QCOM: 'Tecnología', MU: 'Tecnología', IBM: 'Tecnología', NOW: 'Tecnología',
+    INTU: 'Tecnología', ACN: 'Tecnología',
+    GOOGL: 'Telecomunicaciones', GOOG: 'Telecomunicaciones', META: 'Telecomunicaciones',
+    NFLX: 'Telecomunicaciones', DIS: 'Telecomunicaciones', CMCSA: 'Telecomunicaciones',
+    T: 'Telecomunicaciones', VZ: 'Telecomunicaciones',
+    AMZN: 'Consumo discrecional', TSLA: 'Consumo discrecional', HD: 'Consumo discrecional',
+    MCD: 'Consumo discrecional', NKE: 'Consumo discrecional', LOW: 'Consumo discrecional',
+    SBUX: 'Consumo discrecional', BKNG: 'Consumo discrecional',
+    WMT: 'Consumo básico', PG: 'Consumo básico', KO: 'Consumo básico', PEP: 'Consumo básico',
+    COST: 'Consumo básico', PM: 'Consumo básico', MO: 'Consumo básico', CL: 'Consumo básico',
+    JPM: 'Finanzas', BAC: 'Finanzas', WFC: 'Finanzas', GS: 'Finanzas', MS: 'Finanzas',
+    C: 'Finanzas', SCHW: 'Finanzas', BLK: 'Finanzas', AXP: 'Finanzas', SPGI: 'Finanzas',
+    V: 'Finanzas', MA: 'Finanzas', BRKB: 'Finanzas',
+    UNH: 'Salud', JNJ: 'Salud', LLY: 'Salud', MRK: 'Salud', ABBV: 'Salud', PFE: 'Salud',
+    TMO: 'Salud', ABT: 'Salud', DHR: 'Salud', BMY: 'Salud', AMGN: 'Salud', GILD: 'Salud',
+    CVS: 'Salud', MDT: 'Salud', ISRG: 'Salud',
+    XOM: 'Energía', CVX: 'Energía', COP: 'Energía', SLB: 'Energía',
+    BA: 'Industrial', CAT: 'Industrial', GE: 'Industrial', HON: 'Industrial', UPS: 'Industrial',
+    RTX: 'Industrial', LMT: 'Industrial', MMM: 'Industrial', DE: 'Industrial',
+    LIN: 'Materiales', SHW: 'Materiales', FCX: 'Materiales',
+    NEE: 'Utilities', DUK: 'Utilities', SO: 'Utilities', D: 'Utilities', AEP: 'Utilities',
+    AMT: 'Inmobiliario', PLD: 'Inmobiliario', SPG: 'Inmobiliario'
+};
+
+// Resuelve el sector de un ticker. Orden: caché KV -> Twelve Data /profile (si el
+// plan lo permite) -> tabla local. El campo sigue siendo editable por el usuario.
+// Si /profile no está en el plan se recuerda 24h para no gastar créditos en balde.
+async function resolveSector(env, ticker) {
+    const t = String(ticker || '').toUpperCase().trim();
+    if (!t) return { ticker: t, sector: null, fuente: null, nota: 'Ticker vacío' };
+    const cacheKey = `profile:${t}`;
+    const cached = await env.CACHE.get(cacheKey);
+    if (cached) {
+        try { const c = JSON.parse(cached); return { ...c, ticker: t, desde_cache: true }; } catch { /* refetch */ }
+    }
+    const local = () => {
+        const sec = SECTORES_LOCALES[t.replace(/[.\s]/g, '')] || null;
+        return { ticker: t, sector: sec, fuente: sec ? 'tabla_local' : null,
+                 nota: sec ? 'Sector de la tabla local de valores comunes (IBEX 35 / S&P 500). Puedes corregirlo.'
+                           : 'No hay sector automático para este ticker: introdúcelo a mano.' };
+    };
+    const apiKey = env.TWELVE_DATA_API_KEY;
+    const noProfile = await env.CACHE.get('profile_no_disponible');
+    if (!apiKey || noProfile) {
+        const r = local();
+        if (r.sector) await env.CACHE.put(cacheKey, JSON.stringify(r));   // sin TTL: el sector no cambia
+        return { ...r, nota: r.nota + (noProfile ? ' (/profile no disponible en el plan de Twelve Data)' : '') };
+    }
+    try {
+        const resp = await fetch(`https://api.twelvedata.com/profile?symbol=${encodeURIComponent(t)}&apikey=${apiKey}`);
+        const d = await resp.json();
+        if (d && d.status !== 'error' && d.sector) {
+            const r = { ticker: t, sector: d.sector, nombre: d.name || null, industria: d.industry || null,
+                        fuente: 'twelvedata', nota: 'Sector obtenido de Twelve Data. Puedes corregirlo.' };
+            await env.CACHE.put(cacheKey, JSON.stringify(r));             // sin TTL
+            return r;
+        }
+        // 403 / "not available in your plan" -> recordar 24h y caer a la tabla local.
+        const msg = String((d && d.message) || '');
+        if (resp.status === 403 || /plan|upgrade|not available|grow/i.test(msg)) {
+            await env.CACHE.put('profile_no_disponible', msg || '403', { expirationTtl: 86400 });
+        }
+        const r = local();
+        if (r.sector) await env.CACHE.put(cacheKey, JSON.stringify(r));
+        return { ...r, nota: r.nota + (msg ? ` (Twelve Data: ${msg})` : '') };
+    } catch (e) {
+        const r = local();
+        return { ...r, nota: r.nota + ` (Twelve Data no accesible: ${e.message || e})` };
+    }
+}
 
 // Traduce un código de periodo a fecha de inicio (YYYY-MM-DD) respecto a hoy.
 function periodoToStartDate(periodo, refDate) {
@@ -1995,6 +2085,21 @@ export default {
                 if (estado === 'cerradas') out = todas.filter(p => p.cantidad_abierta <= EPS);
                 else if (estado === 'todas') out = todas;
                 else out = todas.filter(p => p.cantidad_abierta > EPS);
+                // Bloque 4: peso_sobre_cartera con la definición única (necesita valor de
+                // mercado y liquidez) y tiempo abierto de cada posición.
+                const ctxH = await _carteraContext(env, uid);
+                const valorPorTicker = {};
+                ctxH.positions.forEach(p => { valorPorTicker[p.ticker] = p.valor; });
+                const hoyH = new Date().toISOString().slice(0, 10);
+                out = out.map(p => ({
+                    ...p,
+                    valor: valorPorTicker[p.ticker] ?? null,
+                    peso_sobre_cartera: weightPct(valorPorTicker[p.ticker], ctxH.totalValue),
+                    peso_sobre_invertido: weightPct(valorPorTicker[p.ticker], ctxH.marketValue),
+                    tiempo_abierto: p.primera_compra
+                        ? formatDuration(p.primera_compra, p.cantidad_abierta > EPS ? hoyH : (p.ultima_venta || hoyH))
+                        : null
+                }));
                 return json(out, 200, cors);
             }
 
@@ -2261,6 +2366,14 @@ export default {
                 const today = new Date().toISOString().slice(0, 10);
                 const r = await snapshotCartera(env, uid, today);
                 return json(r, r.guardado ? 200 : 409, cors);
+            }
+
+            // GET /api/portfolio/sector?ticker=AAPL — sector automático (Twelve Data o tabla local).
+            if (path === '/api/portfolio/sector' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const t = url.searchParams.get('ticker') || '';
+                if (!t) return json({ error: 'Falta el parámetro ticker' }, 400, cors);
+                return json(await resolveSector(env, t), 200, cors);
             }
 
             // GET /api/portfolio/diagnostics — prueba proveedores desde el Worker (1/min por usuario).
