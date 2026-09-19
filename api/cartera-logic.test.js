@@ -120,3 +120,85 @@ test('accruedInterest: 1000 al 3% anual, capitalización anual, 1 año → 30; n
     // Mensual > anual (capitaliza más veces).
     assert.ok(accruedInterest(1000, { ...cfg, capitalizacion: 'mensual' }, now) > i);
 });
+
+// ---------- Bloque 2: pesos ----------
+import { weightPct, computePortfolioWeights, adjustTo100, computeAllocation } from './cartera-logic.js';
+
+test('weightPct: definición única; total 0 o valor nulo → 0 (nunca NaN ni 100 falso)', () => {
+    assert.equal(weightPct(25, 100), 25);
+    assert.equal(weightPct(0, 100), 0);
+    assert.equal(weightPct(50, 0), 0);
+    assert.equal(weightPct(null, 100), 0);
+});
+
+test('computePortfolioWeights: posiciones + liquidez suman exactamente 100%', () => {
+    const pos = [{ ticker: 'A', valor: 6000 }, { ticker: 'B', valor: 2000 }];
+    const w = computePortfolioWeights(pos, 2000);
+    assert.equal(w.total, 10000);
+    assert.equal(w.invertido, 8000);
+    assert.equal(w.items[0].peso_sobre_cartera, 60);
+    assert.equal(w.items[1].peso_sobre_cartera, 20);
+    assert.equal(w.peso_liquidez, 20);
+    const suma = w.items.reduce((a, i) => a + i.peso_sobre_cartera, 0) + w.peso_liquidez;
+    assert.ok(Math.abs(suma - 100) < 1e-9);
+});
+
+test('computePortfolioWeights: peso_sobre_invertido excluye la liquidez', () => {
+    const w = computePortfolioWeights([{ ticker: 'A', valor: 6000 }, { ticker: 'B', valor: 2000 }], 2000);
+    assert.equal(w.items[0].peso_sobre_invertido, 75);
+    assert.equal(w.items[1].peso_sobre_invertido, 25);
+});
+
+test('computePortfolioWeights: liquidez negativa (margen) sigue sumando 100%', () => {
+    const w = computePortfolioWeights([{ ticker: 'A', valor: 12000 }], -2000);
+    assert.equal(w.total, 10000);
+    assert.equal(w.items[0].peso_sobre_cartera, 120);
+    assert.equal(w.peso_liquidez, -20);
+    assert.ok(Math.abs(w.items[0].peso_sobre_cartera + w.peso_liquidez - 100) < 1e-9);
+});
+
+test('adjustTo100: absorbe el redondeo en la partida mayor y no inventa 100% si todo es 0', () => {
+    const items = [{ peso_sobre_cartera: 33.333 }, { peso_sobre_cartera: 33.333 }, { peso_sobre_cartera: 33.333 }];
+    const adj = adjustTo100(items);
+    assert.ok(Math.abs(adj.reduce((a, i) => a + i.peso_sobre_cartera, 0) - 100) < 1e-9);
+    assert.ok(adj[0].peso_sobre_cartera > 33.333);      // el residuo va al mayor (el primero, empatado)
+    assert.equal(items[0].peso_sobre_cartera, 33.333);  // función pura: no muta la entrada
+    assert.deepEqual(adjustTo100([{ peso_sobre_cartera: 0 }]), [{ peso_sobre_cartera: 0 }]);
+    assert.deepEqual(adjustTo100([]), []);
+});
+
+test('computeAllocation: la liquidez entra como una posición más y el reparto suma 100%', () => {
+    const pos = [{ ticker: 'A', tipo_activo: 'accion', cantidad_abierta: 10, precio_medio: 100 },
+                 { ticker: 'B', tipo_activo: 'accion', cantidad_abierta: 10, precio_medio: 100 }];
+    const prices = { A: { price: 600 }, B: { price: 200 } };
+    const r = computeAllocation(pos, prices, 2000);
+    assert.equal(r.total, 10000);
+    const suma = r.items.reduce((a, i) => a + i.peso_sobre_cartera, 0);
+    assert.ok(Math.abs(suma - 100) < 1e-9);
+    const liq = r.items.find(i => i.es_liquidez);
+    assert.equal(liq.valor, 2000);
+    assert.equal(liq.peso_sobre_cartera, 20);
+});
+
+test('computeAllocation: una posición sin precio no falsea el reparto (valor null, peso 0)', () => {
+    const pos = [{ ticker: 'A', tipo_activo: 'accion', cantidad_abierta: 10, precio_medio: 100 },
+                 { ticker: 'BONO', tipo_activo: 'renta_fija', cantidad_abierta: 1, precio_medio: 1000 }];
+    const r = computeAllocation(pos, { A: { price: 100 } }, 0);
+    const bono = r.items.find(i => i.ticker === 'BONO');
+    assert.equal(bono.valor, null);
+    assert.equal(bono.peso_sobre_cartera, 0);
+    assert.equal(r.items.find(i => i.ticker === 'A').peso_sobre_cartera, 100);
+});
+
+test('buildJournal: el peso de cada fila es histórico (sobre el invertido de ese momento)', () => {
+    const { rows } = buildJournal([buy('A', 10, 100, 0, '2025-01-01'), buy('B', 10, 100, 0, '2025-02-01')]);
+    assert.equal(rows[0].peso_historico_pct, 100);  // primera compra: era el 100% de lo invertido entonces
+    assert.equal(rows[1].peso_historico_pct, 50);   // segunda: 1000 de 2000
+});
+
+test('buildJournal: los totales ya NO traen un peso_total tautológico del 100%', () => {
+    const { totales } = buildJournal([buy('A', 10, 100, 0, '2025-01-01'), sell('A', 5, 150, 0, '2025-03-01')]);
+    assert.equal(totales.peso_total, undefined);
+    assert.equal(totales.coste_abierto, 500);        // quedan 5 a coste medio 100
+    assert.equal(totales.capital_invertido_bruto, 1000);
+});

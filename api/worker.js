@@ -36,7 +36,8 @@ import {
 } from '@simplewebauthn/server';
 import { CARTERA_HTML } from './cartera-page.js';
 import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS,
-    computeCashBalance, accruedInterest, isCashOp, CASH_TICKER, CASH_OPS } from './cartera-logic.js';
+    computeCashBalance, accruedInterest, isCashOp, CASH_TICKER, CASH_OPS,
+    weightPct, computePortfolioWeights, adjustTo100 } from './cartera-logic.js';
 import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
     portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 
@@ -797,12 +798,16 @@ async function _carteraContext(env, uid) {
     cash.forEach(c => { cashTotal += c.saldo + c.interes_devengado; });
     const totalValue = marketValue + cashTotal;
 
+    // Pesos con la definición única (tanto por uno para el motor de riesgo).
+    const w = computePortfolioWeights(posValues, cashTotal);
     const weightsTotal = {}, weightsInvested = {};
-    posValues.forEach(p => {
-        weightsTotal[p.ticker] = totalValue > 0 && p.valor != null ? p.valor / totalValue : 0;
-        weightsInvested[p.ticker] = marketValue > 0 && p.valor != null ? p.valor / marketValue : 0;
+    w.items.forEach(p => {
+        weightsTotal[p.ticker] = p.peso_sobre_cartera / 100;
+        weightsInvested[p.ticker] = p.peso_sobre_invertido / 100;
     });
-    return { ops, positions: posValues, prices, cash, cashTotal, tiene_aportaciones, instrMap, marketValue, totalValue, weightsTotal, weightsInvested };
+    const pesoLiquidez = w.peso_liquidez;
+    return { ops, positions: posValues, prices, cash, cashTotal, tiene_aportaciones, instrMap,
+             marketValue, totalValue, pesoLiquidez, weightsTotal, weightsInvested };
 }
 
 // Snapshot del valor total de la cartera de un usuario en `fecha` (YYYY-MM-DD):
@@ -900,32 +905,22 @@ async function _riskCachedOrCompute(env, uid, benchKey, ctx, refresh = false) {
     return payload;
 }
 
-// Fuerza que la suma de todos los pesos por clase (+ liquidez) sea exactamente 100%,
-// absorbiendo el residuo de redondeo en la partida mayor (requisito de cuadre).
-function _forceSum100(clases) {
-    const items = [];
-    for (const k of Object.keys(clases)) for (const it of clases[k]) items.push(it);
-    if (!items.length) return;
-    const sum = items.reduce((a, it) => a + (it.peso_pct || 0), 0);
-    const resid = 100 - sum;
-    if (Math.abs(resid) < 1e-9) return;
-    let max = items[0];
-    for (const it of items) if ((it.peso_pct || 0) > (max.peso_pct || 0)) max = it;
-    max.peso_pct = (max.peso_pct || 0) + resid;
-}
-
 // Agrupa las posiciones por clase de activo con sus campos específicos + pesos.
 function _buildBreakdown(ctx, risk) {
-    const total = ctx.totalValue;
-    const wpct = v => (total > 0 && v != null) ? v / total * 100 : 0;
+    const total = ctx.totalValue, invertido = ctx.marketValue;
+    const wpct = v => weightPct(v, total);
     const betas = (risk && risk.betas) || {}, clasi = (risk && risk.clasificacion) || {};
     const rv = [], rf = [], der = [], cripto = [];
     ctx.positions.forEach(p => {
         const ins = p.instrumento || {};
+        // Total invertido de la posición: coste medio × unidades + comisiones de entrada.
+        const coste = p.precio_medio * p.cantidad_abierta;
         const base = {
             ticker: p.ticker, nombre: ins.nombre || null, unidades: p.cantidad_abierta,
-            peso_pct: wpct(p.valor), peso_invertido_pct: ctx.marketValue > 0 && p.valor != null ? p.valor / ctx.marketValue * 100 : 0,
-            valor: p.valor, tipo_activo: p.tipo_activo, precio_medio: p.precio_medio, precio_actual: p.precio_actual, stale: p.stale
+            peso_sobre_cartera: wpct(p.valor), peso_sobre_invertido: weightPct(p.valor, invertido),
+            valor: p.valor, coste, total_invertido: coste + (p.comision_total_pagada || 0),
+            beneficio: p.valor != null ? p.valor - coste : null,
+            tipo_activo: p.tipo_activo, precio_medio: p.precio_medio, precio_actual: p.precio_actual, stale: p.stale
         };
         if (TIPOS_RENTA_VARIABLE.includes(p.tipo_activo)) {
             rv.push({ ...base, beta: betas[p.ticker] ?? null, clasificacion: clasi[p.ticker] ?? null, sector: ins.sector || null });
@@ -942,15 +937,42 @@ function _buildBreakdown(ctx, risk) {
             der.push({ ...base, der_tipo: ins.der_tipo ?? null, der_vencimiento: ins.der_vencimiento ?? null,
                 der_subyacente_cobertura: ins.der_subyacente_cobertura ?? null, der_tipo_opcion: ins.der_tipo_opcion ?? null, der_prima: ins.der_prima ?? null });
         } else if (p.tipo_activo === 'cripto') {
-            cripto.push({ ticker: p.ticker, tipo_activo: 'cripto', peso_pct: wpct(p.valor), valor: p.valor });
+            cripto.push({ ...base, tipo_activo: 'cripto' });
         } else {
             rv.push({ ...base, beta: null, clasificacion: null, sector: ins.sector || null });
         }
     });
-    const liquidez = ctx.cash.map(c => ({ ...c, peso_pct: wpct(c.saldo + c.interes_devengado) }));
+    const liquidez = ctx.cash.map(c => ({ ...c, valor: c.saldo + c.interes_devengado,
+        peso_sobre_cartera: wpct(c.saldo + c.interes_devengado), peso_sobre_invertido: null }));
+
+    // Cuadre exacto al 100%: se ajusta sobre la lista completa (posiciones + liquidez)
+    // y luego se reparte de vuelta a cada clase, para que la suma de los totales de
+    // todas las tablas dé exactamente 100%.
+    const planas = [...rv, ...rf, ...der, ...cripto, ...liquidez];
+    const ajustadas = adjustTo100(planas, 'peso_sobre_cartera');
+    ajustadas.forEach((it, i) => { planas[i].peso_sobre_cartera = it.peso_sobre_cartera; });
+
+    // Fila de totales por clase (Bloque 5): unidades solo donde tiene sentido
+    // (sumar unidades de tickers distintos no significa nada en renta variable).
+    const sumar = (arr, k) => arr.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+    const totalesDe = (arr, conUnidades) => ({
+        n: arr.length,
+        unidades: conUnidades ? sumar(arr, 'unidades') : null,
+        total_invertido: sumar(arr, 'total_invertido'),
+        valor: sumar(arr, 'valor'),
+        peso_sobre_cartera: sumar(arr, 'peso_sobre_cartera'),
+        beneficio: arr.some(x => x.beneficio != null) ? sumar(arr, 'beneficio') : null
+    });
     const clases = { renta_variable: rv, renta_fija: rf, derivados: der, cripto, liquidez };
-    _forceSum100(clases);
-    return { benchmark: risk ? risk.benchmark : null, total, valor_posiciones: ctx.marketValue, cashTotal: ctx.cashTotal, clases };
+    const totales = {
+        renta_variable: totalesDe(rv, false), renta_fija: totalesDe(rf, true),
+        derivados: totalesDe(der, true), cripto: totalesDe(cripto, false),
+        liquidez: { n: liquidez.length, unidades: null, total_invertido: null,
+                    valor: sumar(liquidez, 'valor'), peso_sobre_cartera: sumar(liquidez, 'peso_sobre_cartera'), beneficio: null }
+    };
+    totales.suma_pesos = Object.values(totales).reduce((a, t) => a + (Number(t.peso_sobre_cartera) || 0), 0);
+    return { benchmark: risk ? risk.benchmark : null, total, valor_posiciones: ctx.marketValue,
+             cashTotal: ctx.cashTotal, clases, totales };
 }
 
 // KPIs agregados de la cartera.
@@ -962,9 +984,9 @@ function _buildKpis(ctx, risk, journal) {
         coste += base;
         if (p.valor != null) pnlNoReal += p.valor - base;
     });
-    const clsW = { renta_variable: 0, renta_fija: 0, derivados: 0, cripto: 0, liquidez: total > 0 ? cashTotal / total * 100 : 0 };
+    const clsW = { renta_variable: 0, renta_fija: 0, derivados: 0, cripto: 0, liquidez: weightPct(cashTotal, total) };
     ctx.positions.forEach(p => {
-        const w = total > 0 && p.valor != null ? p.valor / total * 100 : 0;
+        const w = weightPct(p.valor, total);
         if (TIPOS_RENTA_VARIABLE.includes(p.tipo_activo)) clsW.renta_variable += w;
         else if (p.tipo_activo === 'renta_fija') clsW.renta_fija += w;
         else if (p.tipo_activo === 'derivado') clsW.derivados += w;
@@ -2019,7 +2041,7 @@ export default {
                 // medio sea correcto); los filtros se aplican después, solo a la vista.
                 const { results: allOps } = await env.DB.prepare(
                     'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
-                const { rows } = buildJournal(allOps);
+                const { rows, totales: jTotales } = buildJournal(allOps);
 
                 const desde = url.searchParams.get('desde');
                 const hasta = url.searchParams.get('hasta');
@@ -2037,11 +2059,21 @@ export default {
                 // Comisión real pagada por operación: compra -> comision_entrada; venta -> comision_salida.
                 const comisiones_totales = view.reduce((a, r) =>
                     a + (r.tipo_operacion === 'compra' ? (r.comision_entrada || 0) : (r.comision_salida || 0)), 0);
+                // Peso REAL de lo que sigue abierto sobre la cartera de hoy (liquidez
+                // incluida). Antes esto era un 100% fijo normalizado sobre sí mismo:
+                // tras una venta seguía marcando 100% y no informaba de nada. Si hoy las
+                // posiciones abiertas son el 62% de la cartera, aquí pone 62%.
+                const ctxJ = await _carteraContext(env, uid);
                 const totales = {
                     beneficio_total,
                     comisiones_totales,
                     rentabilidad_pct_media_ponderada: baseTotal > 0 ? (beneficio_total / baseTotal) * 100 : 0,
-                    peso_total: openPositions(allOps).length > 0 ? 100 : 0
+                    coste_abierto: jTotales.coste_abierto,
+                    capital_invertido_bruto: jTotales.capital_invertido_bruto,
+                    peso_abierto_sobre_cartera_pct: weightPct(ctxJ.marketValue, ctxJ.totalValue),
+                    peso_liquidez_pct: ctxJ.pesoLiquidez,
+                    valor_posiciones: ctxJ.marketValue,
+                    valor_cartera: ctxJ.totalValue
                 };
                 // No exponemos el campo interno base_venta.
                 const cleanRows = view.map(({ base_venta, ...r }) => r);
@@ -2055,8 +2087,9 @@ export default {
                     'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
                 const pos = openPositions(results);
                 const tickers = [...new Set(pos.map(p => p.ticker))];
+                const ctxAlloc = await _carteraContext(env, uid);
                 const prices = tickers.length ? await getTickerPrices(tickers, env) : {};
-                const { items, total } = computeAllocation(pos, prices);
+                const { items, total } = computeAllocation(pos, prices, ctxAlloc.cashTotal);
                 // Nunca en silencio: decir qué tickers no tienen precio y por qué.
                 const sin_precio = items.filter(i => i.valor == null).map(i => i.ticker);
                 const errores = [];

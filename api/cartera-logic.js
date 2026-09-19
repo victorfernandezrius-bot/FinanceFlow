@@ -68,6 +68,52 @@ export function accruedInterest(saldo, cfg, now = Date.now()) {
     return saldo * (Math.pow(1 + i / m, m * t) - 1);
 }
 
+// ---------- v4 Bloque 2: PESOS (una sola definición para toda la página) ----------
+// Hay exactamente dos nociones de peso y no se mezclan nunca:
+//
+//   peso_sobre_cartera   = valor de mercado ÷ valor total de la cartera (liquidez
+//                          INCLUIDA). Es el peso principal. Posiciones + liquidez = 100%.
+//   peso_sobre_invertido = valor de mercado ÷ valor invertido (liquidez EXCLUIDA).
+//                          Secundario: responde "dentro de lo invertido, cuánto pesa".
+//
+// Ambos se calculan aquí y en ningún otro sitio, para que una tabla no signifique
+// una cosa y la de al lado otra.
+export function weightPct(valor, total) {
+    if (!(Math.abs(total) > EPS) || valor == null || !isFinite(valor)) return 0;
+    return (valor / total) * 100;
+}
+
+// Pesos de una lista de posiciones ya valoradas ({ticker, valor}) más la liquidez.
+// `cashTotal` puede ser negativo (cuenta en descubierto/margen): el cálculo sigue
+// siendo correcto (la suma da 100%) aunque no sea representable como tarta.
+export function computePortfolioWeights(positions, cashTotal = 0) {
+    const invertido = positions.reduce((a, p) => a + (Number(p.valor) || 0), 0);
+    const total = invertido + (Number(cashTotal) || 0);
+    const items = positions.map(p => ({
+        ...p,
+        peso_sobre_cartera: weightPct(p.valor, total),
+        peso_sobre_invertido: weightPct(p.valor, invertido)
+    }));
+    return { items, invertido, cashTotal: Number(cashTotal) || 0, total,
+             peso_liquidez: weightPct(Number(cashTotal) || 0, total) };
+}
+
+// Ajusta `key` para que la suma sea exactamente 100, absorbiendo el residuo de
+// redondeo en la partida MAYOR. Función pura: devuelve una copia. Si la suma es 0
+// (cartera sin valor) no inventa un 100%: devuelve los items tal cual.
+export function adjustTo100(items, key = 'peso_sobre_cartera') {
+    const out = items.map(it => ({ ...it }));
+    if (!out.length) return out;
+    const sum = out.reduce((a, it) => a + (Number(it[key]) || 0), 0);
+    if (Math.abs(sum) < EPS) return out;
+    const resid = 100 - sum;
+    if (Math.abs(resid) < 1e-9) return out;
+    let max = out[0];
+    for (const it of out) if ((Number(it[key]) || 0) > (Number(max[key]) || 0)) max = it;
+    max[key] = (Number(max[key]) || 0) + resid;
+    return out;
+}
+
 // Agrega todas las operaciones por ticker sumando compras/ventas. Las operaciones
 // de efectivo (aportación/retirada) NO son posiciones y se ignoran aquí.
 // Devuelve un Map<ticker, {buyQty,buyCost,buyComision,sellQty,sellComision,...}>.
@@ -155,7 +201,10 @@ export function buildJournal(ops) {
     // en lugar de un precio medio 0 falso.
     const glob = aggregate(ops);
     const pool = new Map(); // ticker -> { qty, cost, com }
-    let capitalBruto = 0;   // capital bruto invertido acumulado (importe de compras)
+    // Capital invertido acumulado hasta cada operación (compras: cantidad×precio +
+    // comisión). Es el denominador del peso HISTÓRICO de cada fila: la foto del
+    // momento en que se ejecutó, no la de hoy.
+    let capitalBruto = 0;
     const rows = [];
     let beneficioTotal = 0, comisionesTotales = 0, baseVentas = 0;
 
@@ -164,7 +213,7 @@ export function buildJournal(ops) {
         if (isCashOp(op)) {
             rows.push({ id: op.id, fecha: op.fecha, tipo_operacion: op.tipo_operacion, ticker: null,
                 tipo_activo: 'liquidez', moneda: op.moneda || 'EUR', importe: Number(op.importe) || 0, precio: null,
-                comision_entrada: null, comision_salida: null, peso_en_cartera: null, beneficio: null, rentabilidad_pct: null });
+                comision_entrada: null, comision_salida: null, peso_historico_pct: null, beneficio: null, rentabilidad_pct: null });
             continue;
         }
         const q = Number(op.cantidad) || 0, p = Number(op.precio) || 0, c = Number(op.comision) || 0;
@@ -176,14 +225,14 @@ export function buildJournal(ops) {
             id: op.id, fecha: op.fecha, tipo_operacion: op.tipo_operacion,
             ticker: op.ticker, tipo_activo: op.tipo_activo, precio: p,
             comision_entrada: null, comision_salida: null,
-            peso_en_cartera: null, beneficio: null, rentabilidad_pct: null
+            peso_historico_pct: null, beneficio: null, rentabilidad_pct: null
         };
 
         if (op.tipo_operacion === 'compra') {
             s.qty += q; s.cost += q * p; s.com += c;
-            capitalBruto += q * p;
+            capitalBruto += q * p + c;
             row.comision_entrada = c;
-            row.peso_en_cartera = capitalBruto > 0 ? ((q * p) / capitalBruto) * 100 : 0;
+            row.peso_historico_pct = weightPct(q * p + c, capitalBruto);
         } else if (op.tipo_operacion === 'venta') {
             let precio_medio, comEntradaProp;
             if (s.qty > EPS) {
@@ -205,47 +254,58 @@ export function buildJournal(ops) {
             row.beneficio = beneficio;
             row.base_venta = base; // coste base de la venta (precio_medio × cantidad), para totales ponderados
             row.rentabilidad_pct = base > 0 ? (beneficio / base) * 100 : 0;
-            row.peso_en_cartera = capitalBruto > 0 ? ((p * q) / capitalBruto) * 100 : 0;
+            // En una venta el "peso" es el importe desinvertido sobre el capital
+            // invertido acumulado en ese momento.
+            row.peso_historico_pct = weightPct(p * q, capitalBruto);
             beneficioTotal += beneficio; baseVentas += base;
         }
         rows.push(row);
     }
 
-    // peso_total: peso de las posiciones que siguen abiertas sobre su coste total
-    // (suma 100% si hay algo abierto). Es una noción distinta del peso por operación.
-    let openCostTotal = 0;
+    // Coste (base) de las posiciones que siguen abiertas. NO se convierte en un
+    // "peso total" del 100%: ese era el bug — un total normalizado sobre sí mismo
+    // marca 100% siempre, incluso tras vender, y no informa de nada. El peso real
+    // de lo que sigue abierto sobre la cartera de HOY necesita valor de mercado y
+    // liquidez, así que lo calcula el Worker (_carteraContext) y no esta función pura.
+    let costeAbierto = 0;
     for (const s of pool.values()) {
-        if (s.qty > EPS) openCostTotal += s.cost;
+        if (s.qty > EPS) costeAbierto += s.cost;
     }
 
     const totales = {
         beneficio_total: beneficioTotal,
         comisiones_totales: comisionesTotales,
         rentabilidad_pct_media_ponderada: baseVentas > 0 ? (beneficioTotal / baseVentas) * 100 : 0,
-        peso_total: openCostTotal > 0 ? 100 : 0
+        coste_abierto: costeAbierto,
+        capital_invertido_bruto: capitalBruto
     };
     return { rows, totales };
 }
 
-// Reparto (allocation) de las posiciones abiertas sobre el valor de mercado total.
+// Reparto (allocation) de las posiciones abiertas MÁS la liquidez, con la
+// definición única de peso: peso_sobre_cartera (liquidez incluida) suma 100%.
 // priceMap: { TICKER: { price, stale } } tal como devuelve getTickerPrices.
-export function computeAllocation(positions, priceMap) {
-    let total = 0;
-    const items = positions.map(p => {
+export function computeAllocation(positions, priceMap, cashTotal = 0) {
+    const valoradas = positions.map(p => {
         const pr = priceMap && priceMap[p.ticker];
         const price = pr && pr.price != null && isFinite(pr.price) ? Number(pr.price) : null;
-        const valor = price != null ? price * p.cantidad_abierta : null;
-        if (valor != null) total += valor;
         return {
             ticker: p.ticker, tipo_activo: p.tipo_activo,
             cantidad_abierta: p.cantidad_abierta, precio_medio: p.precio_medio,
-            precio_actual: price, valor, stale: pr ? !!pr.stale : true
+            precio_actual: price, valor: price != null ? price * p.cantidad_abierta : null,
+            stale: pr ? !!pr.stale : true, es_liquidez: false
         };
     });
-    for (const it of items) {
-        it.peso_pct = (total > 0 && it.valor != null) ? (it.valor / total) * 100 : 0;
-    }
-    return { items, total };
+    const cash = Number(cashTotal) || 0;
+    const conValor = valoradas.filter(i => i.valor != null);
+    const entradas = cash !== 0
+        ? [...conValor, { ticker: 'Liquidez', tipo_activo: 'liquidez', valor: cash, es_liquidez: true, stale: false }]
+        : conValor;
+    const { items, invertido, total } = computePortfolioWeights(entradas, 0);
+    // Las posiciones sin precio se devuelven con peso 0 y valor null (nunca un 0 falso).
+    const sinValor = valoradas.filter(i => i.valor == null)
+        .map(i => ({ ...i, peso_sobre_cartera: 0, peso_sobre_invertido: 0 }));
+    return { items: [...items, ...sinValor], total, invertido, cashTotal: cash };
 }
 
 // ============================================================

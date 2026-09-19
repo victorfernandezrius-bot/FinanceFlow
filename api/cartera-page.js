@@ -202,14 +202,14 @@ export const CARTERA_HTML = `<!doctype html>
       <div class="field"><label>&nbsp;</label><button class="btn ghost sm" id="flClear">Limpiar</button></div>
     </div>
     <div class="table-scroll"><table>
-      <thead><tr><th class="l">Fecha</th><th class="l">Tipo</th><th class="l">Activo</th><th>Precio</th><th>Com. entrada</th><th>Com. salida</th><th>Peso</th><th>Beneficio</th><th>Rentabilidad</th></tr></thead>
+      <thead><tr><th class="l">Fecha</th><th class="l">Tipo</th><th class="l">Activo</th><th>Precio</th><th>Com. entrada</th><th>Com. salida</th><th title="Coste de la operación sobre el total invertido en el momento de ejecutarla (foto histórica)">Peso hist.</th><th>Beneficio</th><th>Rentabilidad</th></tr></thead>
       <tbody id="jRows"></tbody><tfoot id="jFoot"></tfoot>
     </table></div>
   </section>
 
   <!-- 8. Gráficos (selector de benchmark = estado compartido) -->
   <section class="charts">
-    <div class="card panel"><h2>Reparto por activo</h2><div id="pieWrap"></div><div class="legend" id="pieLegend"></div></div>
+    <div class="card panel"><h2>Reparto por activo</h2><p class="foot-note" style="margin:0 0 8px">Peso sobre el total de la cartera, liquidez incluida (suma 100%).</p><div id="pieWrap"></div><div class="legend" id="pieLegend"></div></div>
     <div class="card panel">
       <div class="sect-head"><h2>Evolución vs. benchmark</h2>
         <select id="benchSel" style="max-width:180px">
@@ -322,11 +322,14 @@ export const CARTERA_HTML = `<!doctype html>
     return api('/portfolio/journal'+(qs.length?'?'+qs.join('&'):'')).then(function(r){return r.ok?r.json():{rows:[],totales:{}};}).then(function(j){
       var tbody=$('jRows'),rows=j.rows||[];
       if(!rows.length){tbody.innerHTML='<tr><td colspan="9" class="empty">Sin operaciones.</td></tr>';$('jFoot').innerHTML='';return;}
-      var html=''; rows.forEach(function(r){html+='<tr><td class="l num">'+esc(r.fecha)+'</td><td class="l"><span class="tag">'+esc(r.tipo_operacion)+'</span></td><td class="l">'+esc(r.ticker)+'</td>'+
-        '<td class="num">'+money(r.precio)+'</td><td class="num">'+(r.comision_entrada!=null?money(r.comision_entrada):'—')+'</td><td class="num">'+(r.comision_salida!=null?money(r.comision_salida):'—')+'</td>'+
-        '<td class="num">'+(r.peso_en_cartera!=null?r.peso_en_cartera.toFixed(1)+'%':'—')+'</td><td class="num '+cls(r.beneficio)+'">'+(r.beneficio!=null?money(r.beneficio):'—')+'</td><td class="num '+cls(r.rentabilidad_pct)+'">'+pct(r.rentabilidad_pct)+'</td></tr>';});
+      var html=''; rows.forEach(function(r){html+='<tr><td class="l num">'+esc(r.fecha)+'</td><td class="l"><span class="tag">'+esc(r.tipo_operacion)+'</span></td><td class="l">'+esc(r.ticker||'Efectivo')+'</td>'+
+        '<td class="num">'+(r.importe!=null?money(r.importe,r.moneda):money(r.precio))+'</td><td class="num">'+(r.comision_entrada!=null?money(r.comision_entrada):'—')+'</td><td class="num">'+(r.comision_salida!=null?money(r.comision_salida):'—')+'</td>'+
+        '<td class="num">'+(r.peso_historico_pct!=null?r.peso_historico_pct.toFixed(1)+'%':'—')+'</td><td class="num '+cls(r.beneficio)+'">'+(r.beneficio!=null?money(r.beneficio):'—')+'</td><td class="num '+cls(r.rentabilidad_pct)+'">'+pct(r.rentabilidad_pct)+'</td></tr>';});
       tbody.innerHTML=html; var t=j.totales||{};
-      $('jFoot').innerHTML='<tr><td class="l" colspan="6">Totales — comisiones: '+money(t.comisiones_totales)+' · peso abierto: '+(t.peso_total!=null?t.peso_total.toFixed(0)+'%':'—')+'</td><td class="num">'+pct(t.rentabilidad_pct_media_ponderada)+'</td><td class="num '+cls(t.beneficio_total)+'">'+money(t.beneficio_total)+'</td><td></td></tr>';
+      // El pie ya NO fuerza 100%: muestra el peso real que hoy representan las
+      // posiciones abiertas sobre la cartera total (liquidez incluida).
+      var pa=t.peso_abierto_sobre_cartera_pct;
+      $('jFoot').innerHTML='<tr><td class="l" colspan="6">Totales — comisiones: '+money(t.comisiones_totales)+' · posiciones abiertas hoy: '+(pa!=null?pa.toFixed(1)+'% de la cartera':'—')+(t.peso_liquidez_pct!=null?' · liquidez: '+t.peso_liquidez_pct.toFixed(1)+'%':'')+'</td><td class="num">'+pct(t.rentabilidad_pct_media_ponderada)+'</td><td class="num '+cls(t.beneficio_total)+'">'+money(t.beneficio_total)+'</td><td></td></tr>';
     });
   }
 
@@ -343,7 +346,7 @@ export const CARTERA_HTML = `<!doctype html>
     // Renta variable
     if(c.renta_variable&&c.renta_variable.length){
       var rows=c.renta_variable.map(function(x){return '<tr><td class="l"><strong>'+esc(x.ticker)+'</strong>'+(x.nombre?'<div class="muted" style="font-size:.8rem">'+esc(x.nombre)+'</div>':'')+'</td>'+
-        '<td class="num">'+(+x.unidades.toFixed(6))+'</td><td class="num">'+pct0(x.peso_pct)+'</td><td class="num">'+(x.beta!=null?num(x.beta,2):'—')+'</td>'+
+        '<td class="num">'+(+x.unidades.toFixed(6))+'</td><td class="num">'+pct0(x.peso_sobre_cartera)+'</td><td class="num">'+(x.beta!=null?num(x.beta,2):'—')+'</td>'+
         '<td>'+(x.clasificacion?'<span class="tag '+x.clasificacion+'">'+CLASI_LABEL[x.clasificacion]+'</span>':'<span class="muted">—</span>')+'</td><td class="l">'+esc(x.sector||'—')+'</td></tr>';}).join('');
       out+='<div class="card panel"><h3>Renta variable</h3><div class="table-scroll"><table><thead><tr><th class="l">Nombre</th><th>Unidades</th><th>Peso</th><th>Beta</th><th class="l">Tipo</th><th class="l">Sector</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
         '<p class="foot-note">La clasificación agresiva/defensiva/neutra depende del benchmark seleccionado en el gráfico de evolución ('+esc(BENCH_NAME[bench()])+'). Al cambiarlo, esta tabla se recalcula.</p></div>';
@@ -351,25 +354,25 @@ export const CARTERA_HTML = `<!doctype html>
     // Renta fija
     if(c.renta_fija&&c.renta_fija.length){
       var rows2=c.renta_fija.map(function(x){return '<tr><td class="l"><strong>'+esc(x.ticker)+'</strong>'+(x.nombre?'<div class="muted" style="font-size:.8rem">'+esc(x.nombre)+'</div>':'')+'</td>'+
-        '<td class="num">'+(+x.unidades.toFixed(4))+'</td><td class="num">'+pct0(x.peso_pct)+'</td><td class="num">'+(x.tipo_interes!=null?pct0(x.tipo_interes):'—')+'</td>'+
+        '<td class="num">'+(+x.unidades.toFixed(4))+'</td><td class="num">'+pct0(x.peso_sobre_cartera)+'</td><td class="num">'+(x.tipo_interes!=null?pct0(x.tipo_interes):'—')+'</td>'+
         '<td class="num">'+(x.cupon!=null?pct0(x.cupon):'—')+'</td><td class="num">'+(x.duracion_modificada!=null?num(x.duracion_modificada,2):'—')+'</td><td class="l num">'+esc(x.vencimiento||'—')+'</td></tr>';}).join('');
       out+='<div class="card panel"><h3>Renta fija</h3><div class="table-scroll"><table><thead><tr><th class="l">Nombre</th><th>Unidades</th><th>Peso</th><th>Tipo interés</th><th>Cupón</th><th>Duración mod.</th><th class="l">Vencimiento</th></tr></thead><tbody>'+rows2+'</tbody></table></div></div>';
     }
     // Derivados
     if(c.derivados&&c.derivados.length){
       var rows3=c.derivados.map(function(x){var esFut=x.der_tipo==='futuro';return '<tr><td class="l"><strong>'+esc(x.ticker)+'</strong>'+(x.nombre?'<div class="muted" style="font-size:.8rem">'+esc(x.nombre)+'</div>':'')+'</td>'+
-        '<td class="num">'+(+x.unidades.toFixed(4))+'</td><td class="num">'+pct0(x.peso_pct)+'</td><td class="l">'+esc(x.der_tipo||'—')+'</td>'+
+        '<td class="num">'+(+x.unidades.toFixed(4))+'</td><td class="num">'+pct0(x.peso_sobre_cartera)+'</td><td class="l">'+esc(x.der_tipo||'—')+'</td>'+
         '<td class="l">'+esc(esFut?(x.der_vencimiento||'—'):(x.der_tipo_opcion||'—'))+'</td><td class="l">'+esc(esFut?(x.der_subyacente_cobertura||'—'):(x.der_prima!=null?money(x.der_prima):'—'))+'</td></tr>';}).join('');
       out+='<div class="card panel"><h3>Derivados</h3><div class="table-scroll"><table><thead><tr><th class="l">Nombre</th><th>Unidades</th><th>Peso</th><th class="l">Tipo</th><th class="l">Venc. / Call·Put</th><th class="l">Cubre / Prima</th></tr></thead><tbody>'+rows3+'</tbody></table></div></div>';
     }
     // Cripto
     if(c.cripto&&c.cripto.length){
-      var rows4=c.cripto.map(function(x){return '<tr><td class="l"><strong>'+esc(x.ticker)+'</strong></td><td class="l"><span class="tag">cripto</span></td><td class="num">'+pct0(x.peso_pct)+'</td></tr>';}).join('');
+      var rows4=c.cripto.map(function(x){return '<tr><td class="l"><strong>'+esc(x.ticker)+'</strong></td><td class="l"><span class="tag">cripto</span></td><td class="num">'+pct0(x.peso_sobre_cartera)+'</td></tr>';}).join('');
       out+='<div class="card panel"><h3>Criptomonedas</h3><div class="table-scroll"><table><thead><tr><th class="l">Ticker</th><th class="l">Tipo</th><th>Peso</th></tr></thead><tbody>'+rows4+'</tbody></table></div></div>';
     }
     // Liquidez (editable)
-    var liq=c.liquidez&&c.liquidez.length?c.liquidez:[{moneda:'EUR',saldo:0,aportaciones:0,retiradas:0,invertido_neto:0,remunerada:false,tipo_interes_anual:0,capitalizacion:'anual',fecha_inicio:'',interes_devengado:0,peso_pct:0}];
-    var rows5=liq.map(function(x){return '<tr><td class="l"><strong>'+esc(x.moneda)+'</strong></td><td class="num '+(x.negativo?'neg':'')+'">'+money(x.saldo,x.moneda)+(x.negativo?'<span class="stale">negativo</span>':'')+'<div class="muted" style="font-size:.72rem;font-weight:400">aport. '+money(x.aportaciones,x.moneda)+' − retir. '+money(x.retiradas,x.moneda)+' − invertido neto '+money(x.invertido_neto,x.moneda)+'</div></td><td class="num">'+pct0(x.peso_pct)+'</td>'+
+    var liq=c.liquidez&&c.liquidez.length?c.liquidez:[{moneda:'EUR',saldo:0,aportaciones:0,retiradas:0,invertido_neto:0,remunerada:false,tipo_interes_anual:0,capitalizacion:'anual',fecha_inicio:'',interes_devengado:0,peso_sobre_cartera:0}];
+    var rows5=liq.map(function(x){return '<tr><td class="l"><strong>'+esc(x.moneda)+'</strong></td><td class="num '+(x.negativo?'neg':'')+'">'+money(x.saldo,x.moneda)+(x.negativo?'<span class="stale">negativo</span>':'')+'<div class="muted" style="font-size:.72rem;font-weight:400">aport. '+money(x.aportaciones,x.moneda)+' − retir. '+money(x.retiradas,x.moneda)+' − invertido neto '+money(x.invertido_neto,x.moneda)+'</div></td><td class="num">'+pct0(x.peso_sobre_cartera)+'</td>'+
       '<td><input type="checkbox" data-liq="rem" '+(x.remunerada?'checked':'')+'></td>'+
       '<td><input type="number" step="any" data-liq="tin" value="'+(x.tipo_interes_anual||0)+'" style="max-width:90px"></td>'+
       '<td><select data-liq="cap"><option value="anual">Anual</option><option value="semestral">Semestral</option><option value="trimestral">Trimestral</option><option value="mensual">Mensual</option><option value="diaria">Diaria</option></select></td>'+
@@ -425,13 +428,16 @@ export const CARTERA_HTML = `<!doctype html>
   function refreshPie(){
     return api('/portfolio/allocation').then(function(r){return r.ok?r.json():{items:[],total:0,errores:['El servidor devolvió un error al calcular el reparto.']};}).then(function(d){
       var its=(d.items||[]).filter(function(i){return i.valor!=null&&i.valor>0;}),wrap=$('pieWrap'),legend=$('pieLegend');
+      var neg=(d.items||[]).filter(function(i){return i.valor!=null&&i.valor<0;});
       var reasons=(d.errores||[]).slice(); if(!(d.items||[]).length&&!reasons.length) reasons.push('No hay posiciones abiertas.');
       if(!its.length){wrap.innerHTML=why('Sin reparto que mostrar. Motivos:',reasons,false);legend.innerHTML='';return;}
       legend.setAttribute('data-extra',reasons.length?why('Posiciones sin precio de mercado (excluidas de la tarta):',reasons,false):'');
       var ang=0,svg='<svg viewBox="0 0 220 220" width="100%" style="max-width:250px;display:block;margin:0 auto">';
-      its.forEach(function(it,i){var sw=it.peso_pct/100*360,col=PALETTE[i%PALETTE.length];svg+=sw>=359.99?'<circle cx="110" cy="110" r="92" fill="none" stroke="'+col+'" stroke-width="30"/>':'<path d="'+arc(110,110,92,ang,ang+sw)+'" fill="none" stroke="'+col+'" stroke-width="30"/>';ang+=sw;});
+      its.forEach(function(it,i){var sw=it.peso_sobre_cartera/100*360,col=it.es_liquidez?CLASS_COLORS.liquidez:PALETTE[i%PALETTE.length];svg+=sw>=359.99?'<circle cx="110" cy="110" r="92" fill="none" stroke="'+col+'" stroke-width="30"/>':'<path d="'+arc(110,110,92,ang,ang+sw)+'" fill="none" stroke="'+col+'" stroke-width="30"/>';ang+=sw;});
       svg+='</svg>';wrap.innerHTML=svg;
-      legend.innerHTML=its.map(function(it,i){return '<div class="row"><span class="dot" style="background:'+PALETTE[i%PALETTE.length]+'"></span>'+esc(it.ticker)+'<span class="pct">'+it.peso_pct.toFixed(1)+'%</span></div>';}).join('')+(legend.getAttribute('data-extra')||'');
+      legend.innerHTML=its.map(function(it,i){return '<div class="row"><span class="dot" style="background:'+(it.es_liquidez?CLASS_COLORS.liquidez:PALETTE[i%PALETTE.length])+'"></span>'+esc(it.ticker)+'<span class="pct">'+it.peso_sobre_cartera.toFixed(1)+'%</span></div>';}).join('')
+        +(neg.length?why('No representable en la tarta (saldo negativo, cuenta en descubierto):',neg.map(function(i){return i.ticker+': '+money(i.valor);}),false):'')
+        +(legend.getAttribute('data-extra')||'');
     });
   }
 
