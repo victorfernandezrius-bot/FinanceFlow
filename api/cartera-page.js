@@ -126,18 +126,21 @@ export const CARTERA_HTML = `<!doctype html>
   <!-- 3. Añadir operación -->
   <section class="card panel">
     <h2>Añadir operación</h2>
+    <div class="why" id="firstCash" style="display:none"><strong>Registra primero una aportación de efectivo a tu cuenta.</strong> Todas las compras se descontarán de ese saldo. (Si compras sin aportación, el saldo de liquidez quedará en negativo: se permite, pero se avisa.)</div>
     <form class="grid" id="opForm" autocomplete="off">
-      <div class="field"><label for="f_ticker">Ticker</label><input id="f_ticker" required placeholder="AAPL"></div>
-      <div class="field"><label for="f_tipoop">Operación</label><select id="f_tipoop"><option value="compra">Compra</option><option value="venta">Venta</option></select></div>
-      <div class="field"><label for="f_tipo">Tipo activo</label>
+      <div class="field"><label for="f_tipoop">Operación</label><select id="f_tipoop"><option value="compra">Compra</option><option value="venta">Venta</option><option value="aportacion">Aportación de efectivo</option><option value="retirada">Retirada de efectivo</option></select></div>
+      <div class="field std"><label for="f_ticker">Ticker</label><input id="f_ticker" required placeholder="AAPL"></div>
+      <div class="field std"><label for="f_tipo">Tipo activo</label>
         <select id="f_tipo"><option value="accion">Acción</option><option value="etf">ETF</option><option value="fondo">Fondo</option><option value="renta_fija">Renta fija</option><option value="derivado">Derivado</option><option value="cripto">Cripto</option></select></div>
       <div class="field"><label for="f_fecha">Fecha</label><input id="f_fecha" type="date" required></div>
-      <div class="field"><label for="f_cantidad">Cantidad</label><input id="f_cantidad" type="number" step="any" min="0" required placeholder="10"></div>
-      <div class="field"><label for="f_precio">Precio de entrada</label><input id="f_precio" type="number" step="any" min="0" required placeholder="150.50"></div>
-      <div class="field"><label for="f_comision">Comisión</label><input id="f_comision" type="number" step="any" min="0" placeholder="0"></div>
-      <div class="field"><label for="f_nombre">Nombre</label><input id="f_nombre" placeholder="Apple Inc."></div>
+      <div class="field cashf hidden"><label for="f_importe">Importe</label><input id="f_importe" type="number" step="any" min="0" placeholder="5000"></div>
+      <div class="field cashf hidden"><label for="f_moneda">Moneda</label><select id="f_moneda"><option value="EUR">EUR</option><option value="USD">USD</option><option value="GBP">GBP</option><option value="CHF">CHF</option></select></div>
+      <div class="field std"><label for="f_cantidad">Cantidad</label><input id="f_cantidad" type="number" step="any" min="0" required placeholder="10"></div>
+      <div class="field std"><label for="f_precio">Precio de entrada</label><input id="f_precio" type="number" step="any" min="0" required placeholder="150.50"></div>
+      <div class="field std"><label for="f_comision">Comisión</label><input id="f_comision" type="number" step="any" min="0" placeholder="0"></div>
+      <div class="field std"><label for="f_nombre">Nombre</label><input id="f_nombre" placeholder="Apple Inc."></div>
       <div class="field"><label for="f_broker">Broker</label><input id="f_broker" placeholder="IBKR…"></div>
-      <div class="field"><label>&nbsp;</label><button class="btn" type="submit">Registrar</button></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" type="submit" id="opSubmit">Registrar</button></div>
       <!-- Campos condicionales -->
       <div class="fieldgroup hidden" id="grp_rv">
         <div class="field wide"><label for="f_sector">Sector (renta variable)</label><input id="f_sector" placeholder="Tecnología"></div>
@@ -238,7 +241,8 @@ export const CARTERA_HTML = `<!doctype html>
   var CLASS_LABEL={renta_variable:'Renta variable',renta_fija:'Renta fija',derivados:'Derivados',cripto:'Cripto',liquidez:'Liquidez'};
   var CLASI_LABEL={agresiva:'Agresiva',defensiva:'Defensiva',igual_benchmark:'Igual al benchmark'};
   var BENCH_NAME={SP500:'S&P 500',NASDAQ100:'Nasdaq 100',DOWJONES:'Dow Jones',IBEX35:'IBEX 35',CAC40:'CAC 40',DAX:'DAX',FTSE100:'FTSE 100'};
-  var state={holdings:[],prices:{},closeTicker:null};
+  var state={holdings:[],prices:{},closeTicker:null,tieneAportaciones:null};
+  function isCashOp(){var v=$('f_tipoop').value;return v==='aportacion'||v==='retirada';}
 
   function $(id){return document.getElementById(id);}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -271,8 +275,11 @@ export const CARTERA_HTML = `<!doctype html>
       h+=kpiCard('Beta cartera',k.beta_cartera!=null?num(k.beta_cartera,2):'—');
       h+=kpiCard('Volatilidad anual',k.volatilidad_anualizada_pct!=null?pct0(k.volatilidad_anualizada_pct):'—');
       h+=kpiCard('Comisiones',money(k.comisiones_totales,'EUR'));
-      h+=kpiCard('% en liquidez',pct0(k.pct_liquidez));
+      h+=kpiCard('Liquidez',money(k.saldo_liquidez,'EUR')+' <span class="muted" style="font-size:.8rem;font-weight:600">('+pct0(k.pct_liquidez)+')</span>',k.liquidez_negativa?'neg':'');
       $('kpiGrid').innerHTML=h;
+      state.tieneAportaciones=!!k.tiene_aportaciones;
+      $('firstCash').style.display=state.tieneAportaciones?'none':'block';
+      if(!state.tieneAportaciones&&!$('f_tipoop').getAttribute('data-touched')){$('f_tipoop').value='aportacion';toggleFields();}
       // barra de pesos por clase
       var pc=k.peso_por_clase||{}; var bar='',leg='';
       ['renta_variable','renta_fija','derivados','cripto','liquidez'].forEach(function(c){ var v=pc[c]||0; if(v>0.001){ bar+='<span style="width:'+v+'%;background:'+CLASS_COLORS[c]+'"></span>';
@@ -361,22 +368,22 @@ export const CARTERA_HTML = `<!doctype html>
       out+='<div class="card panel"><h3>Criptomonedas</h3><div class="table-scroll"><table><thead><tr><th class="l">Ticker</th><th class="l">Tipo</th><th>Peso</th></tr></thead><tbody>'+rows4+'</tbody></table></div></div>';
     }
     // Liquidez (editable)
-    var liq=c.liquidez&&c.liquidez.length?c.liquidez:[{moneda:'EUR',saldo:0,remunerada:false,tipo_interes_anual:0,capitalizacion:'anual',fecha_inicio:'',interes_devengado:0,peso_pct:0}];
-    var rows5=liq.map(function(x){return '<tr><td class="l"><strong>'+esc(x.moneda)+'</strong></td><td class="num">'+money(x.saldo,x.moneda)+'</td><td class="num">'+pct0(x.peso_pct)+'</td>'+
+    var liq=c.liquidez&&c.liquidez.length?c.liquidez:[{moneda:'EUR',saldo:0,aportaciones:0,retiradas:0,invertido_neto:0,remunerada:false,tipo_interes_anual:0,capitalizacion:'anual',fecha_inicio:'',interes_devengado:0,peso_pct:0}];
+    var rows5=liq.map(function(x){return '<tr><td class="l"><strong>'+esc(x.moneda)+'</strong></td><td class="num '+(x.negativo?'neg':'')+'">'+money(x.saldo,x.moneda)+(x.negativo?'<span class="stale">negativo</span>':'')+'<div class="muted" style="font-size:.72rem;font-weight:400">aport. '+money(x.aportaciones,x.moneda)+' − retir. '+money(x.retiradas,x.moneda)+' − invertido neto '+money(x.invertido_neto,x.moneda)+'</div></td><td class="num">'+pct0(x.peso_pct)+'</td>'+
       '<td><input type="checkbox" data-liq="rem" '+(x.remunerada?'checked':'')+'></td>'+
       '<td><input type="number" step="any" data-liq="tin" value="'+(x.tipo_interes_anual||0)+'" style="max-width:90px"></td>'+
       '<td><select data-liq="cap"><option value="anual">Anual</option><option value="semestral">Semestral</option><option value="trimestral">Trimestral</option><option value="mensual">Mensual</option><option value="diaria">Diaria</option></select></td>'+
       '<td><input type="date" data-liq="ini" value="'+(x.fecha_inicio||'')+'" style="max-width:150px"></td>'+
       '<td class="num pos">'+money(x.interes_devengado,x.moneda)+'</td>'+
-      '<td><button class="btn ghost sm" data-liq="save" data-mon="'+esc(x.moneda)+'" data-saldo="'+x.saldo+'">Guardar</button></td></tr>';}).join('');
+      '<td><button class="btn ghost sm" data-liq="save" data-mon="'+esc(x.moneda)+'">Guardar</button></td></tr>';}).join('');
     out+='<div class="card panel"><h3>Liquidez</h3><div class="table-scroll"><table><thead><tr><th class="l">Moneda</th><th>Saldo</th><th>Peso</th><th>Remunerada</th><th>Tipo %</th><th>Capitalización</th><th>Desde</th><th>Interés devengado</th><th></th></tr></thead><tbody>'+rows5+'</tbody></table></div>'+
-      '<p class="foot-note">Edita el saldo desde “añadir operación” con tipo Liquidez no; usa este bloque para la remuneración. Interés devengado = saldo·((1+i/m)^(m·t)−1).</p></div>';
+      '<p class="foot-note">El saldo se calcula solo: aportaciones − retiradas − compras (con comisión) + ventas (sin comisión). Para cambiarlo, registra una aportación o retirada en “Añadir operación”. Este bloque solo configura la remuneración. Interés devengado = saldo·((1+i/m)^(m·t)−1), sobre el saldo actual.</p></div>';
     host.innerHTML=out;
     // set selects capitalizacion values + wire liquidity save
     host.querySelectorAll('select[data-liq="cap"]').forEach(function(sel,idx){ if(liq[idx]) sel.value=liq[idx].capitalizacion||'anual'; });
     host.querySelectorAll('[data-liq="save"]').forEach(function(btn){ btn.onclick=function(){
       var tr=btn.closest('tr');
-      var body={moneda:btn.getAttribute('data-mon'),saldo:parseFloat(btn.getAttribute('data-saldo'))||0,
+      var body={moneda:btn.getAttribute('data-mon'),
         remunerada:tr.querySelector('[data-liq="rem"]').checked,
         tipo_interes_anual:parseFloat(tr.querySelector('[data-liq="tin"]').value)||0,
         capitalizacion:tr.querySelector('[data-liq="cap"]').value,
@@ -454,10 +461,15 @@ export const CARTERA_HTML = `<!doctype html>
 
   // ---------- Formulario: campos condicionales + aviso ----------
   function toggleFields(){
-    var t=$('f_tipo').value;
-    $('grp_rv').className='fieldgroup'+(['accion','etf','fondo'].indexOf(t)>=0?'':' hidden');
-    $('grp_rf').className='fieldgroup'+(t==='renta_fija'?'':' hidden');
-    $('grp_der').className='fieldgroup'+(t==='derivado'?'':' hidden');
+    var t=$('f_tipo').value, cash=isCashOp();
+    document.querySelectorAll('.field.std').forEach(function(e){e.className=e.className.replace(' hidden','')+(cash?' hidden':'');});
+    document.querySelectorAll('.field.cashf').forEach(function(e){e.className=e.className.replace(' hidden','')+(cash?'':' hidden');});
+    ['f_ticker','f_cantidad','f_precio'].forEach(function(id){ if(cash)$(id).removeAttribute('required'); else $(id).setAttribute('required',''); });
+    if(cash)$('f_importe').setAttribute('required',''); else $('f_importe').removeAttribute('required');
+    $('opSubmit').textContent=cash?($('f_tipoop').value==='aportacion'?'Registrar aportación':'Registrar retirada'):'Registrar';
+    $('grp_rv').className='fieldgroup'+(!cash&&['accion','etf','fondo'].indexOf(t)>=0?'':' hidden');
+    $('grp_rf').className='fieldgroup'+(!cash&&t==='renta_fija'?'':' hidden');
+    $('grp_der').className='fieldgroup'+(!cash&&t==='derivado'?'':' hidden');
     var opt=$('f_der_tipo').value==='opcion';
     document.querySelectorAll('.der-opt').forEach(function(e){e.className=e.className.replace(' hidden','')+(opt?'':' hidden');});
     document.querySelectorAll('.der-fut').forEach(function(e){e.className=e.className.replace(' hidden','')+(opt?' hidden':'');});
@@ -497,6 +509,15 @@ export const CARTERA_HTML = `<!doctype html>
 
   // ---------- Eventos ----------
   $('opForm').addEventListener('submit',function(ev){ev.preventDefault();
+    if(isCashOp()){
+      var cbody={tipo_operacion:$('f_tipoop').value,importe:parseFloat($('f_importe').value),moneda:$('f_moneda').value,fecha:$('f_fecha').value||today(),broker_origen:$('f_broker').value.trim()||null};
+      api('/portfolio/operations',{method:'POST',body:JSON.stringify(cbody)}).then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});}).then(function(res){
+        if(!res.ok){showMsg('No se pudo registrar: '+esc(res.d&&res.d.error||'error'),true);return;}
+        var l=res.d.liquidez||{}; showMsg((cbody.tipo_operacion==='aportacion'?'Aportación':'Retirada')+' registrada. Saldo de liquidez en '+esc(l.moneda)+': '+money(l.saldo,l.moneda)+'.',!!l.negativo);
+        $('f_importe').value='';$('f_fecha').value=today();$('f_tipoop').value='compra';toggleFields();reloadData();
+      }).catch(function(){showMsg('Error de red al registrar.',true);});
+      return;
+    }
     var t=$('f_ticker').value.trim().toUpperCase(),tipo=$('f_tipo').value;
     var body={ticker:t,tipo_operacion:$('f_tipoop').value,tipo_activo:tipo,fecha:$('f_fecha').value||today(),
       cantidad:parseFloat($('f_cantidad').value),precio:parseFloat($('f_precio').value),comision:$('f_comision').value?parseFloat($('f_comision').value):0,broker_origen:$('f_broker').value.trim()||null};
@@ -507,12 +528,12 @@ export const CARTERA_HTML = `<!doctype html>
       if(['accion','etf','fondo'].indexOf(tipo)>=0) instr.sector=$('f_sector').value.trim()||null;
       if(tipo==='renta_fija'){instr.rf_tipo_interes=$('f_rf_tipo').value;instr.rf_cupon=$('f_rf_cupon').value;instr.rf_frecuencia_cupon=$('f_rf_frec').value;instr.rf_vencimiento=$('f_rf_venc').value||null;instr.rf_nominal=$('f_rf_nom').value;}
       if(tipo==='derivado'){instr.der_tipo=$('f_der_tipo').value;instr.der_vencimiento=$('f_der_venc').value||null;instr.der_subyacente_cobertura=$('f_der_sub').value.trim()||null;instr.der_tipo_opcion=$('f_der_opt').value;instr.der_prima=$('f_der_prima').value;}
-      var after=function(){showMsg('Operación registrada.');$('opForm').reset();$('f_fecha').value=today();toggleFields();$('avisoPos').style.display='none';reloadData();};
+      var liq=res.d&&res.d.liquidez; var after=function(){ if(liq&&liq.negativo) showMsg('Operación registrada. ⚠ '+esc(liq.aviso||('Saldo de liquidez negativo: '+money(liq.saldo,liq.moneda))),true); else showMsg('Operación registrada.'+(liq?' Liquidez restante en '+esc(liq.moneda)+': '+money(liq.saldo,liq.moneda)+'.':'')); $('opForm').reset();$('f_fecha').value=today();toggleFields();$('avisoPos').style.display='none';reloadData();};
       if(instr.nombre||instr.sector||tipo==='renta_fija'||tipo==='derivado'){ api('/portfolio/instruments/'+encodeURIComponent(t),{method:'PUT',body:JSON.stringify(instr)}).then(after); } else after();
     }).catch(function(){showMsg('Error de red al registrar.',true);});
   });
   $('f_ticker').addEventListener('input',updateAviso);
-  $('f_tipoop').addEventListener('change',updateAviso);
+  $('f_tipoop').addEventListener('change',function(){$('f_tipoop').setAttribute('data-touched','1');toggleFields();updateAviso();});
   $('f_tipo').addEventListener('change',toggleFields);
   $('f_der_tipo').addEventListener('change',toggleFields);
   $('estadoSel').addEventListener('change',refreshPositions);

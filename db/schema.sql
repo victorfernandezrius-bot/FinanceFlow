@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS cartera_operaciones (
   broker_origen TEXT,
   cierra_operacion_id INTEGER,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  importe REAL,                     -- v4: importe de 'aportacion' | 'retirada' (efectivo; ticker='__CASH__')
   FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_operaciones_usuario ON cartera_operaciones(usuario_id);
@@ -242,7 +243,8 @@ CREATE TABLE IF NOT EXISTS cartera_instrumentos (
   FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Cartera v3: liquidez por moneda.
+-- Cartera v3: liquidez por moneda. v4: `saldo` queda OBSOLETO (se calcula desde
+-- las operaciones; el Worker lo escribe a 0). La tabla guarda solo la remuneración.
 CREATE TABLE IF NOT EXISTS cartera_liquidez (
   usuario_id TEXT NOT NULL, moneda TEXT NOT NULL DEFAULT 'EUR', saldo REAL NOT NULL DEFAULT 0,
   remunerada INTEGER DEFAULT 0, tipo_interes_anual REAL DEFAULT 0,

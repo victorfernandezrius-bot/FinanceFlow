@@ -11,11 +11,70 @@
 
 export const EPS = 1e-9;
 
-// Agrega todas las operaciones por ticker sumando compras/ventas.
+// ---------- v4: liquidez como eje ----------
+// Operaciones de efectivo: 'aportacion' (entra dinero en la cuenta) y 'retirada'
+// (sale). No llevan ticker ni precio: solo importe, moneda y fecha. En la tabla
+// cartera_operaciones se guardan con ticker = CASH_TICKER, tipo_activo 'liquidez',
+// cantidad = precio = 0 e `importe` (columna añadida en la migración 0004).
+export const CASH_OPS = ['aportacion', 'retirada'];
+export const CASH_TICKER = '__CASH__';
+export function isCashOp(op) { return !!op && CASH_OPS.includes(op.tipo_operacion); }
+
+// Saldo de liquidez CALCULADO por moneda (nunca introducido a mano):
+//   saldo = Σ aportaciones − Σ retiradas
+//           − Σ (cantidad × precio + comisión) de compras
+//           + Σ (cantidad × precio − comisión) de ventas
+// El interés devengado de una cuenta remunerada se suma aparte (accruedInterest).
+// Se permite saldo negativo (brokers con margen): se señala, no se bloquea.
+export function computeCashBalance(ops) {
+    const por_moneda = {};
+    const get = m => {
+        const k = (m || 'EUR').toUpperCase();
+        if (!por_moneda[k]) por_moneda[k] = { moneda: k, saldo: 0, aportaciones: 0, retiradas: 0, compras: 0, ventas: 0, n_aportaciones: 0 };
+        return por_moneda[k];
+    };
+    for (const op of ops) {
+        const b = get(op.moneda);
+        if (op.tipo_operacion === 'aportacion') { const v = Number(op.importe) || 0; b.aportaciones += v; b.n_aportaciones++; }
+        else if (op.tipo_operacion === 'retirada') { b.retiradas += Number(op.importe) || 0; }
+        else {
+            const q = Number(op.cantidad) || 0, p = Number(op.precio) || 0, c = Number(op.comision) || 0;
+            if (op.tipo_operacion === 'compra') b.compras += q * p + c;
+            else if (op.tipo_operacion === 'venta') b.ventas += q * p - c;
+        }
+    }
+    let saldo_total = 0, tiene_aportaciones = false;
+    for (const b of Object.values(por_moneda)) {
+        b.saldo = b.aportaciones - b.retiradas - b.compras + b.ventas;
+        saldo_total += b.saldo;
+        if (b.n_aportaciones > 0) tiene_aportaciones = true;
+    }
+    return { por_moneda, saldo_total, tiene_aportaciones };
+}
+
+// Interés devengado de una cuenta remunerada: saldo × ((1 + i/m)^(m·t) − 1), con
+// m capitalizaciones/año y t años desde fecha_inicio. Simplificación asumida: se
+// aplica al saldo actual (no a cada tramo histórico del saldo). No devenga sobre
+// saldo negativo.
+export function accruedInterest(saldo, cfg, now = Date.now()) {
+    if (!cfg || !(saldo > 0)) return 0;
+    const remunerada = (cfg.remunerada === 1 || cfg.remunerada === true);
+    const i = (Number(cfg.tipo_interes_anual) || 0) / 100;
+    if (!remunerada || i <= 0 || !cfg.fecha_inicio) return 0;
+    const mMap = { anual: 1, semestral: 2, trimestral: 4, mensual: 12, diaria: 365 };
+    const m = mMap[cfg.capitalizacion] || 1;
+    const t = (now - new Date(cfg.fecha_inicio).getTime()) / (365.25 * 86400000);
+    if (!(t > 0)) return 0;
+    return saldo * (Math.pow(1 + i / m, m * t) - 1);
+}
+
+// Agrega todas las operaciones por ticker sumando compras/ventas. Las operaciones
+// de efectivo (aportación/retirada) NO son posiciones y se ignoran aquí.
 // Devuelve un Map<ticker, {buyQty,buyCost,buyComision,sellQty,sellComision,...}>.
 export function aggregate(ops) {
     const m = new Map();
     for (const op of ops) {
+        if (isCashOp(op)) continue;
         const t = op.ticker;
         let a = m.get(t);
         if (!a) {
@@ -101,6 +160,13 @@ export function buildJournal(ops) {
     let beneficioTotal = 0, comisionesTotales = 0, baseVentas = 0;
 
     for (const op of ops) {
+        // Aportaciones/retiradas: fila informativa del diario, sin P&L ni comisión.
+        if (isCashOp(op)) {
+            rows.push({ id: op.id, fecha: op.fecha, tipo_operacion: op.tipo_operacion, ticker: null,
+                tipo_activo: 'liquidez', moneda: op.moneda || 'EUR', importe: Number(op.importe) || 0, precio: null,
+                comision_entrada: null, comision_salida: null, peso_en_cartera: null, beneficio: null, rentabilidad_pct: null });
+            continue;
+        }
         const q = Number(op.cantidad) || 0, p = Number(op.precio) || 0, c = Number(op.comision) || 0;
         let s = pool.get(op.ticker);
         if (!s) { s = { qty: 0, cost: 0, com: 0 }; pool.set(op.ticker, s); }

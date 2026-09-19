@@ -35,8 +35,8 @@ import {
     verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import { CARTERA_HTML } from './cartera-page.js';
-import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS }
-    from './cartera-logic.js';
+import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS,
+    computeCashBalance, accruedInterest, isCashOp, CASH_TICKER, CASH_OPS } from './cartera-logic.js';
 import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
     portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 
@@ -739,28 +739,29 @@ function _normalizeInstrument(r) {
     };
 }
 
-// Interés devengado: saldo × ((1 + i/m)^(m·t) − 1). m = capitalizaciones/año,
-// t = años desde fecha_inicio.
-function _accruedInterest(c) {
-    const saldo = Number(c.saldo) || 0;
-    const remunerada = (c.remunerada === 1 || c.remunerada === true);
-    const i = (Number(c.tipo_interes_anual) || 0) / 100;
-    if (!remunerada || i <= 0 || !c.fecha_inicio) return 0;
-    const mMap = { anual: 1, semestral: 2, trimestral: 4, mensual: 12, diaria: 365 };
-    const m = mMap[c.capitalizacion] || 1;
-    const t = (Date.now() - new Date(c.fecha_inicio).getTime()) / (365.25 * 86400000);
-    if (!(t > 0)) return 0;
-    return saldo * (Math.pow(1 + i / m, m * t) - 1);
-}
-function _normalizeCash(c) {
-    return {
-        moneda: c.moneda, saldo: Number(c.saldo) || 0,
-        remunerada: (c.remunerada === 1 || c.remunerada === true),
-        tipo_interes_anual: Number(c.tipo_interes_anual) || 0,
-        capitalizacion: c.capitalizacion || 'anual',
-        fecha_inicio: c.fecha_inicio || null,
-        interes_devengado: _accruedInterest(c)
-    };
+// v4: la liquidez se CALCULA desde las operaciones (computeCashBalance); la fila
+// de cartera_liquidez solo aporta la configuración de remuneración. Devuelve una
+// entrada por moneda con saldo calculado, desglose e interés devengado.
+function _buildCash(ops, cashRows) {
+    const bal = computeCashBalance(ops);
+    const cfgByMon = {};
+    (cashRows || []).forEach(r => { cfgByMon[(r.moneda || 'EUR').toUpperCase()] = r; });
+    const monedas = new Set([...Object.keys(bal.por_moneda), ...Object.keys(cfgByMon)]);
+    const cash = [];
+    for (const m of monedas) {
+        const b = bal.por_moneda[m] || { moneda: m, saldo: 0, aportaciones: 0, retiradas: 0, compras: 0, ventas: 0, n_aportaciones: 0 };
+        const c = cfgByMon[m] || {};
+        const cfg = {
+            remunerada: (c.remunerada === 1 || c.remunerada === true),
+            tipo_interes_anual: Number(c.tipo_interes_anual) || 0,
+            capitalizacion: c.capitalizacion || 'anual',
+            fecha_inicio: c.fecha_inicio || null
+        };
+        cash.push({ moneda: m, saldo: b.saldo, aportaciones: b.aportaciones, retiradas: b.retiradas,
+            invertido_neto: b.compras - b.ventas, n_aportaciones: b.n_aportaciones,
+            ...cfg, interes_devengado: accruedInterest(b.saldo, cfg), negativo: b.saldo < -EPS });
+    }
+    return { cash, tiene_aportaciones: bal.tiene_aportaciones };
 }
 
 // Contexto de cartera compartido por risk/breakdown/kpis: posiciones con valor de
@@ -792,7 +793,8 @@ async function _carteraContext(env, uid) {
                  stale: pr ? !!pr.stale : true, instrumento: instrMap[p.ticker] || null };
     });
     let cashTotal = 0;
-    const cash = cashRows.map(c => { const n = _normalizeCash(c); cashTotal += n.saldo + n.interes_devengado; return n; });
+    const { cash, tiene_aportaciones } = _buildCash(ops, cashRows);
+    cash.forEach(c => { cashTotal += c.saldo + c.interes_devengado; });
     const totalValue = marketValue + cashTotal;
 
     const weightsTotal = {}, weightsInvested = {};
@@ -800,7 +802,7 @@ async function _carteraContext(env, uid) {
         weightsTotal[p.ticker] = totalValue > 0 && p.valor != null ? p.valor / totalValue : 0;
         weightsInvested[p.ticker] = marketValue > 0 && p.valor != null ? p.valor / marketValue : 0;
     });
-    return { ops, positions: posValues, prices, cash, cashTotal, instrMap, marketValue, totalValue, weightsTotal, weightsInvested };
+    return { ops, positions: posValues, prices, cash, cashTotal, tiene_aportaciones, instrMap, marketValue, totalValue, weightsTotal, weightsInvested };
 }
 
 // Snapshot del valor total de la cartera de un usuario en `fecha` (YYYY-MM-DD):
@@ -981,6 +983,9 @@ function _buildKpis(ctx, risk, journal) {
         volatilidad_anualizada_pct: risk && risk.portfolio_volatilidad != null ? risk.portfolio_volatilidad * 100 : null,
         comisiones_totales: journal.totales.comisiones_totales,
         pct_liquidez: total > 0 ? cashTotal / total * 100 : 0,
+        saldo_liquidez: cashTotal,
+        liquidez_negativa: ctx.cash.some(c => c.negativo),
+        tiene_aportaciones: !!ctx.tiene_aportaciones,
         peso_por_clase: clsW
     };
 }
@@ -1885,6 +1890,25 @@ export default {
             if (path === '/api/portfolio/operations' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const o = await request.json();
+                // v4: aportación / retirada de efectivo — solo importe, moneda y fecha.
+                if (o && CASH_OPS.includes(o.tipo_operacion)) {
+                    if (!o.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(o.fecha)) return json({ error: 'fecha obligatoria con formato YYYY-MM-DD' }, 400, cors);
+                    const importe = Number(o.importe);
+                    if (!isFinite(importe) || importe <= 0) return json({ error: 'importe debe ser un número positivo (> 0)' }, 400, cors);
+                    const moneda = String(o.moneda || 'EUR').toUpperCase();
+                    const res = await env.DB.prepare(
+                        `INSERT INTO cartera_operaciones
+                            (usuario_id,ticker,tipo_activo,tipo_operacion,fecha,cantidad,precio,comision,moneda,broker_origen,created_at,importe)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+                        .bind(uid, CASH_TICKER, 'liquidez', o.tipo_operacion, o.fecha, 0, 0, 0, moneda, o.broker_origen ?? null,
+                              new Date().toISOString(), importe).run();
+                    await _invalidateRisk(env, uid);
+                    const { results: allOps } = await env.DB.prepare('SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+                    const bal = computeCashBalance(allOps);
+                    const b = bal.por_moneda[moneda];
+                    return json({ id: res.meta && res.meta.last_row_id, tipo_operacion: o.tipo_operacion, importe, moneda,
+                                  liquidez: { moneda, saldo: b ? b.saldo : 0, negativo: !!(b && b.saldo < -EPS) } }, 201, cors);
+                }
                 if (!o || !o.ticker || !o.tipo_activo || !o.tipo_operacion || !o.fecha
                     || o.cantidad == null || o.precio == null) {
                     return json({ error: 'Campos obligatorios: ticker, tipo_activo, tipo_operacion, fecha, cantidad, precio' }, 400, cors);
@@ -1893,8 +1917,9 @@ export default {
                     return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
                 }
                 if (o.tipo_operacion !== 'compra' && o.tipo_operacion !== 'venta') {
-                    return json({ error: "tipo_operacion debe ser 'compra' o 'venta'" }, 400, cors);
+                    return json({ error: "tipo_operacion debe ser 'compra', 'venta', 'aportacion' o 'retirada'" }, 400, cors);
                 }
+                if (o.tipo_activo === 'liquidez') return json({ error: "La liquidez se registra con tipo_operacion 'aportacion' o 'retirada'" }, 400, cors);
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(o.fecha)) {
                     return json({ error: 'fecha debe tener formato YYYY-MM-DD' }, 400, cors);
                 }
@@ -1922,12 +1947,19 @@ export default {
                           o.moneda || 'EUR', o.broker_origen ?? null, new Date().toISOString()).run();
                 const newId = res.meta && res.meta.last_row_id;
                 await _invalidateRisk(env, uid);
-                // Devolver la operación creada + la posición recalculada del ticker.
+                // Devolver la operación creada + la posición recalculada del ticker + el
+                // saldo de liquidez resultante. Decisión v4: una compra que supera el saldo
+                // se PERMITE (brokers con margen) pero se avisa; el saldo negativo se destaca.
                 const { results: all } = await env.DB.prepare(
-                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
-                const agg = aggregate(all).get(ticker);
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+                const agg = aggregate(all.filter(x => x.ticker === ticker)).get(ticker);
+                const bal = computeCashBalance(all);
+                const mon = (o.moneda || 'EUR').toUpperCase();
+                const b = bal.por_moneda[mon] || { saldo: 0 };
+                const liquidez = { moneda: mon, saldo: b.saldo, negativo: b.saldo < -EPS, tiene_aportaciones: bal.tiene_aportaciones,
+                    aviso: b.saldo < -EPS ? `El saldo de liquidez en ${mon} queda negativo (${b.saldo.toFixed(2)}). Se ha registrado igualmente; si no operas con margen, registra la aportación correspondiente.` : null };
                 return json({ id: newId, ticker, tipo_operacion: o.tipo_operacion,
-                              posicion: agg ? positionFrom(agg) : null }, 201, cors);
+                              posicion: agg ? positionFrom(agg) : null, liquidez }, 201, cors);
             }
 
             // GET /api/portfolio/holdings?estado=abiertas|cerradas|todas — posiciones agregadas.
@@ -2133,17 +2165,15 @@ export default {
             if (path === '/api/portfolio/cash') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare(
-                        'SELECT * FROM cartera_liquidez WHERE usuario_id=?').bind(uid).all();
-                    const rows = results.map(_normalizeCash);
-                    const total = rows.reduce((a, c) => a + c.saldo + c.interes_devengado, 0);
-                    return json({ cash: rows, total }, 200, cors);
+                    const ctx = await _carteraContext(env, uid);
+                    return json({ cash: ctx.cash, total: ctx.cashTotal, tiene_aportaciones: ctx.tiene_aportaciones,
+                                  nota: 'El saldo se calcula desde las operaciones (aportaciones, retiradas, compras y ventas); no es editable.' }, 200, cors);
                 }
                 if (method === 'PUT') {
+                    // v4: solo configuración de remuneración. `saldo` se ignora (se calcula).
                     const b = await request.json();
                     const moneda = (b.moneda || 'EUR').toUpperCase();
-                    const saldo = Number(b.saldo);
-                    if (!isFinite(saldo) || saldo < 0) return json({ error: 'saldo debe ser un número >= 0' }, 400, cors);
+                    const saldo = 0;
                     const tin = b.tipo_interes_anual != null ? Number(b.tipo_interes_anual) : 0;
                     if (!isFinite(tin) || tin < 0) return json({ error: 'tipo_interes_anual no puede ser negativo' }, 400, cors);
                     const capOK = ['anual', 'semestral', 'trimestral', 'mensual', 'diaria'];
@@ -2155,9 +2185,8 @@ export default {
                              tipo_interes_anual=excluded.tipo_interes_anual, capitalizacion=excluded.capitalizacion,
                              fecha_inicio=excluded.fecha_inicio`)
                         .bind(uid, moneda, saldo, b.remunerada ? 1 : 0, tin, cap, b.fecha_inicio ?? null).run();
-                    const row = await env.DB.prepare(
-                        'SELECT * FROM cartera_liquidez WHERE usuario_id=? AND moneda=?').bind(uid, moneda).first();
-                    return json(_normalizeCash(row), 200, cors);
+                    const ctx = await _carteraContext(env, uid);
+                    return json(ctx.cash.find(c => c.moneda === moneda) || { moneda }, 200, cors);
                 }
             }
 
