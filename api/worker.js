@@ -7,6 +7,9 @@
 //   Users:     GET/PUT/DELETE /api/users/:id, GET /api/users
 //   Accounts:  GET/POST /api/accounts, DELETE /api/accounts/:id
 //   Movements: GET/POST /api/movements, DELETE /api/movements/:id
+//   Tesorería: GET /api/tesoreria/config, GET/POST /api/tesoreria/compromisos,
+//              DELETE /api/tesoreria/compromisos/:id,
+//              GET /api/tesoreria/agenda?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
 //   Rules:     GET/POST /api/rules, POST /api/rules/bulk, DELETE /api/rules/:id
 //   Autocontrol, scenarios, notifications, bank-connections, import-info
 //   Stripe:    POST /api/stripe/create-checkout, POST /api/stripe/webhook,
@@ -40,6 +43,8 @@ import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJou
     weightPct, computePortfolioWeights, adjustTo100, formatDuration } from './cartera-logic.js';
 import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
     portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
+import { FRECUENCIAS, TIPOS_COMPROMISO, isISODate, hoyMadrid, addDays, buildAgenda,
+    resumenTesoreria, saldoBancario } from './tesoreria-logic.js';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -140,6 +145,20 @@ function webauthnConfig(env) {
     let rpID = 'localhost';
     try { rpID = new URL(env.APP_URL).hostname; } catch (_) {}
     return { rpName: 'FinanceFlow', rpID, expectedOrigin: (env.APP_URL || '').replace(/\/$/, '') };
+}
+
+// ---------- Tesorería ----------
+const TESORERIA_MAX_DIAS = 400;
+
+// D1 devuelve enteros 1/0: normalizar a booleanos antes de enviar al frontend.
+function normalizeCompromiso(c) {
+    if (!c) return c;
+    return {
+        ...c,
+        importe: Number(c.importe),
+        aviso_dias: Number(c.aviso_dias ?? 2),
+        activo: c.activo === 1 || c.activo === true
+    };
 }
 
 async function getAuthUser(request, env) {
@@ -1523,19 +1542,31 @@ export default {
                 if (method === 'POST') {
                     const a = await request.json();
                     const now = new Date().toISOString();
+                    // Tesorería: admite_cobros solo en cuentas de ingreso, admite_pagos solo en gasto.
+                    // El tipo no cambia en el UPDATE, así que se valida contra el tipo guardado si existe.
+                    const prevAcc = await env.DB.prepare('SELECT tipo FROM accounts WHERE id=? AND user_id=?')
+                        .bind(a.id, uid).first();
+                    const tipoAcc = prevAcc?.tipo || a.tipo;
+                    const admiteCobros = tipoAcc === 'ingreso' && a.admite_cobros ? 1 : 0;
+                    const admitePagos = tipoAcc === 'gasto' && a.admite_pagos ? 1 : 0;
+                    a.admite_cobros = admiteCobros === 1;
+                    a.admite_pagos = admitePagos === 1;
                     await env.DB.prepare(
                         `INSERT INTO accounts (id,user_id,nombre,tipo,descripcion,saldo_inicial,saldo_actual,
-                            is_fixed_cost,fixed_monthly_amount,fixed_due_day,is_bank_account,created_at,updated_at)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            is_fixed_cost,fixed_monthly_amount,fixed_due_day,is_bank_account,
+                            admite_cobros,admite_pagos,created_at,updated_at)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                          ON CONFLICT(id) DO UPDATE SET nombre=excluded.nombre, descripcion=excluded.descripcion,
                             saldo_inicial=excluded.saldo_inicial, saldo_actual=excluded.saldo_actual,
                             is_fixed_cost=excluded.is_fixed_cost, fixed_monthly_amount=excluded.fixed_monthly_amount,
                             fixed_due_day=excluded.fixed_due_day, is_bank_account=excluded.is_bank_account,
+                            admite_cobros=excluded.admite_cobros, admite_pagos=excluded.admite_pagos,
                             updated_at=excluded.updated_at
                          WHERE accounts.user_id = excluded.user_id`)
                         .bind(a.id, uid, a.nombre, a.tipo, a.descripcion || '', a.saldo_inicial || 0,
                               a.saldo_actual || 0, a.is_fixed_cost ? 1 : 0, a.fixed_monthly_amount ?? null,
-                              a.fixed_due_day ?? null, a.is_bank_account ? 1 : 0, a.created_at || now, now).run();
+                              a.fixed_due_day ?? null, a.is_bank_account ? 1 : 0,
+                              admiteCobros, admitePagos, a.created_at || now, now).run();
                     return json(a, 200, cors);
                 }
             }
@@ -1560,17 +1591,19 @@ export default {
                     await env.DB.prepare(
                         `INSERT INTO movements (id,user_id,tipo,cantidad,descripcion,fecha,cuenta_id,
                             cuenta_destino_id,categoria,origen,auto_categorized,applied_rule,rule_name,
-                            manually_categorized,bank_reference,created_at,updated_at)
-                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            manually_categorized,bank_reference,compromiso_id,created_at,updated_at)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                          ON CONFLICT(id) DO UPDATE SET tipo=excluded.tipo, cantidad=excluded.cantidad,
                             descripcion=excluded.descripcion, fecha=excluded.fecha, cuenta_id=excluded.cuenta_id,
                             cuenta_destino_id=excluded.cuenta_destino_id, categoria=excluded.categoria,
+                            compromiso_id=COALESCE(excluded.compromiso_id, movements.compromiso_id),
                             updated_at=excluded.updated_at
                          WHERE movements.user_id = excluded.user_id`)
                         .bind(m.id, uid, m.tipo, m.cantidad, m.descripcion, m.fecha, m.cuenta_id ?? null,
                               m.cuenta_destino_id ?? null, m.categoria ?? null, m.origen || 'manual',
                               m.auto_categorized ? 1 : 0, m.applied_rule ?? null, m.rule_name ?? null,
-                              m.manually_categorized ? 1 : 0, m.bank_reference ?? null, m.created_at || now, now).run();
+                              m.manually_categorized ? 1 : 0, m.bank_reference ?? null, m.compromiso_id ?? null,
+                              m.created_at || now, now).run();
                     return json(m, 200, cors);
                 }
             }
@@ -1580,6 +1613,123 @@ export default {
                 await env.DB.prepare('DELETE FROM movements WHERE id=? AND user_id=?')
                     .bind(movMatch[1].split('?')[0], uid).run();
                 return json({ success: true }, 200, cors);
+            }
+
+            // ---------- TESORERÍA ----------
+            // Compromisos = series futuras de cobros/pagos. Las ocurrencias se calculan
+            // al vuelo (api/tesoreria-logic.js); los costes fijos de las cuentas entran
+            // como pagos mensuales virtuales.
+            if (path.startsWith('/api/tesoreria/')) {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const premiumRequired = env.CASHFLOW_PREMIUM === 'true';
+
+                if (path === '/api/tesoreria/config' && method === 'GET')
+                    return json({ premium_required: premiumRequired }, 200, cors);
+
+                if (premiumRequired && authUser.plan !== 'premium')
+                    return json({ error: 'premium_required' }, 403, cors);
+
+                if (path === '/api/tesoreria/compromisos' && method === 'GET') {
+                    const { results } = await env.DB.prepare(
+                        'SELECT * FROM tesoreria_compromisos WHERE user_id=? ORDER BY activo DESC, fecha_ancla DESC')
+                        .bind(uid).all();
+                    return json(results.map(normalizeCompromiso), 200, cors);
+                }
+
+                if (path === '/api/tesoreria/compromisos' && method === 'POST') {
+                    const c = await request.json().catch(() => null);
+                    if (!c || typeof c !== 'object') return json({ error: 'Datos inválidos' }, 400, cors);
+                    if (!TIPOS_COMPROMISO.includes(c.tipo))
+                        return json({ error: "El tipo debe ser 'cobro' o 'pago'" }, 400, cors);
+                    if (!FRECUENCIAS[c.frecuencia])
+                        return json({ error: 'Frecuencia no válida (mensual, trimestral, semestral o anual)' }, 400, cors);
+                    const importe = Math.round(Number(c.importe) * 100) / 100;
+                    if (!Number.isFinite(importe) || importe <= 0)
+                        return json({ error: 'El importe debe ser mayor que 0' }, 400, cors);
+                    const concepto = String(c.concepto ?? '').trim().slice(0, 200);
+                    if (!concepto) return json({ error: 'El concepto es obligatorio' }, 400, cors);
+                    if (!isISODate(c.fecha_ancla))
+                        return json({ error: 'La fecha debe tener formato AAAA-MM-DD' }, 400, cors);
+                    const fechaFin = c.fecha_fin || null;
+                    if (fechaFin && !isISODate(fechaFin))
+                        return json({ error: 'La fecha de fin debe tener formato AAAA-MM-DD' }, 400, cors);
+                    if (fechaFin && fechaFin < c.fecha_ancla)
+                        return json({ error: 'La fecha de fin no puede ser anterior a la primera fecha' }, 400, cors);
+                    const avisoDias = c.aviso_dias == null || c.aviso_dias === '' ? 2 : Number(c.aviso_dias);
+                    if (!Number.isInteger(avisoDias) || avisoDias < 0 || avisoDias > 7)
+                        return json({ error: 'Los días de aviso deben estar entre 0 y 7' }, 400, cors);
+
+                    const cuenta = await env.DB.prepare(
+                        'SELECT id, tipo, admite_cobros, admite_pagos FROM accounts WHERE id=? AND user_id=?')
+                        .bind(c.cuenta_id ?? '', uid).first();
+                    if (!cuenta) return json({ error: 'La cuenta no existe' }, 400, cors);
+                    if (c.tipo === 'cobro' && !(cuenta.tipo === 'ingreso' && cuenta.admite_cobros === 1))
+                        return json({ error: "La cuenta debe ser de ingreso y tener activado 'cobros recurrentes'" }, 400, cors);
+                    if (c.tipo === 'pago' && !(cuenta.tipo === 'gasto' && cuenta.admite_pagos === 1))
+                        return json({ error: "La cuenta debe ser de gasto y tener activado 'pagos recurrentes'" }, 400, cors);
+
+                    const id = c.id || crypto.randomUUID();
+                    const now = new Date().toISOString();
+                    const activo = c.activo === undefined || c.activo === null ? 1 : (c.activo === true || c.activo === 1 ? 1 : 0);
+                    const res = await env.DB.prepare(
+                        `INSERT INTO tesoreria_compromisos (id,user_id,tipo,cuenta_id,concepto,importe,frecuencia,
+                            fecha_ancla,fecha_fin,aviso_dias,activo,movimiento_origen_id,created_at,updated_at)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         ON CONFLICT(id) DO UPDATE SET tipo=excluded.tipo, cuenta_id=excluded.cuenta_id,
+                            concepto=excluded.concepto, importe=excluded.importe, frecuencia=excluded.frecuencia,
+                            fecha_ancla=excluded.fecha_ancla, fecha_fin=excluded.fecha_fin,
+                            aviso_dias=excluded.aviso_dias, activo=excluded.activo,
+                            movimiento_origen_id=COALESCE(excluded.movimiento_origen_id, tesoreria_compromisos.movimiento_origen_id),
+                            updated_at=excluded.updated_at
+                         WHERE tesoreria_compromisos.user_id = excluded.user_id`)
+                        .bind(id, uid, c.tipo, cuenta.id, concepto, importe, c.frecuencia, c.fecha_ancla, fechaFin,
+                              avisoDias, activo, c.movimiento_origen_id ?? null, now, now).run();
+                    // Si el id existía y era de otro usuario, el WHERE bloquea el UPDATE (0 cambios).
+                    if (!res.meta?.changes) return json({ error: 'No encontrado' }, 404, cors);
+                    const saved = await env.DB.prepare('SELECT * FROM tesoreria_compromisos WHERE id=? AND user_id=?')
+                        .bind(id, uid).first();
+                    return json(normalizeCompromiso(saved), 200, cors);
+                }
+
+                const compMatch = path.match(/^\/api\/tesoreria\/compromisos\/([^/]+)$/);
+                if (compMatch && method === 'DELETE') {
+                    const compId = decodeURIComponent(compMatch[1]);
+                    await env.DB.batch([
+                        env.DB.prepare('UPDATE movements SET compromiso_id=NULL WHERE compromiso_id=? AND user_id=?')
+                            .bind(compId, uid),
+                        env.DB.prepare('DELETE FROM tesoreria_compromisos WHERE id=? AND user_id=?')
+                            .bind(compId, uid)
+                    ]);
+                    return json({ success: true }, 200, cors);
+                }
+
+                if (path === '/api/tesoreria/agenda' && method === 'GET') {
+                    const qDesde = url.searchParams.get('desde');
+                    const qHasta = url.searchParams.get('hasta');
+                    if ((qDesde && !isISODate(qDesde)) || (qHasta && !isISODate(qHasta)))
+                        return json({ error: 'Las fechas deben tener formato AAAA-MM-DD' }, 400, cors);
+                    const desde = qDesde || hoyMadrid();
+                    let hasta = qHasta || addDays(desde, 30);
+                    if (hasta < desde) return json({ error: "'hasta' no puede ser anterior a 'desde'" }, 400, cors);
+                    const maxHasta = addDays(desde, TESORERIA_MAX_DIAS);
+                    const recortado = hasta > maxHasta;
+                    if (recortado) hasta = maxHasta;
+
+                    const [compRes, accRes] = await env.DB.batch([
+                        env.DB.prepare('SELECT * FROM tesoreria_compromisos WHERE user_id=? AND activo=1').bind(uid),
+                        env.DB.prepare(
+                            `SELECT id, nombre, tipo, saldo_actual, is_bank_account, is_fixed_cost,
+                                    fixed_monthly_amount, fixed_due_day
+                             FROM accounts WHERE user_id=?`).bind(uid)
+                    ]);
+                    const compromisos = compRes.results || [];
+                    const accounts = accRes.results || [];
+                    const agenda = buildAgenda({ compromisos, accounts, desde, hasta });
+                    const resumen = resumenTesoreria(agenda, saldoBancario(accounts));
+                    return json({ desde, hasta, rango_recortado: recortado, hoy: hoyMadrid(), agenda, resumen }, 200, cors);
+                }
+
+                return json({ error: 'No encontrado' }, 404, cors);
             }
 
             // ---------- RULES ----------
