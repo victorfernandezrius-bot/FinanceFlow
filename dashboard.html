@@ -1924,6 +1924,25 @@
                             </div>
                         </div>
                         
+                        <!-- Tesorería: la cuenta admite cobros (ingreso) / pagos (gasto) recurrentes -->
+                        <div id="cashflow-flags-section" class="hidden">
+                            <div class="border-t pt-4">
+                                <div id="cashflow-cobros-row" class="flex items-center hidden">
+                                    <input type="checkbox" id="account-admite-cobros" name="admite_cobros" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                    <label for="account-admite-cobros" class="ml-2 block text-sm font-medium text-gray-700">
+                                        Esta cuenta puede contener cobros recurrentes
+                                    </label>
+                                </div>
+                                <div id="cashflow-pagos-row" class="flex items-center hidden">
+                                    <input type="checkbox" id="account-admite-pagos" name="admite_pagos" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                    <label for="account-admite-pagos" class="ml-2 block text-sm font-medium text-gray-700">
+                                        Esta cuenta puede contener pagos recurrentes
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">Permite marcar sus movimientos como recurrentes y verlos en el calendario de Tesorería.</p>
+                            </div>
+                        </div>
+
                         <div id="initial-balance-field" class="hidden">
                             <label for="account-initial-balance" class="block text-sm font-medium text-gray-700">Saldo Inicial</label>
                             <input type="number" id="account-initial-balance" name="initial_balance" step="0.01" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2">
@@ -2482,6 +2501,9 @@
                     const fixedCostFields = document.getElementById('fixed-cost-fields');
                     if (e.target.checked) {
                         fixedCostFields.classList.remove('hidden');
+                        // Un coste fijo es un pago recurrente: marcarlo por defecto (desmarcable)
+                        const admitePagos = document.getElementById('account-admite-pagos');
+                        if (admitePagos) admitePagos.checked = true;
                     } else {
                         fixedCostFields.classList.add('hidden');
                         // Limpiar campos
@@ -7807,6 +7829,13 @@
                         document.getElementById('fixed-cost-section').classList.add('hidden');
                     }
 
+                    // Tesorería: flags de cobros/pagos recurrentes
+                    this.updateCashflowFlagsSection(account.tipo);
+                    const admiteCobrosCb = document.getElementById('account-admite-cobros');
+                    const admitePagosCb = document.getElementById('account-admite-pagos');
+                    if (admiteCobrosCb) admiteCobrosCb.checked = account.tipo === 'ingreso' && !!account.admite_cobros;
+                    if (admitePagosCb) admitePagosCb.checked = account.tipo === 'gasto' && !!account.admite_pagos;
+
                     // Rellenar campo bancario si es activo
                     if (account.tipo === 'activo') {
                         const bankSection = document.getElementById('bank-account-section');
@@ -7850,6 +7879,7 @@
                 document.getElementById('initial-balance-field')?.classList.add('hidden');
                 document.getElementById('fixed-cost-section')?.classList.add('hidden');
                 document.getElementById('fixed-cost-fields')?.classList.add('hidden');
+                this.updateCashflowFlagsSection(null);
 
                 const bankCheckbox = document.getElementById('is-bank-account');
                 if (bankCheckbox) bankCheckbox.checked = false;
@@ -7932,6 +7962,24 @@
                     document.getElementById('is-fixed-cost').checked = false;
                     document.getElementById('fixed-cost-fields').classList.add('hidden');
                 }
+
+                this.updateCashflowFlagsSection(type);
+            }
+
+            // Tesorería: muestra el flag que corresponde al tipo (ingreso → cobros,
+            // gasto → pagos) y desmarca el que no aplica. Oculto para el resto.
+            updateCashflowFlagsSection(type) {
+                const section = document.getElementById('cashflow-flags-section');
+                if (!section) return;
+                const esIngreso = type === 'ingreso';
+                const esGasto = type === 'gasto';
+                section.classList.toggle('hidden', !esIngreso && !esGasto);
+                document.getElementById('cashflow-cobros-row')?.classList.toggle('hidden', !esIngreso);
+                document.getElementById('cashflow-pagos-row')?.classList.toggle('hidden', !esGasto);
+                const cobros = document.getElementById('account-admite-cobros');
+                const pagos = document.getElementById('account-admite-pagos');
+                if (cobros && !esIngreso) cobros.checked = false;
+                if (pagos && !esGasto) pagos.checked = false;
             }
 
             handleMovementTypeChange(type) {
@@ -8077,6 +8125,10 @@
                 if (accountType === 'activo') {
                     accountData.is_bank_account = formData.get('is_bank_account') === 'on';
                 }
+
+                // Tesorería: flags de cobros/pagos recurrentes (siempre explícitos para poder desmarcar)
+                accountData.admite_cobros = accountType === 'ingreso' && formData.get('admite_cobros') === 'on';
+                accountData.admite_pagos = accountType === 'gasto' && formData.get('admite_pagos') === 'on';
 
                 try {
                     // Verificar si estamos editando o creando
