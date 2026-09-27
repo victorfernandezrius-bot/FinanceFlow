@@ -1,0 +1,28 @@
+-- ============================================
+-- Feature: Cartera de Inversión v4 — liquidez como eje de la cartera
+--
+-- 1) cartera_operaciones admite dos tipos nuevos de operación de EFECTIVO:
+--      'aportacion' (entra dinero en la cuenta) y 'retirada' (sale).
+--    No llevan ticker ni precio: se guardan con ticker='__CASH__',
+--    tipo_activo='liquidez', cantidad=0, precio=0 y el importe en la columna
+--    nueva `importe` (moneda y fecha como el resto). La validación del enum
+--    sigue en el Worker (no hay CHECK en D1).
+--
+-- 2) El saldo de liquidez pasa a ser CALCULADO a partir de las operaciones:
+--      saldo = Σ aportaciones − Σ retiradas − Σ(cantidad×precio+comisión) compras
+--              + Σ(cantidad×precio−comisión) ventas  (+ interés devengado)
+--    cartera_liquidez.saldo deja de usarse como dato editable: la columna se
+--    conserva (D1/SQLite no permite quitar NOT NULL sin recrear la tabla) y el
+--    Worker la escribe siempre a 0. La tabla guarda solo la configuración de
+--    remuneración (remunerada, tipo_interes_anual, capitalizacion, fecha_inicio).
+--
+-- ATENCIÓN: ALTER TABLE ... ADD COLUMN no es idempotente en SQLite (no existe
+-- "ADD COLUMN IF NOT EXISTS"). Antes de aplicar, comprobar que la columna no
+-- existe:  SELECT name FROM pragma_table_info('cartera_operaciones') WHERE name='importe';
+-- Si ya devuelve una fila, NO volver a ejecutar este fichero.
+--
+-- Aplicar en STAGING:
+--   npx wrangler d1 execute cp-db-staging --remote --file=db/migrations/0004_cartera_liquidez_calculada.sql
+-- ============================================
+
+ALTER TABLE cartera_operaciones ADD COLUMN importe REAL;

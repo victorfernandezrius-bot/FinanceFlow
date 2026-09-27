@@ -13,6 +13,14 @@
 //              POST /api/stripe/verify-session, POST /api/stripe/customer-portal
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
+//   Portfolio: POST /api/portfolio/operations, GET /api/portfolio/holdings?estado=,
+//              POST /api/portfolio/close, GET /api/portfolio/journal,
+//              GET /api/portfolio/allocation, GET /api/portfolio/history,
+//              GET /api/portfolio/daily-return,
+//              GET/PUT /api/portfolio/instruments/:ticker, GET/PUT /api/portfolio/cash,
+//              GET /api/portfolio/risk|breakdown|kpis?benchmark=X,
+//              GET /api/portfolio/prices?tickers=AAPL,MSFT (batch a Twelve Data)
+//   UI:        GET /cartera.html (página standalone de la cartera)
 //
 // Bindings (wrangler.toml): DB (D1), CACHE (KV)
 // Secrets: JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
@@ -26,6 +34,12 @@ import {
     generateAuthenticationOptions,
     verifyAuthenticationResponse
 } from '@simplewebauthn/server';
+import { CARTERA_HTML } from './cartera-page.js';
+import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJournal, computeAllocation, EPS,
+    computeCashBalance, accruedInterest, isCashOp, CASH_TICKER, CASH_OPS,
+    weightPct, computePortfolioWeights, adjustTo100, formatDuration } from './cartera-logic.js';
+import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
+    portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -381,6 +395,735 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
 }
 
 // ============================================================
+// CARTERA DE INVERSIÓN — helpers
+// ============================================================
+
+// TTL de la caché de precios en KV (segundos). 900s = 15 min.
+// Para probar la degradación a "stale" en local, bájalo temporalmente a 10.
+const PRICE_TTL = 900;
+
+// Tipos de activo admitidos. v3 amplía el enum con renta fija, derivados y liquidez.
+const TIPOS_ACTIVO = ['accion', 'etf', 'fondo', 'renta_fija', 'derivado', 'cripto', 'liquidez'];
+// Clases de renta variable (para betas/clasificación) y agrupación por clase.
+const TIPOS_RENTA_VARIABLE = ['accion', 'etf', 'fondo'];
+
+// Degradación a "stale" para un ticker: último precio conocido desde el backup
+// `price_bak:{ticker}` (sin TTL) o, si no existe, precio nulo. Nunca lanza error.
+async function _stalePrice(ticker, env) {
+    const backupRaw = await env.CACHE.get(`price_bak:${ticker}`);
+    if (backupRaw) {
+        try { return { ...JSON.parse(backupRaw), stale: true }; } catch { /* ignore */ }
+    }
+    return { ticker, price: null, fetched_at: null, stale: true };
+}
+
+// Precios de varios tickers con estrategia cache-first sobre KV (env.CACHE) y
+// UNA sola llamada batch a Twelve Data para los que falten:
+//   1) Para cada ticker, si hay precio fresco en `price:{ticker}` (dentro del
+//      TTL) se usa directamente (no entra en la llamada externa).
+//   2) Con los tickers que faltan se hace UNA única petición batch
+//      `/price?symbol=A,B,C`. Twelve Data devuelve `{price:"..."}` cuando se pide
+//      un único símbolo y `{ A:{price:"..."}, B:{status:"error"} }` cuando se
+//      piden varios; se parsean ambos formatos.
+//   3) Si el batch falla del todo (red, apikey, rate limit global) o un ticker
+//      concreto no viene o viene con error, ese ticker degrada a `stale:true`
+//      con su último precio conocido (backup sin TTL). Nunca error duro.
+// El backup sin TTL se mantiene aparte porque KV borra la clave con TTL al
+// expirar, y entonces no podríamos servir "el último precio aunque haya expirado".
+export async function getTickerPrices(tickers, env) {
+    const result = {};
+    const misses = [];
+
+    // 1) Cache-first por ticker.
+    for (const ticker of tickers) {
+        const cachedRaw = await env.CACHE.get(`price:${ticker}`);
+        if (cachedRaw) {
+            try { result[ticker] = { ...JSON.parse(cachedRaw), stale: false }; continue; } catch { /* refetch */ }
+        }
+        misses.push(ticker);
+    }
+    if (!misses.length) return result;
+
+    // 2) UNA sola llamada batch para los que faltan.
+    let batch = null;
+    try {
+        const apiKey = env.TWELVE_DATA_API_KEY;
+        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada');
+        const symbol = misses.map(encodeURIComponent).join(',');
+        const resp = await fetch(`https://api.twelvedata.com/price?symbol=${symbol}&apikey=${apiKey}`);
+        const data = await resp.json();
+        // Error global (apikey inválida, límite de plan agotado, etc.).
+        if (data && data.status === 'error') throw new Error(data.message || 'Error de Twelve Data');
+        batch = data;
+    } catch (err) {
+        // Batch caído por completo: todos los que faltan degradan a stale.
+        for (const ticker of misses) result[ticker] = await _stalePrice(ticker, env);
+        return result;
+    }
+
+    // 3) Resolver cada ticker que faltaba a partir de la respuesta batch.
+    const now = new Date().toISOString();
+    for (const ticker of misses) {
+        // Formato 1 símbolo -> { price }; varios -> { TICKER: { price | status:'error' } }.
+        let priceStr = null;
+        if (misses.length === 1 && batch && batch.price != null) {
+            priceStr = batch.price;
+        } else if (batch && batch[ticker] && batch[ticker].status !== 'error' && batch[ticker].price != null) {
+            priceStr = batch[ticker].price;
+        }
+        const price = priceStr != null ? parseFloat(priceStr) : NaN;
+        if (isFinite(price)) {
+            const payload = { ticker, price, fetched_at: now };
+            await env.CACHE.put(`price:${ticker}`, JSON.stringify(payload), { expirationTtl: PRICE_TTL });
+            await env.CACHE.put(`price_bak:${ticker}`, JSON.stringify(payload));
+            result[ticker] = { ...payload, stale: false };
+        } else {
+            // Ticker ausente o con error en el batch: degradar a stale.
+            result[ticker] = await _stalePrice(ticker, env);
+        }
+    }
+    return result;
+}
+
+// Benchmarks soportados por /api/portfolio/history. Los símbolos de índice de
+// Twelve Data pueden no coincidir 1:1 con estos alias; conviene verificarlos
+// contra la documentación de Twelve Data antes de producción.
+const BENCHMARKS = {
+    SP500:     { symbol: 'SPX',  nombre: 'S&P 500' },
+    NASDAQ100: { symbol: 'NDX',  nombre: 'Nasdaq 100' },
+    DOWJONES:  { symbol: 'DJI',  nombre: 'Dow Jones' },
+    IBEX35:    { symbol: 'IBEX', nombre: 'IBEX 35' },
+    CAC40:     { symbol: 'CAC',  nombre: 'CAC 40' },
+    DAX:       { symbol: 'DAX',  nombre: 'DAX' },
+    FTSE100:   { symbol: 'FTSE', nombre: 'FTSE 100' }
+};
+
+// ---------- v4 Bloque 6: sector del instrumento ----------
+// Tabla LOCAL y curada de sectores para los valores más comunes del IBEX 35 y del
+// S&P 500. Es un fallback honesto: no adivina nada: si el ticker no está, el campo
+// se deja manual. Nunca se usa un LLM para inventar el sector.
+const SECTORES_LOCALES = {
+    // IBEX 35 (tickers de Madrid)
+    SAN: 'Finanzas', BBVA: 'Finanzas', CABK: 'Finanzas', SAB: 'Finanzas', BKT: 'Finanzas',
+    UNI: 'Finanzas', MAP: 'Seguros', ITX: 'Consumo discrecional', PUIG: 'Consumo básico',
+    IBE: 'Utilities', ELE: 'Utilities', NTGY: 'Utilities', ANA: 'Utilities', ENG: 'Utilities',
+    RED: 'Utilities', REE: 'Utilities', SLR: 'Utilities', SOLARIA: 'Utilities',
+    REP: 'Energía', TEF: 'Telecomunicaciones', CLNX: 'Telecomunicaciones',
+    AMS: 'Tecnología', IDR: 'Tecnología', GRF: 'Salud', ROVI: 'Salud',
+    FER: 'Industrial', ACS: 'Industrial', AENA: 'Industrial', IAG: 'Industrial',
+    SCYR: 'Industrial', LOG: 'Industrial', ACX: 'Materiales', MTS: 'Materiales',
+    COL: 'Inmobiliario', MRL: 'Inmobiliario', MEL: 'Consumo discrecional', FDR: 'Consumo discrecional',
+    ENA: 'Utilities',
+    // S&P 500 (principales)
+    AAPL: 'Tecnología', MSFT: 'Tecnología', NVDA: 'Tecnología', AVGO: 'Tecnología', ORCL: 'Tecnología',
+    CRM: 'Tecnología', ADBE: 'Tecnología', AMD: 'Tecnología', INTC: 'Tecnología', CSCO: 'Tecnología',
+    TXN: 'Tecnología', QCOM: 'Tecnología', MU: 'Tecnología', IBM: 'Tecnología', NOW: 'Tecnología',
+    INTU: 'Tecnología', ACN: 'Tecnología',
+    GOOGL: 'Telecomunicaciones', GOOG: 'Telecomunicaciones', META: 'Telecomunicaciones',
+    NFLX: 'Telecomunicaciones', DIS: 'Telecomunicaciones', CMCSA: 'Telecomunicaciones',
+    T: 'Telecomunicaciones', VZ: 'Telecomunicaciones',
+    AMZN: 'Consumo discrecional', TSLA: 'Consumo discrecional', HD: 'Consumo discrecional',
+    MCD: 'Consumo discrecional', NKE: 'Consumo discrecional', LOW: 'Consumo discrecional',
+    SBUX: 'Consumo discrecional', BKNG: 'Consumo discrecional',
+    WMT: 'Consumo básico', PG: 'Consumo básico', KO: 'Consumo básico', PEP: 'Consumo básico',
+    COST: 'Consumo básico', PM: 'Consumo básico', MO: 'Consumo básico', CL: 'Consumo básico',
+    JPM: 'Finanzas', BAC: 'Finanzas', WFC: 'Finanzas', GS: 'Finanzas', MS: 'Finanzas',
+    C: 'Finanzas', SCHW: 'Finanzas', BLK: 'Finanzas', AXP: 'Finanzas', SPGI: 'Finanzas',
+    V: 'Finanzas', MA: 'Finanzas', BRKB: 'Finanzas',
+    UNH: 'Salud', JNJ: 'Salud', LLY: 'Salud', MRK: 'Salud', ABBV: 'Salud', PFE: 'Salud',
+    TMO: 'Salud', ABT: 'Salud', DHR: 'Salud', BMY: 'Salud', AMGN: 'Salud', GILD: 'Salud',
+    CVS: 'Salud', MDT: 'Salud', ISRG: 'Salud',
+    XOM: 'Energía', CVX: 'Energía', COP: 'Energía', SLB: 'Energía',
+    BA: 'Industrial', CAT: 'Industrial', GE: 'Industrial', HON: 'Industrial', UPS: 'Industrial',
+    RTX: 'Industrial', LMT: 'Industrial', MMM: 'Industrial', DE: 'Industrial',
+    LIN: 'Materiales', SHW: 'Materiales', FCX: 'Materiales',
+    NEE: 'Utilities', DUK: 'Utilities', SO: 'Utilities', D: 'Utilities', AEP: 'Utilities',
+    AMT: 'Inmobiliario', PLD: 'Inmobiliario', SPG: 'Inmobiliario'
+};
+
+// Resuelve el sector de un ticker. Orden: caché KV -> Twelve Data /profile (si el
+// plan lo permite) -> tabla local. El campo sigue siendo editable por el usuario.
+// Si /profile no está en el plan se recuerda 24h para no gastar créditos en balde.
+async function resolveSector(env, ticker) {
+    const t = String(ticker || '').toUpperCase().trim();
+    if (!t) return { ticker: t, sector: null, fuente: null, nota: 'Ticker vacío' };
+    const cacheKey = `profile:${t}`;
+    const cached = await env.CACHE.get(cacheKey);
+    if (cached) {
+        try { const c = JSON.parse(cached); return { ...c, ticker: t, desde_cache: true }; } catch { /* refetch */ }
+    }
+    const local = () => {
+        const sec = SECTORES_LOCALES[t.replace(/[.\s]/g, '')] || null;
+        return { ticker: t, sector: sec, fuente: sec ? 'tabla_local' : null,
+                 nota: sec ? 'Sector de la tabla local de valores comunes (IBEX 35 / S&P 500). Puedes corregirlo.'
+                           : 'No hay sector automático para este ticker: introdúcelo a mano.' };
+    };
+    const apiKey = env.TWELVE_DATA_API_KEY;
+    const noProfile = await env.CACHE.get('profile_no_disponible');
+    if (!apiKey || noProfile) {
+        const r = local();
+        if (r.sector) await env.CACHE.put(cacheKey, JSON.stringify(r));   // sin TTL: el sector no cambia
+        return { ...r, nota: r.nota + (noProfile ? ' (/profile no disponible en el plan de Twelve Data)' : '') };
+    }
+    try {
+        const resp = await fetch(`https://api.twelvedata.com/profile?symbol=${encodeURIComponent(t)}&apikey=${apiKey}`);
+        const d = await resp.json();
+        if (d && d.status !== 'error' && d.sector) {
+            const r = { ticker: t, sector: d.sector, nombre: d.name || null, industria: d.industry || null,
+                        fuente: 'twelvedata', nota: 'Sector obtenido de Twelve Data. Puedes corregirlo.' };
+            await env.CACHE.put(cacheKey, JSON.stringify(r));             // sin TTL
+            return r;
+        }
+        // 403 / "not available in your plan" -> recordar 24h y caer a la tabla local.
+        const msg = String((d && d.message) || '');
+        if (resp.status === 403 || /plan|upgrade|not available|grow/i.test(msg)) {
+            await env.CACHE.put('profile_no_disponible', msg || '403', { expirationTtl: 86400 });
+        }
+        const r = local();
+        if (r.sector) await env.CACHE.put(cacheKey, JSON.stringify(r));
+        return { ...r, nota: r.nota + (msg ? ` (Twelve Data: ${msg})` : '') };
+    } catch (e) {
+        const r = local();
+        return { ...r, nota: r.nota + ` (Twelve Data no accesible: ${e.message || e})` };
+    }
+}
+
+// Traduce un código de periodo a fecha de inicio (YYYY-MM-DD) respecto a hoy.
+function periodoToStartDate(periodo, refDate) {
+    const d = new Date(refDate.getTime());
+    const p = String(periodo || '').toUpperCase();
+    if (p === '1M' || p === 'MENSUAL') d.setMonth(d.getMonth() - 1);
+    else if (p === '3M' || p === 'TRIMESTRAL') d.setMonth(d.getMonth() - 3);
+    else if (p === '6M' || p === 'SEMESTRAL') d.setMonth(d.getMonth() - 6);
+    else if (p === '1A' || p === '1Y' || p === 'ANUAL') d.setFullYear(d.getFullYear() - 1);
+    else if (p === 'YTD') { d.setMonth(0); d.setDate(1); }
+    else if (p === 'MAX') return '1970-01-01';
+    else d.setFullYear(d.getFullYear() - 1); // por defecto, 1 año
+    return d.toISOString().slice(0, 10);
+}
+
+// Alinea una serie diaria de cierres [{fecha, close}] a las fechas de la cartera:
+// para cada fecha toma el último cierre disponible en esa fecha o anterior (los
+// snapshots de cartera pueden caer en fin de semana; el índice no cotiza).
+function alignSeriesToDates(serie, fechas) {
+    if (!serie || !serie.length || !fechas || !fechas.length) return [];
+    const sorted = [...serie].sort((a, b) => a.fecha < b.fecha ? -1 : 1);
+    const out = [];
+    let i = 0, last = null;
+    for (const fecha of fechas) {
+        while (i < sorted.length && sorted[i].fecha <= fecha) { last = sorted[i].close; i++; }
+        if (last != null) out.push({ fecha, valor: last });
+    }
+    return out;
+}
+
+// ============================================================
+// v3 — Series históricas y fuente de benchmark (aisladas)
+// ============================================================
+
+// Series diarias de cierres por ticker con cache-first en KV (`series:{ticker}:{fecha}`,
+// TTL 24h: la serie diaria solo cambia una vez al día). UNA sola llamada batch a
+// Twelve Data para todos los que falten (misma técnica que getTickerPrices).
+// Devuelve { series: {ticker: [{fecha,close}]}, errores: {ticker: 'motivo'} }.
+// Un fallo del proveedor se recuerda SERIES_FAIL_TTL segundos en KV (`series_fail:{t}`)
+// para no volver a pegar a Twelve Data en cada recarga de página (con el plan
+// gratuito, 8 llamadas/min: sin esto, el propio usuario agota el minuto recargando
+// y todo falla en cascada). El motivo del fallo viaja hasta la UI: nunca se traga.
+const SERIES_FAIL_TTL = 300;
+async function getSeriesBatch(env, tickers) {
+    const today = new Date().toISOString().slice(0, 10);
+    const series = {}, errores = {};
+    const misses = [];
+    for (const t of tickers) {
+        const raw = await env.CACHE.get(`series:${t}:${today}`);
+        if (raw) { try { series[t] = JSON.parse(raw); continue; } catch { /* refetch */ } }
+        const fail = await env.CACHE.get(`series_fail:${t}`);
+        if (fail) { errores[t] = fail + ' (se reintenta en unos minutos)'; continue; }
+        misses.push(t);
+    }
+    if (!misses.length) return { series, errores };
+    const remember = async (t, msg) => {
+        errores[t] = msg;
+        try { await env.CACHE.put(`series_fail:${t}`, msg, { expirationTtl: SERIES_FAIL_TTL }); } catch { /* ignore */ }
+    };
+    try {
+        const apiKey = env.TWELVE_DATA_API_KEY;
+        if (!apiKey) throw new Error('TWELVE_DATA_API_KEY no configurada en este entorno');
+        const sym = misses.map(encodeURIComponent).join(',');
+        const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${sym}`
+            + `&interval=1day&outputsize=${RISK_WINDOW}&order=ASC&apikey=${apiKey}`);
+        const d = await r.json();
+        if (d && d.status === 'error') throw new Error(`Twelve Data: ${d.message || d.code || 'error'}`);
+        for (const t of misses) {
+            let values = null, msg = null;
+            if (misses.length === 1 && Array.isArray(d.values)) values = d.values;
+            else if (d[t] && Array.isArray(d[t].values)) values = d[t].values;
+            else if (d[t] && d[t].status === 'error') msg = `Twelve Data: ${d[t].message || 'símbolo no disponible'}`;
+            else msg = 'Twelve Data no devolvió serie para este símbolo';
+            if (values) {
+                const serie = values
+                    .map(v => ({ fecha: (v.datetime || '').slice(0, 10), close: parseFloat(v.close) }))
+                    .filter(x => x.fecha && isFinite(x.close));
+                series[t] = serie;
+                await env.CACHE.put(`series:${t}:${today}`, JSON.stringify(serie), { expirationTtl: 86400 });
+            } else {
+                await remember(t, msg);
+            }
+        }
+    } catch (e) {
+        const msg = String(e && e.message || e);
+        for (const t of misses) await remember(t, msg);
+    }
+    return { series, errores };
+}
+
+// Símbolos de benchmark en Stooq (CSV, sin API key). Fuente de RESERVA cuando
+// Twelve Data no sirve el índice (los anuncia como "coming soon").
+// Nota: en Stooq `^ndq` es el Nasdaq Composite y `^ndx` el Nasdaq 100; se usa
+// `^ndx` para que el benchmark coincida con su nombre. `^ukx` = FTSE 100.
+const STOOQ_SYMBOLS = {
+    SP500: '^spx', NASDAQ100: '^ndx', DOWJONES: '^dji',
+    IBEX35: '^ibex', CAC40: '^cac', DAX: '^dax', FTSE100: '^ukx'
+};
+
+// Cierres diarios del benchmark desde Twelve Data. Devuelve { serie, error }.
+async function fetchBenchmarkClosesTwelveData(env, benchKey) {
+    const b = BENCHMARKS[benchKey];
+    if (!b) return { serie: [], error: 'benchmark no soportado' };
+    const apiKey = env.TWELVE_DATA_API_KEY;
+    if (!apiKey) return { serie: [], error: 'TWELVE_DATA_API_KEY no configurada en este entorno' };
+    try {
+        const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(b.symbol)}`
+            + `&interval=1day&outputsize=${RISK_WINDOW}&order=ASC&apikey=${apiKey}`);
+        const d = await r.json();
+        if (!d || d.status === 'error' || !Array.isArray(d.values)) {
+            return { serie: [], error: `Twelve Data (${b.symbol}): ${(d && d.message) || 'sin datos'}` };
+        }
+        const serie = d.values.map(v => ({ fecha: (v.datetime || '').slice(0, 10), close: parseFloat(v.close) }))
+            .filter(x => x.fecha && isFinite(x.close));
+        return serie.length ? { serie, error: null } : { serie: [], error: `Twelve Data (${b.symbol}): serie vacía` };
+    } catch (e) { return { serie: [], error: `Twelve Data (${b.symbol}): ${e.message || e}` }; }
+}
+
+// Cierres diarios del benchmark desde Stooq (CSV). Devuelve { serie, error }.
+// Si Stooq contesta con HTML o con "Exceeded the daily hits limit", se reporta
+// tal cual en vez de devolver una serie vacía en silencio.
+async function fetchBenchmarkClosesStooq(benchKey) {
+    const sym = STOOQ_SYMBOLS[benchKey];
+    if (!sym) return { serie: [], error: 'benchmark no soportado en Stooq' };
+    try {
+        const r = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&i=d`,
+            { headers: { 'User-Agent': 'Mozilla/5.0 (FinanceFlow cartera)', 'Accept': 'text/csv,*/*' } });
+        const csv = await r.text();
+        if (!r.ok) return { serie: [], error: `Stooq (${sym}): HTTP ${r.status}` };
+        const lines = csv.trim().split('\n');
+        if (lines.length < 2 || !/^date,open,high,low,close/i.test(lines[0])) {
+            const snippet = csv.trim().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+            return { serie: [], error: `Stooq (${sym}): respuesta sin CSV — "${snippet || 'vacía'}"` };
+        }
+        const out = [];
+        for (let i = 1; i < lines.length; i++) {
+            const c = lines[i].split(',');           // Date,Open,High,Low,Close,Volume
+            const fecha = c[0], close = parseFloat(c[4]);
+            if (fecha && isFinite(close)) out.push({ fecha, close });
+        }
+        return out.length ? { serie: out.slice(-RISK_WINDOW), error: null } : { serie: [], error: `Stooq (${sym}): CSV sin filas` };
+    } catch (e) { return { serie: [], error: `Stooq (${sym}): ${e.message || e}` }; }
+}
+
+// Serie diaria del benchmark [{fecha, close}] con cache-first en KV (24h, solo si
+// hubo datos). Orden de proveedores: Twelve Data (si hay key) y, si no sirve el
+// índice, Stooq. Devuelve { serie, fuente: 'twelvedata'|'stooq'|null, errores: [] }
+// para que la UI pueda decir exactamente por qué no hay benchmark.
+async function getBenchmarkDailySeries(env, benchKey) {
+    const today = new Date().toISOString().slice(0, 10);
+    const cacheKey = `series:BENCH_${benchKey}:${today}`;
+    const cached = await env.CACHE.get(cacheKey);
+    if (cached) {
+        try { const c = JSON.parse(cached); if (c && Array.isArray(c.serie) && c.serie.length) return { ...c, errores: [] }; } catch { /* refetch */ }
+    }
+    const errores = [];
+    const td = await fetchBenchmarkClosesTwelveData(env, benchKey);
+    if (td.serie.length) {
+        await env.CACHE.put(cacheKey, JSON.stringify({ serie: td.serie, fuente: 'twelvedata' }), { expirationTtl: 86400 });
+        return { serie: td.serie, fuente: 'twelvedata', errores };
+    }
+    errores.push(td.error);
+    const st = await fetchBenchmarkClosesStooq(benchKey);
+    if (st.serie.length) {
+        await env.CACHE.put(cacheKey, JSON.stringify({ serie: st.serie, fuente: 'stooq' }), { expirationTtl: 86400 });
+        return { serie: st.serie, fuente: 'stooq', errores };
+    }
+    errores.push(st.error);
+    return { serie: [], fuente: null, errores };
+}
+
+// Construye el payload de riesgo (matriz var-cov, betas, volatilidades, clasificación,
+// beta y volatilidad de cartera) a partir de las series y los pesos (tanto por uno).
+async function computeRiskPayload(env, benchKey, positions, weightsByTicker) {
+    const tickers = positions.map(p => p.ticker);
+    // Solo se piden series a Twelve Data para renta variable y cripto: un derivado
+    // ("SOLARIA" como futuro), un bono ("BONO FRANCES") o la liquidez no tienen
+    // símbolo cotizado y solo gastaban cuota para fallar.
+    const conSerie = positions.filter(p => TIPOS_RENTA_VARIABLE.includes(p.tipo_activo) || p.tipo_activo === 'cripto').map(p => p.ticker);
+    const no_aplica = tickers.filter(t => !conSerie.includes(t));
+    const { series: seriesAssets, errores: seriesErrores } = conSerie.length ? await getSeriesBatch(env, conSerie) : { series: {}, errores: {} };
+    const bench = await getBenchmarkDailySeries(env, benchKey);
+    const benchSerie = bench.serie;
+    const hasBench = benchSerie.length > 0;
+
+    const withData = conSerie.filter(t => seriesAssets[t] && seriesAssets[t].length);
+    const sin_serie = conSerie.filter(t => !withData.includes(t));
+    const seriesByKey = {};
+    withData.forEach(t => { seriesByKey[t] = seriesAssets[t]; });
+    if (hasBench) seriesByKey['__BENCH__'] = benchSerie;
+    const keys = hasBench ? [...withData, '__BENCH__'] : [...withData];
+    // MIN_SESSIONS + 1 cierres para que queden >= MIN_SESSIONS rendimientos.
+    const { dates, returns, excluidos } = keys.length ? alignedReturns(seriesByKey, keys, MIN_SESSIONS + 1) : { dates: [], returns: {}, excluidos: [] };
+    const sesiones_por_ticker = {};
+    withData.forEach(t => { sesiones_por_ticker[t] = (seriesAssets[t] || []).length; });
+
+    const betas = {}, volatilidades = {}, clasificacion = {};
+    const benchReturns = returns['__BENCH__'] || [];
+    for (const t of withData) {
+        const rt = returns[t] || [];
+        volatilidades[t] = rt.length >= MIN_SESSIONS ? annualizedVolatility(rt) : null;
+        if (hasBench && rt.length >= MIN_SESSIONS && benchReturns.length >= MIN_SESSIONS) {
+            const b = beta(rt, benchReturns);
+            betas[t] = b; clasificacion[t] = classifyBeta(b);
+        } else { betas[t] = null; clasificacion[t] = null; }
+    }
+    const returnsByTicker = {};
+    withData.forEach(t => { returnsByTicker[t] = returns[t] || []; });
+    const { tickers: sufTickers, matriz } = covarianceMatrix(returnsByTicker, withData);
+    // insuficientes: con serie pero por debajo del mínimo (distinto de "sin serie").
+    const insuficientes = withData.filter(t => !sufTickers.includes(t));
+    const portfolio_volatilidad = portfolioVolatility(weightsByTicker, matriz, sufTickers);
+    const portfolio_beta = portfolioBeta(weightsByTicker, betas);
+
+    const errores = [];
+    for (const t of sin_serie) errores.push(`${t}: ${seriesErrores[t] || 'sin serie de precios'}`);
+    if (!hasBench) for (const e of bench.errores) errores.push(`Benchmark ${benchKey}: ${e}`);
+    if (excluidos.includes('__BENCH__')) errores.push(`Benchmark ${benchKey}: serie demasiado corta (${benchSerie.length} sesiones)`);
+
+    return {
+        benchmark: benchKey, fecha_calculo: new Date().toISOString().slice(0, 10),
+        calculado_en: new Date().toISOString(),
+        sesiones: dates.length, benchmark_disponible: hasBench, fuente_benchmark: bench.fuente,
+        tickers: sufTickers, insuficientes, sin_serie, no_aplica, sesiones_por_ticker, min_sesiones: MIN_SESSIONS,
+        matriz, betas, volatilidades, clasificacion,
+        portfolio_beta, portfolio_volatilidad, errores
+    };
+}
+
+// ---------- Normalizadores v3 ----------
+function _normalizeInstrument(r) {
+    if (!r) return null;
+    const num = v => v == null ? null : Number(v);
+    return {
+        ticker: r.ticker, nombre: r.nombre ?? null, tipo_activo: r.tipo_activo, sector: r.sector ?? null,
+        rf_tipo_interes: num(r.rf_tipo_interes), rf_cupon: num(r.rf_cupon), rf_frecuencia_cupon: r.rf_frecuencia_cupon ?? null,
+        rf_vencimiento: r.rf_vencimiento ?? null, rf_nominal: num(r.rf_nominal),
+        der_tipo: r.der_tipo ?? null, der_vencimiento: r.der_vencimiento ?? null,
+        der_subyacente_cobertura: r.der_subyacente_cobertura ?? null, der_tipo_opcion: r.der_tipo_opcion ?? null,
+        der_prima: num(r.der_prima)
+    };
+}
+
+// v4: la liquidez se CALCULA desde las operaciones (computeCashBalance); la fila
+// de cartera_liquidez solo aporta la configuración de remuneración. Devuelve una
+// entrada por moneda con saldo calculado, desglose e interés devengado.
+function _buildCash(ops, cashRows) {
+    const bal = computeCashBalance(ops);
+    const cfgByMon = {};
+    (cashRows || []).forEach(r => { cfgByMon[(r.moneda || 'EUR').toUpperCase()] = r; });
+    const monedas = new Set([...Object.keys(bal.por_moneda), ...Object.keys(cfgByMon)]);
+    const cash = [];
+    for (const m of monedas) {
+        const b = bal.por_moneda[m] || { moneda: m, saldo: 0, aportaciones: 0, retiradas: 0, compras: 0, ventas: 0, n_aportaciones: 0 };
+        const c = cfgByMon[m] || {};
+        const cfg = {
+            remunerada: (c.remunerada === 1 || c.remunerada === true),
+            tipo_interes_anual: Number(c.tipo_interes_anual) || 0,
+            capitalizacion: c.capitalizacion || 'anual',
+            fecha_inicio: c.fecha_inicio || null
+        };
+        cash.push({ moneda: m, saldo: b.saldo, aportaciones: b.aportaciones, retiradas: b.retiradas,
+            invertido_neto: b.compras - b.ventas, n_aportaciones: b.n_aportaciones,
+            ...cfg, interes_devengado: accruedInterest(b.saldo, cfg), negativo: b.saldo < -EPS });
+    }
+    return { cash, tiene_aportaciones: bal.tiene_aportaciones };
+}
+
+// Contexto de cartera compartido por risk/breakdown/kpis: posiciones con valor de
+// mercado, liquidez (con interés devengado), instrumentos y pesos (incluida la
+// liquidez en el total). weightsInvested excluye el efectivo.
+async function _carteraContext(env, uid) {
+    const { results: ops } = await env.DB.prepare(
+        'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+    const positions = openPositions(ops);
+    const tickers = [...new Set(positions.map(p => p.ticker))];
+    const prices = tickers.length ? await getTickerPrices(tickers, env) : {};
+    const { results: cashRows } = await env.DB.prepare(
+        'SELECT * FROM cartera_liquidez WHERE usuario_id=?').bind(uid).all();
+    const { results: instrRows } = await env.DB.prepare(
+        'SELECT * FROM cartera_instrumentos WHERE usuario_id=?').bind(uid).all();
+    const instrMap = {}; instrRows.forEach(r => { instrMap[r.ticker] = _normalizeInstrument(r); });
+
+    let marketValue = 0;
+    const posValues = positions.map(p => {
+        const pr = prices[p.ticker];
+        const price = pr && pr.price != null && isFinite(pr.price) ? Number(pr.price) : null;
+        // Sin precio de mercado (típico en renta fija / derivados: no hay feed) se
+        // valora a coste (precio_medio × cantidad) para que la posición cuente en
+        // los pesos; se marca con valor_estimado_coste para poder señalarlo en la UI.
+        const valorEsCoste = price == null;
+        const valor = price != null ? price * p.cantidad_abierta : p.precio_medio * p.cantidad_abierta;
+        marketValue += valor;
+        return { ...p, precio_actual: price, valor, valor_estimado_coste: valorEsCoste,
+                 stale: pr ? !!pr.stale : true, instrumento: instrMap[p.ticker] || null };
+    });
+    let cashTotal = 0;
+    const { cash, tiene_aportaciones } = _buildCash(ops, cashRows);
+    cash.forEach(c => { cashTotal += c.saldo + c.interes_devengado; });
+    const totalValue = marketValue + cashTotal;
+
+    // Pesos con la definición única (tanto por uno para el motor de riesgo).
+    const w = computePortfolioWeights(posValues, cashTotal);
+    const weightsTotal = {}, weightsInvested = {};
+    w.items.forEach(p => {
+        weightsTotal[p.ticker] = p.peso_sobre_cartera / 100;
+        weightsInvested[p.ticker] = p.peso_sobre_invertido / 100;
+    });
+    const pesoLiquidez = w.peso_liquidez;
+    return { ops, positions: posValues, prices, cash, cashTotal, tiene_aportaciones, instrMap,
+             marketValue, totalValue, pesoLiquidez, weightsTotal, weightsInvested };
+}
+
+// Snapshot del valor total de la cartera de un usuario en `fecha` (YYYY-MM-DD):
+// valor de las posiciones a mercado (a coste si no hay precio) + liquidez. Lo usa
+// el cron diario y POST /api/portfolio/snapshot (para probar sin cron). Devuelve
+// { guardado, fecha, valor_total, sin_precio } y NO guarda un 0 engañoso si no hay
+// ninguna posición valorada.
+async function snapshotCartera(env, uid, fecha) {
+    const ctx = await _carteraContext(env, uid);
+    const sin_precio = ctx.positions.filter(p => p.precio_actual == null).map(p => p.ticker);
+    const valorados = ctx.positions.filter(p => p.precio_actual != null).length;
+    if (!ctx.positions.length && ctx.cashTotal <= 0) {
+        return { guardado: false, fecha, valor_total: 0, sin_precio, motivo: 'No hay posiciones abiertas ni liquidez que valorar.' };
+    }
+    if (ctx.positions.length && !valorados) {
+        return { guardado: false, fecha, valor_total: ctx.totalValue, sin_precio,
+                 motivo: 'Ninguna posición tiene precio de mercado; no se guarda un valor a coste como si fuera de mercado.' };
+    }
+    await env.DB.prepare(
+        `INSERT INTO cartera_valor_diario (usuario_id, fecha, valor_total) VALUES (?,?,?)
+         ON CONFLICT(usuario_id, fecha) DO UPDATE SET valor_total = excluded.valor_total`)
+        .bind(uid, fecha, ctx.totalValue).run();
+    return { guardado: true, fecha, valor_total: ctx.totalValue, sin_precio, motivo: null };
+}
+
+// Diagnóstico de proveedores DESDE el Worker (con su red y su key reales): qué
+// símbolos de índice responden en Twelve Data y en Stooq, y si /profile está
+// disponible en el plan. Cuesta hasta 8 créditos de Twelve Data (1 batch de 7
+// índices + 1 profile): se limita a una ejecución por minuto y usuario.
+async function providerDiagnostics(env, opts = {}) {
+    const out = { fecha: new Date().toISOString(), twelve_data: { key_configurada: !!env.TWELVE_DATA_API_KEY, indices: {}, profile_AAPL: null }, stooq: {} };
+    const apiKey = env.TWELVE_DATA_API_KEY;
+    if (opts.td !== false && apiKey) {
+        try {
+            const keys = Object.keys(BENCHMARKS);
+            const sym = keys.map(k => BENCHMARKS[k].symbol).join(',');
+            const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1day&outputsize=3&apikey=${apiKey}`);
+            const d = await r.json();
+            for (const k of keys) {
+                const s = BENCHMARKS[k].symbol;
+                const node = keys.length === 1 ? d : d[s];
+                if (d && d.status === 'error') out.twelve_data.indices[k] = { symbol: s, ok: false, error: d.message || d.code };
+                else if (node && Array.isArray(node.values) && node.values.length) out.twelve_data.indices[k] = { symbol: s, ok: true, n: node.values.length, ultima_fecha: node.values[0].datetime };
+                else out.twelve_data.indices[k] = { symbol: s, ok: false, error: (node && node.message) || 'sin datos' };
+            }
+        } catch (e) { out.twelve_data.error = String(e.message || e); }
+        try {
+            const r = await fetch(`https://api.twelvedata.com/profile?symbol=AAPL&apikey=${apiKey}`);
+            const d = await r.json();
+            const ok = !!(d && d.status !== 'error' && (d.sector || d.industry || d.name));
+            out.twelve_data.profile_AAPL = { ok, http: r.status, disponible_en_plan: ok, sector: ok ? (d.sector || null) : null,
+                error: ok ? null : ((d && d.message) || `HTTP ${r.status}`), code: d && d.code };
+        } catch (e) { out.twelve_data.profile_AAPL = { ok: false, error: String(e.message || e) }; }
+    } else if (opts.td !== false) {
+        out.twelve_data.error = 'TWELVE_DATA_API_KEY no configurada en este entorno';
+    }
+    if (opts.stooq !== false) {
+        for (const k of Object.keys(STOOQ_SYMBOLS)) {
+            const r = await fetchBenchmarkClosesStooq(k);
+            out.stooq[k] = { symbol: STOOQ_SYMBOLS[k], ok: r.serie.length > 0, n: r.serie.length,
+                ultima_fecha: r.serie.length ? r.serie[r.serie.length - 1].fecha : null, error: r.error };
+        }
+    }
+    return out;
+}
+
+// Señales sobre la salud del modelo de liquidez: si el usuario nunca registró una
+// aportación, su efectivo sale negativo por exactamente lo invertido y el valor
+// total de la cartera queda cerca de cero, con lo que los pesos dejan de ser
+// representativos. Se reporta para explicarlo en pantalla, no se disimula.
+function _avisosCartera(ctx) {
+    const falta_aportacion_inicial = ctx.cashTotal < -EPS && !ctx.tiene_aportaciones;
+    const pesos_fiables = ctx.totalValue > EPS && (ctx.marketValue <= EPS || ctx.totalValue >= ctx.marketValue * 0.05);
+    const avisos = [];
+    if (falta_aportacion_inicial) {
+        avisos.push('No has registrado ninguna aportación de efectivo, así que la liquidez sale negativa por todo lo invertido '
+            + `(${ctx.cashTotal.toFixed(2)}). Registra una aportación por el capital con el que empezaste y los pesos cuadrarán.`);
+    } else if (ctx.cash.some(c => c.negativo)) {
+        avisos.push('El saldo de liquidez es negativo: has invertido más de lo aportado (cuenta con margen o falta registrar una aportación).');
+    }
+    if (!pesos_fiables) {
+        avisos.push('El valor total de la cartera (posiciones + liquidez) es casi cero o negativo, así que los porcentajes de peso no son representativos.');
+    }
+    return { falta_aportacion_inicial, pesos_fiables, avisos };
+}
+
+// Riesgo desde caché (si es de hoy) o recalculado y guardado.
+// - Un cálculo con errores de proveedor (parcial) solo se reutiliza RISK_PARTIAL_TTL_MS:
+//   antes, un fallo transitorio a primera hora dejaba la matriz vacía todo el día.
+// - La caché se borra al registrar/cerrar operaciones (_invalidateRisk): antes,
+//   añadir posiciones no cambiaba nada hasta el día siguiente.
+// - `refresh=true` fuerza el recálculo (botón "Recalcular" de la UI).
+const RISK_PARTIAL_TTL_MS = 10 * 60 * 1000;
+async function _invalidateRisk(env, uid) {
+    try { await env.DB.prepare('DELETE FROM cartera_riesgo_cache WHERE usuario_id=?').bind(uid).run(); } catch { /* ignore */ }
+}
+async function _riskCachedOrCompute(env, uid, benchKey, ctx, refresh = false) {
+    const today = new Date().toISOString().slice(0, 10);
+    const cached = refresh ? null : await env.DB.prepare(
+        'SELECT payload, fecha_calculo FROM cartera_riesgo_cache WHERE usuario_id=? AND benchmark=?')
+        .bind(uid, benchKey).first();
+    if (cached && cached.fecha_calculo === today) {
+        try {
+            const p = JSON.parse(cached.payload);
+            const parcial = (p.errores && p.errores.length) || !p.benchmark_disponible;
+            const edad = Date.now() - new Date(p.calculado_en || 0).getTime();
+            if (!parcial || edad < RISK_PARTIAL_TTL_MS) return { ...p, desde_cache: true };
+        } catch { /* recompute */ }
+    }
+    const payload = await computeRiskPayload(env, benchKey, ctx.positions, ctx.weightsTotal);
+    await env.DB.prepare(
+        `INSERT INTO cartera_riesgo_cache (usuario_id,benchmark,fecha_calculo,payload) VALUES (?,?,?,?)
+         ON CONFLICT(usuario_id,benchmark) DO UPDATE SET fecha_calculo=excluded.fecha_calculo, payload=excluded.payload`)
+        .bind(uid, benchKey, today, JSON.stringify(payload)).run();
+    return payload;
+}
+
+// Agrupa las posiciones por clase de activo con sus campos específicos + pesos.
+function _buildBreakdown(ctx, risk) {
+    const total = ctx.totalValue, invertido = ctx.marketValue;
+    const wpct = v => weightPct(v, total);
+    const betas = (risk && risk.betas) || {}, clasi = (risk && risk.clasificacion) || {};
+    const rv = [], rf = [], der = [], cripto = [];
+    ctx.positions.forEach(p => {
+        const ins = p.instrumento || {};
+        // Total invertido de la posición: coste medio × unidades + comisiones de entrada.
+        const coste = p.precio_medio * p.cantidad_abierta;
+        const base = {
+            ticker: p.ticker, nombre: ins.nombre || null, unidades: p.cantidad_abierta,
+            peso_sobre_cartera: wpct(p.valor), peso_sobre_invertido: weightPct(p.valor, invertido),
+            valor: p.valor, coste, total_invertido: coste + (p.comision_total_pagada || 0),
+            beneficio: p.valor != null ? p.valor - coste : null,
+            tipo_activo: p.tipo_activo, precio_medio: p.precio_medio, precio_actual: p.precio_actual, stale: p.stale
+        };
+        if (TIPOS_RENTA_VARIABLE.includes(p.tipo_activo)) {
+            rv.push({ ...base, beta: betas[p.ticker] ?? null, clasificacion: clasi[p.ticker] ?? null, sector: ins.sector || null });
+        } else if (p.tipo_activo === 'renta_fija') {
+            let dur = null;
+            if (ins.rf_vencimiento && ins.rf_nominal) {
+                dur = bondDuration({ cupon_pct: ins.rf_cupon, frecuencia: ins.rf_frecuencia_cupon,
+                    vencimiento: ins.rf_vencimiento, nominal: ins.rf_nominal, ytm_pct: ins.rf_tipo_interes });
+            }
+            rf.push({ ...base, tipo_interes: ins.rf_tipo_interes ?? null, cupon: ins.rf_cupon ?? null,
+                frecuencia_cupon: ins.rf_frecuencia_cupon ?? null, vencimiento: ins.rf_vencimiento ?? null, nominal: ins.rf_nominal ?? null,
+                duracion_macaulay: dur ? dur.macaulay : null, duracion_modificada: dur ? dur.modificada : null });
+        } else if (p.tipo_activo === 'derivado') {
+            der.push({ ...base, der_tipo: ins.der_tipo ?? null, der_vencimiento: ins.der_vencimiento ?? null,
+                der_subyacente_cobertura: ins.der_subyacente_cobertura ?? null, der_tipo_opcion: ins.der_tipo_opcion ?? null, der_prima: ins.der_prima ?? null });
+        } else if (p.tipo_activo === 'cripto') {
+            cripto.push({ ...base, tipo_activo: 'cripto' });
+        } else {
+            rv.push({ ...base, beta: null, clasificacion: null, sector: ins.sector || null });
+        }
+    });
+    const liquidez = ctx.cash.map(c => ({ ...c, valor: c.saldo + c.interes_devengado,
+        peso_sobre_cartera: wpct(c.saldo + c.interes_devengado), peso_sobre_invertido: null }));
+
+    // Cuadre exacto al 100%: se ajusta sobre la lista completa (posiciones + liquidez)
+    // y luego se reparte de vuelta a cada clase, para que la suma de los totales de
+    // todas las tablas dé exactamente 100%.
+    const planas = [...rv, ...rf, ...der, ...cripto, ...liquidez];
+    const ajustadas = adjustTo100(planas, 'peso_sobre_cartera');
+    ajustadas.forEach((it, i) => { planas[i].peso_sobre_cartera = it.peso_sobre_cartera; });
+
+    // Fila de totales por clase (Bloque 5): unidades solo donde tiene sentido
+    // (sumar unidades de tickers distintos no significa nada en renta variable).
+    const sumar = (arr, k) => arr.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+    const totalesDe = (arr, conUnidades) => ({
+        n: arr.length,
+        unidades: conUnidades ? sumar(arr, 'unidades') : null,
+        total_invertido: sumar(arr, 'total_invertido'),
+        valor: sumar(arr, 'valor'),
+        peso_sobre_cartera: sumar(arr, 'peso_sobre_cartera'),
+        beneficio: arr.some(x => x.beneficio != null) ? sumar(arr, 'beneficio') : null
+    });
+    const clases = { renta_variable: rv, renta_fija: rf, derivados: der, cripto, liquidez };
+    const totales = {
+        renta_variable: totalesDe(rv, false), renta_fija: totalesDe(rf, true),
+        derivados: totalesDe(der, true), cripto: totalesDe(cripto, false),
+        liquidez: { n: liquidez.length, unidades: null, total_invertido: null,
+                    valor: sumar(liquidez, 'valor'), peso_sobre_cartera: sumar(liquidez, 'peso_sobre_cartera'), beneficio: null }
+    };
+    totales.suma_pesos = Object.values(totales).reduce((a, t) => a + (Number(t.peso_sobre_cartera) || 0), 0);
+    return { benchmark: risk ? risk.benchmark : null, total, valor_posiciones: ctx.marketValue,
+             cashTotal: ctx.cashTotal, clases, totales, ..._avisosCartera(ctx) };
+}
+
+// KPIs agregados de la cartera.
+function _buildKpis(ctx, risk, journal) {
+    const total = ctx.totalValue, marketValue = ctx.marketValue, cashTotal = ctx.cashTotal;
+    let coste = 0, pnlNoReal = 0;
+    ctx.positions.forEach(p => {
+        const base = p.precio_medio * p.cantidad_abierta;
+        coste += base;
+        if (p.valor != null) pnlNoReal += p.valor - base;
+    });
+    const clsW = { renta_variable: 0, renta_fija: 0, derivados: 0, cripto: 0, liquidez: weightPct(cashTotal, total) };
+    ctx.positions.forEach(p => {
+        const w = weightPct(p.valor, total);
+        if (TIPOS_RENTA_VARIABLE.includes(p.tipo_activo)) clsW.renta_variable += w;
+        else if (p.tipo_activo === 'renta_fija') clsW.renta_fija += w;
+        else if (p.tipo_activo === 'derivado') clsW.derivados += w;
+        else if (p.tipo_activo === 'cripto') clsW.cripto += w;
+        else clsW.renta_variable += w;
+    });
+    const pnlReal = journal.totales.beneficio_total;
+    return {
+        valor_mercado_total: total,
+        valor_posiciones: marketValue,
+        coste_total_invertido: coste,
+        pnl_no_realizado: pnlNoReal,
+        pnl_realizado: pnlReal,
+        rentabilidad_total_pct: coste > 0 ? (pnlNoReal + pnlReal) / coste * 100 : null,
+        beta_cartera: risk ? risk.portfolio_beta : null,
+        volatilidad_anualizada_pct: risk && risk.portfolio_volatilidad != null ? risk.portfolio_volatilidad * 100 : null,
+        comisiones_totales: journal.totales.comisiones_totales,
+        pct_liquidez: total > 0 ? cashTotal / total * 100 : 0,
+        saldo_liquidez: cashTotal,
+        liquidez_negativa: ctx.cash.some(c => c.negativo),
+        tiene_aportaciones: !!ctx.tiene_aportaciones,
+        ..._avisosCartera(ctx),
+        peso_por_clase: clsW
+    };
+}
+
+// ============================================================
 // ROUTER
 // ============================================================
 export default {
@@ -395,6 +1138,17 @@ export default {
         try {
             // ---------- HEALTH ----------
             if (path === '/api/health') return json({ ok: true, ts: Date.now() }, 200, cors);
+
+            // ---------- UI CARTERA (página standalone, servida por el Worker) ----------
+            // Pública (la propia página pide el JWT); mismo origen que la API para
+            // poder verificarla con `wrangler dev` sin CORS. En producción la web
+            // estática va por Pages; esto es sobre todo para pruebas locales.
+            if ((path === '/cartera' || path === '/cartera.html') && method === 'GET') {
+                return new Response(CARTERA_HTML, {
+                    status: 200,
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+                });
+            }
 
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
@@ -1264,6 +2018,406 @@ export default {
                 }
             }
 
+            // ---------- CARTERA DE INVERSIÓN v2 (basada en histórico de operaciones) ----------
+            // POST /api/portfolio/operations — registra una compra o venta.
+            if (path === '/api/portfolio/operations' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const o = await request.json();
+                // v4: aportación / retirada de efectivo — solo importe, moneda y fecha.
+                if (o && CASH_OPS.includes(o.tipo_operacion)) {
+                    if (!o.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(o.fecha)) return json({ error: 'fecha obligatoria con formato YYYY-MM-DD' }, 400, cors);
+                    const importe = Number(o.importe);
+                    if (!isFinite(importe) || importe <= 0) return json({ error: 'importe debe ser un número positivo (> 0)' }, 400, cors);
+                    const moneda = String(o.moneda || 'EUR').toUpperCase();
+                    const res = await env.DB.prepare(
+                        `INSERT INTO cartera_operaciones
+                            (usuario_id,ticker,tipo_activo,tipo_operacion,fecha,cantidad,precio,comision,moneda,broker_origen,created_at,importe)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+                        .bind(uid, CASH_TICKER, 'liquidez', o.tipo_operacion, o.fecha, 0, 0, 0, moneda, o.broker_origen ?? null,
+                              new Date().toISOString(), importe).run();
+                    await _invalidateRisk(env, uid);
+                    const { results: allOps } = await env.DB.prepare('SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+                    const bal = computeCashBalance(allOps);
+                    const b = bal.por_moneda[moneda];
+                    return json({ id: res.meta && res.meta.last_row_id, tipo_operacion: o.tipo_operacion, importe, moneda,
+                                  liquidez: { moneda, saldo: b ? b.saldo : 0, negativo: !!(b && b.saldo < -EPS) } }, 201, cors);
+                }
+                if (!o || !o.ticker || !o.tipo_activo || !o.tipo_operacion || !o.fecha
+                    || o.cantidad == null || o.precio == null) {
+                    return json({ error: 'Campos obligatorios: ticker, tipo_activo, tipo_operacion, fecha, cantidad, precio' }, 400, cors);
+                }
+                if (!TIPOS_ACTIVO.includes(o.tipo_activo)) {
+                    return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
+                }
+                if (o.tipo_operacion !== 'compra' && o.tipo_operacion !== 'venta') {
+                    return json({ error: "tipo_operacion debe ser 'compra', 'venta', 'aportacion' o 'retirada'" }, 400, cors);
+                }
+                if (o.tipo_activo === 'liquidez') return json({ error: "La liquidez se registra con tipo_operacion 'aportacion' o 'retirada'" }, 400, cors);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(o.fecha)) {
+                    return json({ error: 'fecha debe tener formato YYYY-MM-DD' }, 400, cors);
+                }
+                const cantidad = Number(o.cantidad);
+                if (!isFinite(cantidad) || cantidad <= 0) return json({ error: 'cantidad debe ser un número positivo (> 0)' }, 400, cors);
+                const precio = Number(o.precio);
+                if (!isFinite(precio) || precio <= 0) return json({ error: 'precio debe ser un número positivo (> 0)' }, 400, cors);
+                const comision = o.comision != null ? Number(o.comision) : 0;
+                if (!isFinite(comision) || comision < 0) return json({ error: 'comision no puede ser negativa' }, 400, cors);
+                const ticker = String(o.ticker).toUpperCase();
+
+                if (o.tipo_operacion === 'venta') {
+                    const { results: prev } = await env.DB.prepare(
+                        'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
+                    const abierta = openQty(prev, ticker);
+                    if (cantidad > abierta + EPS) {
+                        return json({ error: `No puedes vender ${cantidad} de ${ticker}: solo tienes ${abierta} abiertas.` }, 400, cors);
+                    }
+                }
+                const res = await env.DB.prepare(
+                    `INSERT INTO cartera_operaciones
+                        (usuario_id,ticker,tipo_activo,tipo_operacion,fecha,cantidad,precio,comision,moneda,broker_origen,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+                    .bind(uid, ticker, o.tipo_activo, o.tipo_operacion, o.fecha, cantidad, precio, comision,
+                          o.moneda || 'EUR', o.broker_origen ?? null, new Date().toISOString()).run();
+                const newId = res.meta && res.meta.last_row_id;
+                await _invalidateRisk(env, uid);
+                // Devolver la operación creada + la posición recalculada del ticker + el
+                // saldo de liquidez resultante. Decisión v4: una compra que supera el saldo
+                // se PERMITE (brokers con margen) pero se avisa; el saldo negativo se destaca.
+                const { results: all } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+                const agg = aggregate(all.filter(x => x.ticker === ticker)).get(ticker);
+                const bal = computeCashBalance(all);
+                const mon = (o.moneda || 'EUR').toUpperCase();
+                const b = bal.por_moneda[mon] || { saldo: 0 };
+                const liquidez = { moneda: mon, saldo: b.saldo, negativo: b.saldo < -EPS, tiene_aportaciones: bal.tiene_aportaciones,
+                    aviso: b.saldo < -EPS ? `El saldo de liquidez en ${mon} queda negativo (${b.saldo.toFixed(2)}). Se ha registrado igualmente; si no operas con margen, registra la aportación correspondiente.` : null };
+                return json({ id: newId, ticker, tipo_operacion: o.tipo_operacion,
+                              posicion: agg ? positionFrom(agg) : null, liquidez }, 201, cors);
+            }
+
+            // GET /api/portfolio/holdings?estado=abiertas|cerradas|todas — posiciones agregadas.
+            if (path === '/api/portfolio/holdings' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
+                const estado = url.searchParams.get('estado') || 'abiertas';
+                const todas = [...aggregate(results).values()].map(positionFrom);
+                let out;
+                if (estado === 'cerradas') out = todas.filter(p => p.cantidad_abierta <= EPS);
+                else if (estado === 'todas') out = todas;
+                else out = todas.filter(p => p.cantidad_abierta > EPS);
+                // Bloque 4: peso_sobre_cartera con la definición única (necesita valor de
+                // mercado y liquidez) y tiempo abierto de cada posición.
+                const ctxH = await _carteraContext(env, uid);
+                const valorPorTicker = {};
+                ctxH.positions.forEach(p => { valorPorTicker[p.ticker] = p.valor; });
+                const hoyH = new Date().toISOString().slice(0, 10);
+                out = out.map(p => ({
+                    ...p,
+                    valor: valorPorTicker[p.ticker] ?? null,
+                    peso_sobre_cartera: weightPct(valorPorTicker[p.ticker], ctxH.totalValue),
+                    peso_sobre_invertido: weightPct(valorPorTicker[p.ticker], ctxH.marketValue),
+                    tiempo_abierto: p.primera_compra
+                        ? formatDuration(p.primera_compra, p.cantidad_abierta > EPS ? hoyH : (p.ultima_venta || hoyH))
+                        : null
+                }));
+                return json(out, 200, cors);
+            }
+
+            // POST /api/portfolio/close — cierra la posición abierta de un ticker (venta total).
+            if (path === '/api/portfolio/close' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const b = await request.json();
+                if (!b || !b.ticker || b.precio_cierre == null || !b.fecha_cierre) {
+                    return json({ error: 'Campos obligatorios: ticker, precio_cierre, fecha_cierre' }, 400, cors);
+                }
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha_cierre)) {
+                    return json({ error: 'fecha_cierre debe tener formato YYYY-MM-DD' }, 400, cors);
+                }
+                const precioCierre = Number(b.precio_cierre);
+                if (!isFinite(precioCierre) || precioCierre <= 0) return json({ error: 'precio_cierre debe ser un número positivo (> 0)' }, 400, cors);
+                const comSalida = b.comision_salida != null ? Number(b.comision_salida) : 0;
+                if (!isFinite(comSalida) || comSalida < 0) return json({ error: 'comision_salida no puede ser negativa' }, 400, cors);
+                const ticker = String(b.ticker).toUpperCase();
+
+                const { results } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? AND ticker=?').bind(uid, ticker).all();
+                const cl = computeClose(results, ticker, precioCierre, comSalida);
+                if (!cl) return json({ error: `No hay posición abierta de ${ticker} para cerrar` }, 400, cors);
+
+                await env.DB.prepare(
+                    `INSERT INTO cartera_operaciones
+                        (usuario_id,ticker,tipo_activo,tipo_operacion,fecha,cantidad,precio,comision,moneda,broker_origen,created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+                    .bind(uid, ticker, cl.tipo_activo, 'venta', b.fecha_cierre, cl.cantidad, precioCierre, comSalida,
+                          cl.moneda, b.broker_origen ?? null, new Date().toISOString()).run();
+                await _invalidateRisk(env, uid);
+
+                return json({
+                    ticker, cantidad_cerrada: cl.cantidad, precio_medio: cl.precio_medio, precio_cierre: precioCierre,
+                    comision_entrada_proporcional: cl.comision_entrada_proporcional, comision_salida: comSalida,
+                    beneficio: cl.beneficio, rentabilidad_pct: cl.rentabilidad_pct
+                }, 200, cors);
+            }
+
+            // GET /api/portfolio/journal — diario de operaciones con filtros + totales.
+            if (path === '/api/portfolio/journal' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                // El P&L realizado se calcula sobre TODO el histórico (para que el precio
+                // medio sea correcto); los filtros se aplican después, solo a la vista.
+                const { results: allOps } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
+                const { rows, totales: jTotales } = buildJournal(allOps);
+
+                const desde = url.searchParams.get('desde');
+                const hasta = url.searchParams.get('hasta');
+                const fTicker = url.searchParams.get('ticker');
+                const fTipo = url.searchParams.get('tipo_operacion');
+                let view = rows;
+                if (desde) view = view.filter(r => r.fecha >= desde);
+                if (hasta) view = view.filter(r => r.fecha <= hasta);
+                if (fTicker) view = view.filter(r => r.ticker === String(fTicker).toUpperCase());
+                if (fTipo) view = view.filter(r => r.tipo_operacion === fTipo);
+
+                const ventas = view.filter(r => r.tipo_operacion === 'venta');
+                const beneficio_total = ventas.reduce((a, r) => a + (r.beneficio || 0), 0);
+                const baseTotal = ventas.reduce((a, r) => a + (r.base_venta || 0), 0);
+                // Comisión real pagada por operación: compra -> comision_entrada; venta -> comision_salida.
+                const comisiones_totales = view.reduce((a, r) =>
+                    a + (r.tipo_operacion === 'compra' ? (r.comision_entrada || 0) : (r.comision_salida || 0)), 0);
+                // Peso REAL de lo que sigue abierto sobre la cartera de hoy (liquidez
+                // incluida). Antes esto era un 100% fijo normalizado sobre sí mismo:
+                // tras una venta seguía marcando 100% y no informaba de nada. Si hoy las
+                // posiciones abiertas son el 62% de la cartera, aquí pone 62%.
+                const ctxJ = await _carteraContext(env, uid);
+                const totales = {
+                    beneficio_total,
+                    comisiones_totales,
+                    rentabilidad_pct_media_ponderada: baseTotal > 0 ? (beneficio_total / baseTotal) * 100 : 0,
+                    coste_abierto: jTotales.coste_abierto,
+                    capital_invertido_bruto: jTotales.capital_invertido_bruto,
+                    peso_abierto_sobre_cartera_pct: weightPct(ctxJ.marketValue, ctxJ.totalValue),
+                    peso_liquidez_pct: ctxJ.pesoLiquidez,
+                    valor_posiciones: ctxJ.marketValue,
+                    valor_cartera: ctxJ.totalValue
+                };
+                // No exponemos el campo interno base_venta.
+                const cleanRows = view.map(({ base_venta, ...r }) => r);
+                return json({ rows: cleanRows, totales }, 200, cors);
+            }
+
+            // GET /api/portfolio/allocation — peso de cada posición sobre el valor de mercado.
+            if (path === '/api/portfolio/allocation' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=?').bind(uid).all();
+                const pos = openPositions(results);
+                const tickers = [...new Set(pos.map(p => p.ticker))];
+                const ctxAlloc = await _carteraContext(env, uid);
+                const prices = tickers.length ? await getTickerPrices(tickers, env) : {};
+                const { items, total } = computeAllocation(pos, prices, ctxAlloc.cashTotal);
+                // Nunca en silencio: decir qué tickers no tienen precio y por qué.
+                const sin_precio = items.filter(i => i.valor == null).map(i => i.ticker);
+                const errores = [];
+                if (sin_precio.length) {
+                    errores.push(env.TWELVE_DATA_API_KEY
+                        ? `El proveedor de precios (Twelve Data) no devolvió cotización para: ${sin_precio.join(', ')}`
+                        : 'TWELVE_DATA_API_KEY no configurada en este entorno: no hay precios de mercado');
+                }
+                return json({ items, total, sin_precio, errores }, 200, cors);
+            }
+
+            // GET /api/portfolio/history — serie diaria de valor de cartera + benchmark.
+            if (path === '/api/portfolio/history' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const periodo = url.searchParams.get('periodo') || '1A';
+                const benchKey = (url.searchParams.get('benchmark') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const start = periodoToStartDate(periodo, new Date());
+                const { results } = await env.DB.prepare(
+                    'SELECT fecha, valor_total FROM cartera_valor_diario WHERE usuario_id=? AND fecha>=? ORDER BY fecha ASC')
+                    .bind(uid, start).all();
+                const portfolio = results.map(r => ({ fecha: r.fecha, valor: Number(r.valor_total) }));
+
+                let benchmark = null;
+                if (benchKey) {
+                    const bench = BENCHMARKS[benchKey];
+                    if (!bench) {
+                        benchmark = { key: benchKey, error: 'benchmark no soportado', soportados: Object.keys(BENCHMARKS), serie: [] };
+                    } else {
+                        // Misma fuente (Twelve Data -> Stooq) que /risk, alineada a las fechas de la cartera.
+                        const b = await getBenchmarkDailySeries(env, benchKey);
+                        const serie = portfolio.length ? alignSeriesToDates(b.serie, portfolio.map(p => p.fecha)) : [];
+                        benchmark = { key: benchKey, symbol: bench.symbol, nombre: bench.nombre, serie,
+                                      fuente: b.fuente, errores: b.errores, sesiones_disponibles: b.serie.length };
+                    }
+                }
+                const motivo = portfolio.length ? null
+                    : 'Aún no hay snapshots diarios de tu cartera. En producción los genera el cron cada día; aquí puedes generar el de hoy con "Generar snapshot".';
+                return json({ periodo, desde: start, portfolio, benchmark, motivo }, 200, cors);
+            }
+
+            // GET /api/portfolio/daily-return — rentabilidad diaria y acumulada del periodo.
+            if (path === '/api/portfolio/daily-return' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const periodo = url.searchParams.get('periodo') || 'mensual';
+                const start = periodoToStartDate(periodo, new Date());
+                const { results } = await env.DB.prepare(
+                    'SELECT fecha, valor_total FROM cartera_valor_diario WHERE usuario_id=? ORDER BY fecha ASC').bind(uid).all();
+                const serie = results.map(r => ({ fecha: r.fecha, valor: Number(r.valor_total) }));
+
+                let valor_actual = null, fecha_actual = null, valor_anterior = null, rentabilidad_diaria_pct = null;
+                if (serie.length >= 1) { valor_actual = serie[serie.length - 1].valor; fecha_actual = serie[serie.length - 1].fecha; }
+                if (serie.length >= 2) {
+                    valor_anterior = serie[serie.length - 2].valor;
+                    rentabilidad_diaria_pct = valor_anterior > 0 ? ((valor_actual - valor_anterior) / valor_anterior) * 100 : null;
+                }
+                const enRango = serie.filter(s => s.fecha >= start);
+                let valor_inicial = null, fecha_inicial = null, rentabilidad_acumulada_pct = null;
+                if (enRango.length >= 1) {
+                    valor_inicial = enRango[0].valor; fecha_inicial = enRango[0].fecha;
+                    if (valor_inicial > 0 && valor_actual != null) {
+                        rentabilidad_acumulada_pct = ((valor_actual - valor_inicial) / valor_inicial) * 100;
+                    }
+                }
+                return json({ periodo, rentabilidad_diaria_pct, rentabilidad_acumulada_pct,
+                              valor_actual, valor_anterior, valor_inicial, fecha_actual, fecha_inicial }, 200, cors);
+            }
+
+            // GET/PUT /api/portfolio/instruments/:ticker — atributos manuales del instrumento.
+            const instrMatch = path.match(/^\/api\/portfolio\/instruments\/(.+)$/);
+            if (instrMatch) {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const ticker = decodeURIComponent(instrMatch[1].split('?')[0]).toUpperCase();
+                if (method === 'GET') {
+                    const row = await env.DB.prepare(
+                        'SELECT * FROM cartera_instrumentos WHERE usuario_id=? AND ticker=?').bind(uid, ticker).first();
+                    return json(_normalizeInstrument(row) || { ticker }, 200, cors);
+                }
+                if (method === 'PUT') {
+                    const b = await request.json();
+                    if (b.tipo_activo && !TIPOS_ACTIVO.includes(b.tipo_activo)) {
+                        return json({ error: `tipo_activo inválido. Debe ser uno de: ${TIPOS_ACTIVO.join(', ')}` }, 400, cors);
+                    }
+                    const n = v => (v == null || v === '') ? null : Number(v);
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_instrumentos
+                            (usuario_id,ticker,nombre,tipo_activo,sector,rf_tipo_interes,rf_cupon,rf_frecuencia_cupon,
+                             rf_vencimiento,rf_nominal,der_tipo,der_vencimiento,der_subyacente_cobertura,der_tipo_opcion,der_prima)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         ON CONFLICT(usuario_id,ticker) DO UPDATE SET nombre=excluded.nombre, tipo_activo=excluded.tipo_activo,
+                             sector=excluded.sector, rf_tipo_interes=excluded.rf_tipo_interes, rf_cupon=excluded.rf_cupon,
+                             rf_frecuencia_cupon=excluded.rf_frecuencia_cupon, rf_vencimiento=excluded.rf_vencimiento,
+                             rf_nominal=excluded.rf_nominal, der_tipo=excluded.der_tipo, der_vencimiento=excluded.der_vencimiento,
+                             der_subyacente_cobertura=excluded.der_subyacente_cobertura, der_tipo_opcion=excluded.der_tipo_opcion,
+                             der_prima=excluded.der_prima`)
+                        .bind(uid, ticker, b.nombre ?? null, b.tipo_activo ?? 'accion', b.sector ?? null,
+                              n(b.rf_tipo_interes), n(b.rf_cupon), b.rf_frecuencia_cupon ?? null, b.rf_vencimiento ?? null, n(b.rf_nominal),
+                              b.der_tipo ?? null, b.der_vencimiento ?? null, b.der_subyacente_cobertura ?? null,
+                              b.der_tipo_opcion ?? null, n(b.der_prima)).run();
+                    const row = await env.DB.prepare(
+                        'SELECT * FROM cartera_instrumentos WHERE usuario_id=? AND ticker=?').bind(uid, ticker).first();
+                    return json(_normalizeInstrument(row), 200, cors);
+                }
+            }
+
+            // GET/PUT /api/portfolio/cash — liquidez con interés devengado calculado.
+            if (path === '/api/portfolio/cash') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (method === 'GET') {
+                    const ctx = await _carteraContext(env, uid);
+                    return json({ cash: ctx.cash, total: ctx.cashTotal, tiene_aportaciones: ctx.tiene_aportaciones,
+                                  nota: 'El saldo se calcula desde las operaciones (aportaciones, retiradas, compras y ventas); no es editable.' }, 200, cors);
+                }
+                if (method === 'PUT') {
+                    // v4: solo configuración de remuneración. `saldo` se ignora (se calcula).
+                    const b = await request.json();
+                    const moneda = (b.moneda || 'EUR').toUpperCase();
+                    const saldo = 0;
+                    const tin = b.tipo_interes_anual != null ? Number(b.tipo_interes_anual) : 0;
+                    if (!isFinite(tin) || tin < 0) return json({ error: 'tipo_interes_anual no puede ser negativo' }, 400, cors);
+                    const capOK = ['anual', 'semestral', 'trimestral', 'mensual', 'diaria'];
+                    const cap = capOK.includes(b.capitalizacion) ? b.capitalizacion : 'anual';
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_liquidez (usuario_id,moneda,saldo,remunerada,tipo_interes_anual,capitalizacion,fecha_inicio)
+                         VALUES (?,?,?,?,?,?,?)
+                         ON CONFLICT(usuario_id,moneda) DO UPDATE SET saldo=excluded.saldo, remunerada=excluded.remunerada,
+                             tipo_interes_anual=excluded.tipo_interes_anual, capitalizacion=excluded.capitalizacion,
+                             fecha_inicio=excluded.fecha_inicio`)
+                        .bind(uid, moneda, saldo, b.remunerada ? 1 : 0, tin, cap, b.fecha_inicio ?? null).run();
+                    const ctx = await _carteraContext(env, uid);
+                    return json(ctx.cash.find(c => c.moneda === moneda) || { moneda }, 200, cors);
+                }
+            }
+
+            // GET /api/portfolio/risk?benchmark=X — matriz var-cov, betas, clasificación, volatilidades.
+            if (path === '/api/portfolio/risk' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const refresh = url.searchParams.get('refresh') === '1';
+                const ctx = await _carteraContext(env, uid);
+                const payload = await _riskCachedOrCompute(env, uid, benchKey, ctx, refresh);
+                return json(payload, 200, cors);
+            }
+
+            // GET /api/portfolio/breakdown?benchmark=X — posiciones agrupadas por clase de activo.
+            if (path === '/api/portfolio/breakdown' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const ctx = await _carteraContext(env, uid);
+                const risk = await _riskCachedOrCompute(env, uid, benchKey, ctx);
+                const bd = _buildBreakdown(ctx, risk);
+                return json(bd, 200, cors);
+            }
+
+            // GET /api/portfolio/kpis?benchmark=X — KPIs agregados.
+            if (path === '/api/portfolio/kpis' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const benchKey = (url.searchParams.get('benchmark') || 'SP500').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const ctx = await _carteraContext(env, uid);
+                const risk = await _riskCachedOrCompute(env, uid, benchKey, ctx);
+                const { results: allOps } = await env.DB.prepare(
+                    'SELECT * FROM cartera_operaciones WHERE usuario_id=? ORDER BY fecha ASC, id ASC').bind(uid).all();
+                const journal = buildJournal(allOps);
+                return json(_buildKpis(ctx, risk, journal), 200, cors);
+            }
+
+            // POST /api/portfolio/snapshot — genera el snapshot de HOY bajo demanda (staging sin cron).
+            if (path === '/api/portfolio/snapshot' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const today = new Date().toISOString().slice(0, 10);
+                const r = await snapshotCartera(env, uid, today);
+                return json(r, r.guardado ? 200 : 409, cors);
+            }
+
+            // GET /api/portfolio/sector?ticker=AAPL — sector automático (Twelve Data o tabla local).
+            if (path === '/api/portfolio/sector' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const t = url.searchParams.get('ticker') || '';
+                if (!t) return json({ error: 'Falta el parámetro ticker' }, 400, cors);
+                return json(await resolveSector(env, t), 200, cors);
+            }
+
+            // GET /api/portfolio/diagnostics — prueba proveedores desde el Worker (1/min por usuario).
+            if (path === '/api/portfolio/diagnostics' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `diag:${uid}`, 1, 60)) {
+                    return json({ error: 'Diagnóstico ya ejecutado hace menos de un minuto; espera antes de repetir (gasta cuota de Twelve Data).' }, 429, cors);
+                }
+                const d = await providerDiagnostics(env, { td: url.searchParams.get('td') !== '0', stooq: url.searchParams.get('stooq') !== '0' });
+                return json(d, 200, cors);
+            }
+
+            if (path === '/api/portfolio/prices' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const raw = url.searchParams.get('tickers') || '';
+                const tickers = [...new Set(
+                    raw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+                )].slice(0, 50);
+                if (!tickers.length) return json({ error: 'Falta el parámetro tickers' }, 400, cors);
+                const prices = await getTickerPrices(tickers, env);
+                return json({ prices }, 200, cors);
+            }
+
                  return json({ error: 'Not found', path }, 404, cors);
 
         } catch (err) {
@@ -1341,6 +2495,44 @@ export default {
             } catch (e) {
                 console.error('Cron push, usuario', user.id, ':', e);
             }
+        }
+
+        // ── Snapshot diario del valor de cartera (cartera_valor_diario) ──
+        // Requisito clave: sin esto no hay serie para el gráfico de evolución ni
+        // para la rentabilidad acumulada. Misma función que POST /api/portfolio/snapshot.
+        try {
+            const today = now.toISOString().slice(0, 10);
+            const { results: carteraUsers } = await env.DB.prepare(
+                'SELECT DISTINCT usuario_id FROM cartera_operaciones').all();
+            for (const cu of carteraUsers) {
+                try { await snapshotCartera(env, cu.usuario_id, today); }
+                catch (e) { console.error('Cron cartera snapshot, usuario', cu.usuario_id, ':', e); }
+            }
+        } catch (e) {
+            console.error('Cron cartera snapshot:', e);
+        }
+
+        // ── Recalcular caché de riesgo por usuario con posiciones (benchmark por defecto) ──
+        // Así el primer usuario del día no paga el coste de calcular toda la matriz.
+        try {
+            const DEFAULT_BENCH = 'SP500';
+            const { results: carteraUsers } = await env.DB.prepare(
+                'SELECT DISTINCT usuario_id FROM cartera_operaciones').all();
+            for (const cu of carteraUsers) {
+                try {
+                    const ctx = await _carteraContext(env, cu.usuario_id);
+                    if (!ctx.positions.length) continue;
+                    const payload = await computeRiskPayload(env, DEFAULT_BENCH, ctx.positions, ctx.weightsTotal);
+                    await env.DB.prepare(
+                        `INSERT INTO cartera_riesgo_cache (usuario_id,benchmark,fecha_calculo,payload) VALUES (?,?,?,?)
+                         ON CONFLICT(usuario_id,benchmark) DO UPDATE SET fecha_calculo=excluded.fecha_calculo, payload=excluded.payload`)
+                        .bind(cu.usuario_id, DEFAULT_BENCH, now.toISOString().slice(0, 10), JSON.stringify(payload)).run();
+                } catch (e) {
+                    console.error('Cron riesgo, usuario', cu.usuario_id, ':', e);
+                }
+            }
+        } catch (e) {
+            console.error('Cron riesgo:', e);
         }
 
         // ── Solicitud de valoración al mes de registro (email, una sola vez) ──
