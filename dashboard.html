@@ -766,6 +766,43 @@
             }
             .tes-day { flex: 0 0 42%; scroll-snap-align: start; }
         }
+        .tes-cal-head, .tes-cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+        .tes-cal-head { margin-bottom: 4px; }
+        .tes-cal-head span { text-align: center; font-size: .72rem; font-weight: 700; color: var(--text-secondary); padding: .25rem 0; }
+        .tes-cal-row { margin-bottom: 4px; }
+        .tes-cell {
+            min-height: 84px; border: 1px solid var(--border-color); border-radius: var(--radius-control);
+            padding: .35rem .45rem; display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+            background: var(--bg-primary, #fff); text-align: left; min-width: 0; font: inherit; color: inherit;
+        }
+        button.tes-cell { cursor: pointer; transition: background-color 140ms ease; }
+        button.tes-cell:hover { background: var(--bg-secondary); }
+        .tes-cell.tes-out { opacity: .38; }
+        .tes-cell.tes-today { border-color: var(--tes-accent); box-shadow: inset 0 0 0 1px var(--tes-accent); }
+        .tes-cell-num { font-family: var(--font-display); font-weight: 700; font-size: .85rem; color: var(--text-primary); }
+        .tes-cell.tes-today .tes-cell-num { color: var(--tes-accent); }
+        .tes-cell-amt { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: .74rem; display: flex; align-items: center; gap: .25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tes-cell-mob { display: none; }
+        .tes-cell-dots { display: flex; gap: 3px; }
+        .tes-cell-net { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: .66rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tes-month-foot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); }
+        .tes-month-foot div { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+        .tes-month-foot .tes-kpi-value { font-size: 1.05rem; }
+        @media (max-width: 767px) {
+            .tes-cell { min-height: 54px; padding: .3rem; align-items: center; }
+            .tes-cell-desk { display: none; }
+            .tes-cell-mob { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; }
+            .tes-month-foot .tes-kpi-value { font-size: .9rem; }
+        }
+        .tes-form { display: flex; flex-direction: column; gap: .9rem; padding: .5rem 0 1rem; }
+        .tes-form label { font-size: .8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: .25rem; }
+        .tes-input {
+            width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-control);
+            padding: .5rem .65rem; background: var(--bg-primary, #fff); color: var(--text-primary); font: inherit;
+        }
+        .tes-input:focus { outline: 2px solid var(--tes-accent); outline-offset: 1px; }
+        .tes-form-error { color: var(--tes-pago-text); font-size: .8rem; font-weight: 600; }
+        .tes-foot-actions { display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 1.25rem 1.25rem; border-top: 1px solid var(--border-color); }
         /* Modal de desglose */
         #tes-desglose-panel {
             background: var(--bg-elevated, #fff); color: var(--text-primary);
@@ -787,7 +824,7 @@
         .tes-group-title { font-size: .75rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--text-secondary); margin: 1rem 0 .1rem; display: flex; align-items: center; gap: .4rem; }
         .tes-total { display: flex; justify-content: space-between; font-weight: 700; padding: .75rem 1.25rem; border-top: 1px solid var(--border-color); }
         @media (prefers-reduced-motion: reduce) {
-            .tes-switch, .tes-switch-thumb, .tes-segmented button, .tes-btn, .tes-tooltip, .tes-icon-btn { transition: none; }
+            .tes-switch, .tes-switch-thumb, .tes-segmented button, .tes-btn, .tes-tooltip, .tes-icon-btn, button.tes-cell { transition: none; }
             .tes-grow, .tes-skel { animation: none; }
         }
     </style>
@@ -1410,6 +1447,19 @@
                                 </div>
                             </div>
                             <div id="tes-semana-body" aria-live="polite"></div>
+                        </section>
+
+                        <!-- 5c · Calendario mensual -->
+                        <section id="tes-mes" class="tes-card" aria-labelledby="tes-mes-title">
+                            <div class="tes-card-head">
+                                <h3 id="tes-mes-title" class="tes-card-title">Calendario</h3>
+                                <div class="tes-nav">
+                                    <button type="button" class="tes-icon-btn" data-mes="-1" aria-label="Mes anterior"><i class="fas fa-arrow-left"></i></button>
+                                    <button type="button" class="tes-btn tes-btn-ghost" data-mes="hoy">Hoy</button>
+                                    <button type="button" class="tes-icon-btn" data-mes="1" aria-label="Mes siguiente"><i class="fas fa-arrow-right"></i></button>
+                                </div>
+                            </div>
+                            <div id="tes-mes-body" aria-live="polite"></div>
                         </section>
                     </div>
                 </div>
@@ -8463,10 +8513,41 @@
                     if (dia) this.tesOpenDia(dia.dataset.dia, this._tes.semanaAgenda || []);
                 });
 
+                // Mes: navegación y desglose del día
+                document.getElementById('tes-mes')?.addEventListener('click', (e) => {
+                    const nav = e.target.closest('[data-mes]');
+                    if (nav) {
+                        const v = nav.dataset.mes;
+                        this._tes.mes = v === 'hoy'
+                            ? this.tesHoy().slice(0, 7)
+                            : this.tesAddMonths(`${this._tes.mes}-01`, Number(v)).slice(0, 7);
+                        this.tesRenderMes();
+                        return;
+                    }
+                    const dia = e.target.closest('[data-dia]');
+                    if (dia) this.tesOpenDia(dia.dataset.dia, this._tes.mesAgenda || []);
+                });
+
+                // Acciones del desglose: editar/detener serie, ir a la cuenta del coste fijo
+                document.getElementById('tes-desglose')?.addEventListener('click', (e) => {
+                    const btn = e.target.closest('[data-accion]');
+                    if (!btn) return;
+                    const accion = btn.dataset.accion;
+                    if (accion === 'editar') this.tesEditarSerie(btn.dataset.comp);
+                    else if (accion === 'detener') this.tesDetenerSerie(btn.dataset.comp);
+                    else if (accion === 'cuenta') {
+                        this.tesCloseDesglose();
+                        this.handleNavigation('accounts');
+                        this.openAccountModal(btn.dataset.cuenta);
+                    }
+                });
+
                 const modal = document.getElementById('tes-desglose');
                 document.getElementById('tes-desglose-close')?.addEventListener('click', () => this.tesCloseDesglose());
+                // Cerrar solo si el clic cae en el fondo (no vale "fuera del panel": una acción
+                // puede haber sustituido ya el nodo pulsado y quedaría desconectado del panel)
                 modal?.addEventListener('click', (e) => {
-                    if (!document.getElementById('tes-desglose-panel').contains(e.target)) this.tesCloseDesglose();
+                    if (e.target === modal || e.target === modal.firstElementChild) this.tesCloseDesglose();
                 });
                 document.addEventListener('keydown', (e) => {
                     const dialogOpen = !document.getElementById('tes-dialog')?.classList.contains('hidden');
@@ -8853,6 +8934,232 @@
                 if (today && strip.scrollWidth > strip.clientWidth) strip.scrollLeft = today.offsetLeft - strip.offsetLeft;
             }
 
+            async tesRenderMes() {
+                const body = document.getElementById('tes-mes-body');
+                if (!body || !this._tes) return;
+                const token = this._tesToken('mes');
+                const primero = `${this._tes.mes}-01`, ultimo = this.tesMonthEnd(primero);
+                const titulo = this.tesFmtDate(primero, { month: 'long', year: 'numeric' });
+                document.getElementById('tes-mes-title').textContent = titulo.charAt(0).toUpperCase() + titulo.slice(1);
+                body.innerHTML = this._tesSkeleton('mes');
+
+                let data;
+                try {
+                    data = await this.tesGetAgenda(primero, ultimo);
+                } catch (err) {
+                    if (token === this._tes.tokens.mes) body.innerHTML = this._tesError(err, 'tesRenderMes');
+                    return;
+                }
+                if (token !== this._tes.tokens.mes) return;
+                this._tes.mesAgenda = data.agenda;
+
+                const hoy = this.tesHoy();
+                const porDia = new Map();
+                for (const it of data.agenda) {
+                    const d = porDia.get(it.fecha) || { cobros: 0, pagos: 0, n: 0 };
+                    if (it.tipo === 'cobro') d.cobros += it.importe; else d.pagos += it.importe;
+                    d.n++;
+                    porDia.set(it.fecha, d);
+                }
+                const nombres = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+                const head = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+                    .map((l, i) => `<span><abbr title="${nombres[i]}" style="text-decoration:none;">${l}</abbr></span>`).join('');
+                let rows = '';
+                for (let lun = this.tesMonday(primero); lun <= ultimo; lun = this.tesAddDays(lun, 7)) {
+                    let cells = '';
+                    for (let i = 0; i < 7; i++) {
+                        const iso = this.tesAddDays(lun, i);
+                        const fuera = iso.slice(0, 7) !== this._tes.mes;
+                        const d = fuera ? null : porDia.get(iso);
+                        const cls = `tes-cell ${fuera ? 'tes-out' : ''} ${iso === hoy ? 'tes-today' : ''}`;
+                        const num = `<span class="tes-cell-num">${Number(iso.slice(8))}</span>`;
+                        if (!d) {
+                            cells += `<div class="${cls}" ${fuera ? 'aria-hidden="true"' : ''}>${num}</div>`;
+                            continue;
+                        }
+                        const neto = d.cobros - d.pagos;
+                        const largo = this.tesFmtDate(iso, { weekday: 'long', day: 'numeric', month: 'long' });
+                        const partes = [];
+                        if (d.cobros) partes.push(`cobros ${this.formatCurrency(d.cobros)}`);
+                        if (d.pagos) partes.push(`pagos ${this.formatCurrency(d.pagos)}`);
+                        cells += `<button type="button" class="${cls}" data-dia="${iso}" ${iso === hoy ? 'aria-current="date"' : ''}
+                                    aria-label="${this._tesEsc(`${largo}: ${partes.join(', ')}. Ver detalle`)}">
+                            ${num}
+                            <span class="tes-cell-desk">
+                                ${d.cobros ? `<span class="tes-cell-amt tes-text-cobro"><span class="tes-dot tes-dot-cobro"></span>+${this._tesEsc(this.formatCurrency(d.cobros))}</span>` : ''}
+                                ${d.pagos ? `<span class="tes-cell-amt tes-text-pago"><span class="tes-dot tes-dot-pago"></span>−${this._tesEsc(this.formatCurrency(d.pagos))}</span>` : ''}
+                            </span>
+                            <span class="tes-cell-mob" aria-hidden="true">
+                                <span class="tes-cell-dots">
+                                    ${d.cobros ? '<span class="tes-dot tes-dot-cobro"></span>' : ''}
+                                    ${d.pagos ? '<span class="tes-dot tes-dot-pago"></span>' : ''}
+                                </span>
+                                <span class="tes-cell-net">${neto > 0 ? '+' : neto < 0 ? '−' : ''}${this._tesEsc(this._tesFmtShort(Math.abs(neto)))}</span>
+                            </span>
+                        </button>`;
+                    }
+                    rows += `<div class="tes-cal-row">${cells}</div>`;
+                }
+
+                const r = data.resumen;
+                let nota = '';
+                if (!data.agenda.length) {
+                    nota = this.tesHasSources()
+                        ? '<p class="tes-muted tes-note">Sin cobros ni pagos previstos este mes.</p>'
+                        : `<p class="tes-muted tes-note">Aún no tienes cobros ni pagos programados. Marca una cuenta como 'admite pagos' y registra un movimiento como pago recurrente.
+                             <button type="button" class="tes-link" onclick="dashboard.openMovementModal()">Registrar movimiento</button></p>`;
+                }
+                body.innerHTML = `
+                    <div class="tes-cal-head" aria-hidden="true">${head}</div>
+                    <div class="tes-cal">${rows}</div>
+                    ${nota}
+                    <div class="tes-month-foot">
+                        <div><span class="tes-kpi-label"><span class="tes-dot tes-dot-cobro"></span>Cobros del mes</span>
+                             <span class="tes-kpi-value tes-text-cobro">${this.formatCurrency(r.cobros_total)}</span></div>
+                        <div><span class="tes-kpi-label"><span class="tes-dot tes-dot-pago"></span>Pagos del mes</span>
+                             <span class="tes-kpi-value tes-text-pago">${this.formatCurrency(r.pagos_total)}</span></div>
+                        <div><span class="tes-kpi-label">Neto del mes</span>
+                             <span class="tes-kpi-value">${r.flujo_neto > 0 ? '+' : ''}${this.formatCurrency(r.flujo_neto)}</span></div>
+                    </div>`;
+            }
+
+            // Acciones de una fila del desglose
+            tesRowActions(it) {
+                if (it.origen === 'coste_fijo') {
+                    return `<div class="tes-row-actions">
+                        <button type="button" class="tes-link" data-accion="cuenta" data-cuenta="${this._tesEsc(it.cuenta_id)}">Editar en la cuenta</button>
+                    </div>`;
+                }
+                if (!it.compromiso_id) return '';
+                const id = this._tesEsc(it.compromiso_id);
+                return `<div class="tes-row-actions">
+                    <button type="button" class="tes-link" data-accion="editar" data-comp="${id}">Editar serie</button>
+                    <button type="button" class="tes-link tes-link-danger" data-accion="detener" data-comp="${id}">Detener serie</button>
+                </div>`;
+            }
+
+            async _tesGetCompromiso(id) {
+                let c = (this._compromisos || []).find(x => x.id === id);
+                if (!c) c = (await this.tesoreriaLoadCompromisos(true)).find(x => x.id === id);
+                if (!c) throw new Error('No se ha encontrado la serie');
+                return c;
+            }
+
+            // Formulario "Editar serie" dentro del modal de desglose
+            async tesEditarSerie(id) {
+                let c;
+                try { c = await this._tesGetCompromiso(id); }
+                catch (err) { this.showToast(err.message, 'error'); return; }
+                const esc = s => this._tesEsc(s);
+                const freqs = ['mensual', 'trimestral', 'semestral', 'anual'];
+                document.getElementById('tes-desglose-title').textContent = 'Editar serie';
+                document.getElementById('tes-desglose-sub').textContent =
+                    `${c.concepto} · ${c.tipo === 'cobro' ? 'Cobro' : 'Pago'} recurrente desde el ${this.tesFmtDate(c.fecha_ancla, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+                document.getElementById('tes-desglose-body').innerHTML = `
+                    <form id="tes-serie-form" class="tes-form" novalidate>
+                        <div>
+                            <label for="tes-serie-importe">Importe</label>
+                            <input id="tes-serie-importe" class="tes-input tes-num" type="number" step="0.01" min="0.01" inputmode="decimal" value="${esc(c.importe)}" required>
+                        </div>
+                        <div>
+                            <span id="tes-serie-freq-label" class="block" style="font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.25rem;">Frecuencia</span>
+                            <div id="tes-serie-freq" class="tes-segmented" role="radiogroup" aria-labelledby="tes-serie-freq-label">
+                                ${freqs.map(f => `<button type="button" role="radio" data-freq="${f}" aria-checked="${f === c.frecuencia}" tabindex="${f === c.frecuencia ? 0 : -1}">${this._tesFrecuenciaLabel(f)}</button>`).join('')}
+                            </div>
+                        </div>
+                        <div class="flex gap-3">
+                            <div style="flex:1;">
+                                <label for="tes-serie-aviso">Avisarme (días antes)</label>
+                                <input id="tes-serie-aviso" class="tes-input" type="number" min="0" max="7" step="1" value="${esc(c.aviso_dias ?? 2)}">
+                            </div>
+                            <div style="flex:1.4;">
+                                <label for="tes-serie-fin">Fecha fin (opcional)</label>
+                                <input id="tes-serie-fin" class="tes-input" type="date" min="${esc(c.fecha_ancla)}" value="${esc(c.fecha_fin || '')}">
+                            </div>
+                        </div>
+                        <p id="tes-serie-error" class="tes-form-error hidden" role="alert"></p>
+                    </form>`;
+                document.getElementById('tes-desglose-foot').innerHTML = `
+                    <div class="tes-foot-actions">
+                        <button type="button" class="tes-btn tes-btn-ghost" id="tes-serie-cancelar">Cancelar</button>
+                        <button type="submit" form="tes-serie-form" class="tes-btn tes-btn-primary" id="tes-serie-guardar">Guardar cambios</button>
+                    </div>`;
+
+                const group = document.getElementById('tes-serie-freq');
+                const selectFreq = (btn) => group.querySelectorAll('[role="radio"]').forEach(b => {
+                    b.setAttribute('aria-checked', b === btn ? 'true' : 'false');
+                    b.tabIndex = b === btn ? 0 : -1;
+                });
+                group.addEventListener('click', e => { const b = e.target.closest('[role="radio"]'); if (b) selectFreq(b); });
+                group.addEventListener('keydown', e => {
+                    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+                    if (!(e.key in keys)) return;
+                    e.preventDefault();
+                    const btns = [...group.querySelectorAll('[role="radio"]')];
+                    const i = btns.findIndex(b => b.getAttribute('aria-checked') === 'true');
+                    const next = btns[(i + keys[e.key] + btns.length) % btns.length];
+                    selectFreq(next); next.focus();
+                });
+                document.getElementById('tes-serie-cancelar').addEventListener('click', () => {
+                    const d = this._tesDesglose;
+                    if (d) this.tesOpenDesglose(d); else this.tesCloseDesglose();
+                });
+                document.getElementById('tes-serie-form').addEventListener('input', () => {
+                    document.getElementById('tes-serie-error')?.classList.add('hidden');
+                });
+                document.getElementById('tes-serie-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const errEl = document.getElementById('tes-serie-error');
+                    const showErr = (m) => { errEl.textContent = m; errEl.classList.remove('hidden'); };
+                    const importe = Math.round(parseFloat(document.getElementById('tes-serie-importe').value) * 100) / 100;
+                    const aviso = parseInt(document.getElementById('tes-serie-aviso').value, 10);
+                    const fin = document.getElementById('tes-serie-fin').value || null;
+                    if (!(importe > 0)) return showErr('El importe debe ser mayor que 0');
+                    if (!Number.isInteger(aviso) || aviso < 0 || aviso > 7) return showErr('Los días de aviso deben estar entre 0 y 7');
+                    if (fin && fin < c.fecha_ancla) return showErr('La fecha de fin no puede ser anterior a la primera fecha de la serie');
+                    const freq = group.querySelector('[aria-checked="true"]')?.dataset.freq || c.frecuencia;
+                    const btn = document.getElementById('tes-serie-guardar');
+                    btn.disabled = true;
+                    try {
+                        const saved = await DataClient.saveCompromiso(this.currentUserId(), {
+                            ...c, importe, frecuencia: freq, aviso_dias: aviso, fecha_fin: fin
+                        });
+                        this._tesoreriaUpsertCache(saved);
+                        this.tesCloseDesglose();
+                        this.showToast('Serie actualizada', 'success');
+                        this.tesRefresh();
+                    } catch (err) {
+                        showErr(err.message || 'No se pudo guardar');
+                        btn.disabled = false;
+                    }
+                });
+                document.getElementById('tes-serie-importe').focus();
+            }
+
+            async tesDetenerSerie(id) {
+                let c;
+                try { c = await this._tesGetCompromiso(id); }
+                catch (err) { this.showToast(err.message, 'error'); return; }
+                const ok = await this.tesoreriaDialog({
+                    title: '¿Detener esta serie?',
+                    message: `"${c.concepto}" dejará de aparecer en tu calendario y no recibirás más avisos. Los movimientos ya registrados no cambian.`,
+                    actions: [
+                        { label: 'Cancelar', value: false, variant: 'ghost' },
+                        { label: 'Detener serie', value: true, variant: 'danger' }
+                    ]
+                });
+                if (!ok) return;
+                try {
+                    const saved = await DataClient.saveCompromiso(this.currentUserId(), { ...c, activo: false });
+                    this._tesoreriaUpsertCache(saved);
+                    this.tesCloseDesglose();
+                    this.showToast('Serie detenida', 'success');
+                    this.tesRefresh();
+                } catch (err) {
+                    this.showToast(err.message || 'No se pudo detener la serie', 'error');
+                }
+            }
+
             // Desglose de un periodo/día. items: ocurrencias de la agenda (cobros y/o pagos).
             tesOpenDesglose({ titulo, subtitulo, items }) {
                 const modal = document.getElementById('tes-desglose');
@@ -9140,7 +9447,6 @@
             // Devuelve una promesa con el value elegido; Escape o clic fuera → null.
             tesoreriaDialog({ title, message, actions }) {
                 const modal = document.getElementById('tes-dialog');
-                const panel = document.getElementById('tes-dialog-panel');
                 const actionsEl = document.getElementById('tes-dialog-actions');
                 document.getElementById('tes-dialog-title').textContent = title;
                 document.getElementById('tes-dialog-message').textContent = message;
@@ -9158,7 +9464,7 @@
                     const onKey = (e) => {
                         if (e.key === 'Escape') { e.stopPropagation(); close(null); }
                     };
-                    const onBackdrop = (e) => { if (!panel.contains(e.target)) close(null); };
+                    const onBackdrop = (e) => { if (e.target === modal || e.target === modal.firstElementChild) close(null); };
                     let primary = null;
                     actions.forEach(a => {
                         const b = document.createElement('button');
