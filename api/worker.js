@@ -9,8 +9,7 @@
 //   Movements: GET/POST /api/movements, DELETE /api/movements/:id
 //   Tesorería: GET /api/tesoreria/config, GET/POST /api/tesoreria/compromisos,
 //              DELETE /api/tesoreria/compromisos/:id,
-//              GET /api/tesoreria/agenda?desde=YYYY-MM-DD&hasta=YYYY-MM-DD,
-//              POST /api/tesoreria/push-test (solo staging)
+//              GET /api/tesoreria/agenda?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
 //   Rules:     GET/POST /api/rules, POST /api/rules/bulk, DELETE /api/rules/:id
 //   Autocontrol, scenarios, notifications, bank-connections, import-info
 //   Stripe:    POST /api/stripe/create-checkout, POST /api/stripe/webhook,
@@ -449,7 +448,7 @@ function computeDailyAlerts(now, movs, accounts, plan, associations, compromisos
     return [...superados, ...al80, ...costesFijos, ...tesPagos, ...tesCobros, ...resumen, ...inactividad];
 }
 
-// Datos que necesita computeDailyAlerts para un usuario (cron y push-test).
+// Datos que necesita computeDailyAlerts para un usuario (cron diario).
 async function loadAlertInputs(env, userId, now) {
     // Movimientos de los últimos 6 meses (mes actual, anterior e histórico del Índice Flow),
     // plan de autocontrol, asociaciones cuenta→grupo y compromisos de tesorería activos.
@@ -1791,42 +1790,6 @@ export default {
                     const agenda = buildAgenda({ compromisos, accounts, desde, hasta });
                     const resumen = resumenTesoreria(agenda, saldoBancario(accounts));
                     return json({ desde, hasta, rango_recortado: recortado, hoy: hoyMadrid(), agenda, resumen }, 200, cors);
-                }
-
-                // Solo staging (no hay cron): genera los avisos de tesorería de HOY para el
-                // usuario autenticado y los envía a sus suscripciones, SIN escribir en push_log.
-                if (path === '/api/tesoreria/push-test' && method === 'POST') {
-                    if (!String(env.APP_URL || '').includes('staging'))
-                        return json({ error: 'No encontrado' }, 404, cors);
-                    const now = new Date();
-                    const inputs = await loadAlertInputs(env, uid, now);
-                    const avisos = computeDailyAlerts(now, inputs.movs, inputs.accounts, inputs.plan,
-                        inputs.associations, inputs.compromisos).filter(a => a.type.startsWith('tesoreria_'));
-                    const { results: subs } = await env.DB.prepare(
-                        'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').bind(uid).all();
-                    const envios = [];
-                    if (!env.VAPID_PRIVATE_KEY) {
-                        envios.push({ ok: false, error: 'Falta el secret VAPID_PRIVATE_KEY en este entorno' });
-                    } else {
-                        for (const aviso of avisos) {
-                            for (const sub of subs) {
-                                const r = await sendPush(env, sub, {
-                                    title: aviso.title, body: aviso.body,
-                                    url: aviso.url, tag: `${aviso.notifKey}:test`
-                                });
-                                envios.push({ notifKey: aviso.notifKey, host: r.host, ok: r.ok, status: r.status, error: r.error });
-                            }
-                        }
-                    }
-                    // Para entender por qué una serie no avisa hoy: su próxima fecha y su ventana
-                    const hoy = hoyMadrid(now);
-                    const proximas = inputs.compromisos.map(c => {
-                        const [prox] = expandCompromiso(c, hoy, addDays(hoy, 400));
-                        return { compromiso_id: c.id, concepto: c.concepto, tipo: c.tipo,
-                                 proxima: prox ? prox.fecha : null, aviso_dias: c.aviso_dias,
-                                 aviso_desde: prox ? addDays(prox.fecha, -Number(c.aviso_dias ?? 2)) : null };
-                    });
-                    return json({ hoy, avisos, suscripciones: subs.length, envios, proximas }, 200, cors);
                 }
 
                 return json({ error: 'No encontrado' }, 404, cors);
