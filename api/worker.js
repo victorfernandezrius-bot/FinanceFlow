@@ -9,7 +9,8 @@
 //   Movements: GET/POST /api/movements, DELETE /api/movements/:id
 //   Tesorería: GET /api/tesoreria/config, GET/POST /api/tesoreria/compromisos,
 //              DELETE /api/tesoreria/compromisos/:id,
-//              GET /api/tesoreria/agenda?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+//              GET /api/tesoreria/agenda?desde=YYYY-MM-DD&hasta=YYYY-MM-DD,
+//              POST /api/tesoreria/push-test (solo staging)
 //   Rules:     GET/POST /api/rules, POST /api/rules/bulk, DELETE /api/rules/:id
 //   Autocontrol, scenarios, notifications, bank-connections, import-info
 //   Stripe:    POST /api/stripe/create-checkout, POST /api/stripe/webhook,
@@ -44,7 +45,7 @@ import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJou
 import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
     portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 import { FRECUENCIAS, TIPOS_COMPROMISO, isISODate, hoyMadrid, addDays, buildAgenda,
-    resumenTesoreria, saldoBancario } from './tesoreria-logic.js';
+    resumenTesoreria, saldoBancario, expandCompromiso } from './tesoreria-logic.js';
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -320,11 +321,43 @@ function cronFlowIndex(movs, accounts, now) {
     return { flow, mesesConDatos };
 }
 
+// Avisos de tesorería: próxima ocurrencia de cada compromiso activo que cae en
+// hoy ≤ fecha ≤ hoy + aviso_dias (fechas Europe/Madrid). Una por serie y ocurrencia
+// (notifKey tesoreria:{id}:{fecha}, deduplicado por push_log).
+const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function computeTesoreriaAlerts(now, compromisos) {
+    const hoy = hoyMadrid(now);
+    const out = [];
+    for (const c of compromisos || []) {
+        if (!(c.activo === 1 || c.activo === true)) continue;
+        const dias = Math.min(7, Math.max(0, Number(c.aviso_dias ?? 2) || 0));
+        const [prox] = expandCompromiso(c, hoy, addDays(hoy, dias));
+        if (!prox) continue;
+        const [, m, d] = prox.fecha.split('-').map(Number);
+        const esPago = c.tipo === 'pago';
+        out.push({
+            type: esPago ? 'tesoreria_pago' : 'tesoreria_cobro',
+            notifKey: `tesoreria:${c.id}:${prox.fecha}`,
+            title: `${esPago ? '📅 Pago previsto' : '💶 Cobro previsto'}: ${c.concepto}`,
+            body: `El ${d} de ${MESES_ES[m - 1]} tienes un ${esPago ? 'pago' : 'cobro'} de ${fmtEur(Number(c.importe))} € (${c.frecuencia}).`,
+            url: '/dashboard.html#tesoreria',
+            fecha: prox.fecha,
+            compromiso_id: c.id
+        });
+    }
+    return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
 // Calcula los avisos del día para un usuario, ya ordenados por prioridad:
-// superado > 80 % > coste fijo > resumen > inactividad. Mismos notifKey que la app.
-function computeDailyAlerts(now, movs, accounts, plan, associations) {
+// superado > 80 % > coste fijo y pagos de tesorería > cobros de tesorería > resumen
+// > inactividad. Mismos notifKey que la app. `compromisos` es opcional.
+function computeDailyAlerts(now, movs, accounts, plan, associations, compromisos = []) {
     const monthStr = now.toISOString().substring(0, 7);
     const superados = [], al80 = [], costesFijos = [], resumen = [], inactividad = [];
+    const tesoreria = computeTesoreriaAlerts(now, compromisos);
+    // Cuentas con un pago recurrente activo: su coste fijo no se avisa (evita doble push)
+    const cuentasConPago = new Set((compromisos || [])
+        .filter(c => (c.activo === 1 || c.activo === true) && c.tipo === 'pago').map(c => c.cuenta_id));
 
     // Presupuestos de autocontrol (grupos de gasto: Necesidades y Resto)
     if (plan && plan.percentages && associations) {
@@ -362,6 +395,7 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
     const hoy = now.getDate();
     accounts
         .filter(a => (a.is_fixed_cost === 1 || a.is_fixed_cost === true) && a.fixed_due_day)
+        .filter(a => !cuentasConPago.has(a.id))
         .forEach(a => {
             const dias = a.fixed_due_day - hoy;
             if (dias >= 0 && dias <= 3) {
@@ -410,7 +444,37 @@ function computeDailyAlerts(now, movs, accounts, plan, associations) {
         }
     }
 
-    return [...superados, ...al80, ...costesFijos, ...resumen, ...inactividad];
+    const tesPagos = tesoreria.filter(a => a.type === 'tesoreria_pago');
+    const tesCobros = tesoreria.filter(a => a.type === 'tesoreria_cobro');
+    return [...superados, ...al80, ...costesFijos, ...tesPagos, ...tesCobros, ...resumen, ...inactividad];
+}
+
+// Datos que necesita computeDailyAlerts para un usuario (cron y push-test).
+async function loadAlertInputs(env, userId, now) {
+    // Movimientos de los últimos 6 meses (mes actual, anterior e histórico del Índice Flow),
+    // plan de autocontrol, asociaciones cuenta→grupo y compromisos de tesorería activos.
+    const sinceDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const since = `${sinceDate.getFullYear()}-${String(sinceDate.getMonth() + 1).padStart(2, '0')}-01`;
+    const { results: movs } = await env.DB.prepare(
+        'SELECT tipo, cantidad, fecha, cuenta_id, cuenta_destino_id FROM movements WHERE user_id=? AND fecha>=?')
+        .bind(userId, since).all();
+    const { results: accounts } = await env.DB.prepare(
+        'SELECT id, nombre, tipo, saldo_actual, is_fixed_cost, fixed_monthly_amount, fixed_due_day FROM accounts WHERE user_id=?')
+        .bind(userId).all();
+    const planRow = await env.DB.prepare('SELECT plan_data FROM autocontrol_plan WHERE user_id=?').bind(userId).first();
+    const assocRow = await env.DB.prepare('SELECT associations_data FROM autocontrol_associations WHERE user_id=?').bind(userId).first();
+    const plan = planRow ? JSON.parse(planRow.plan_data) : null;
+    const associations = assocRow ? JSON.parse(assocRow.associations_data) : null;
+    let compromisos = [];
+    try {
+        const { results } = await env.DB.prepare(
+            'SELECT * FROM tesoreria_compromisos WHERE user_id=? AND activo=1').bind(userId).all();
+        compromisos = results || [];
+    } catch (e) {
+        // Sin la migración 0005 aplicada la tabla no existe: el resto de avisos sigue funcionando
+        console.error('loadAlertInputs: tesoreria_compromisos no disponible:', e && e.message);
+    }
+    return { movs, accounts, plan, associations, compromisos };
 }
 
 // ============================================================
@@ -1729,6 +1793,42 @@ export default {
                     return json({ desde, hasta, rango_recortado: recortado, hoy: hoyMadrid(), agenda, resumen }, 200, cors);
                 }
 
+                // Solo staging (no hay cron): genera los avisos de tesorería de HOY para el
+                // usuario autenticado y los envía a sus suscripciones, SIN escribir en push_log.
+                if (path === '/api/tesoreria/push-test' && method === 'POST') {
+                    if (!String(env.APP_URL || '').includes('staging'))
+                        return json({ error: 'No encontrado' }, 404, cors);
+                    const now = new Date();
+                    const inputs = await loadAlertInputs(env, uid, now);
+                    const avisos = computeDailyAlerts(now, inputs.movs, inputs.accounts, inputs.plan,
+                        inputs.associations, inputs.compromisos).filter(a => a.type.startsWith('tesoreria_'));
+                    const { results: subs } = await env.DB.prepare(
+                        'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?').bind(uid).all();
+                    const envios = [];
+                    if (!env.VAPID_PRIVATE_KEY) {
+                        envios.push({ ok: false, error: 'Falta el secret VAPID_PRIVATE_KEY en este entorno' });
+                    } else {
+                        for (const aviso of avisos) {
+                            for (const sub of subs) {
+                                const r = await sendPush(env, sub, {
+                                    title: aviso.title, body: aviso.body,
+                                    url: aviso.url, tag: `${aviso.notifKey}:test`
+                                });
+                                envios.push({ notifKey: aviso.notifKey, host: r.host, ok: r.ok, status: r.status, error: r.error });
+                            }
+                        }
+                    }
+                    // Para entender por qué una serie no avisa hoy: su próxima fecha y su ventana
+                    const hoy = hoyMadrid(now);
+                    const proximas = inputs.compromisos.map(c => {
+                        const [prox] = expandCompromiso(c, hoy, addDays(hoy, 400));
+                        return { compromiso_id: c.id, concepto: c.concepto, tipo: c.tipo,
+                                 proxima: prox ? prox.fecha : null, aviso_dias: c.aviso_dias,
+                                 aviso_desde: prox ? addDays(prox.fecha, -Number(c.aviso_dias ?? 2)) : null };
+                    });
+                    return json({ hoy, avisos, suscripciones: subs.length, envios, proximas }, 200, cors);
+                }
+
                 return json({ error: 'No encontrado' }, 404, cors);
             }
 
@@ -2589,23 +2689,8 @@ export default {
 
         for (const user of users) {
             try {
-                // Datos del usuario: cuentas, movimientos de los últimos 6 meses
-                // (cubre mes actual, anterior y el histórico del Índice Flow),
-                // plan de autocontrol y asociaciones cuenta→grupo.
-                const sinceDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-                const since = `${sinceDate.getFullYear()}-${String(sinceDate.getMonth() + 1).padStart(2, '0')}-01`;
-                const { results: movs } = await env.DB.prepare(
-                    'SELECT tipo, cantidad, fecha, cuenta_id, cuenta_destino_id FROM movements WHERE user_id=? AND fecha>=?')
-                    .bind(user.id, since).all();
-                const { results: accounts } = await env.DB.prepare(
-                    'SELECT id, nombre, tipo, saldo_actual, is_fixed_cost, fixed_monthly_amount, fixed_due_day FROM accounts WHERE user_id=?')
-                    .bind(user.id).all();
-                const planRow = await env.DB.prepare('SELECT plan_data FROM autocontrol_plan WHERE user_id=?').bind(user.id).first();
-                const assocRow = await env.DB.prepare('SELECT associations_data FROM autocontrol_associations WHERE user_id=?').bind(user.id).first();
-                const plan = planRow ? JSON.parse(planRow.plan_data) : null;
-                const associations = assocRow ? JSON.parse(assocRow.associations_data) : null;
-
-                const avisos = computeDailyAlerts(now, movs, accounts, plan, associations);
+                const { movs, accounts, plan, associations, compromisos } = await loadAlertInputs(env, user.id, now);
+                const avisos = computeDailyAlerts(now, movs, accounts, plan, associations, compromisos);
                 if (!avisos.length) continue;
 
                 const { results: subs } = await env.DB.prepare(
@@ -2636,7 +2721,7 @@ export default {
                         await sendPush(env, sub, {
                             title: aviso.title,
                             body: aviso.body,
-                            url: '/dashboard.html',
+                            url: aviso.url || '/dashboard.html',
                             tag: aviso.notifKey
                         });
                     }

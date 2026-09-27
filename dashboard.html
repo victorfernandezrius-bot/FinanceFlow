@@ -2765,7 +2765,10 @@
                 safe(this.renderImportStatementSection, 'renderImportStatementSection');
                 safe(this.showNotificationsContainer, 'showNotificationsContainer');
 
-                this.showSection('dashboard');
+                // Deep link desde un push de tesorería (/dashboard.html#tesoreria): se abre al
+                // final del arranque para que nada lo devuelva al Dashboard.
+                if (!this.openHashSection()) this.showSection('dashboard');
+                window.addEventListener('hashchange', () => this.openHashSection());
 
                 // Migración push /public/ -> / y luego reconciliación de huérfanas
                 // (no bloquean el arranque; se autorreintentan en la siguiente carga).
@@ -5300,7 +5303,9 @@
                     'import_completed': '<i class="fas fa-download text-green-500"></i>',
                     'info': '<i class="fas fa-info-circle text-blue-500"></i>',
                     'warning': '<i class="fas fa-exclamation-triangle text-yellow-500"></i>',
-                    'success': '<i class="fas fa-check-circle text-green-500"></i>'
+                    'success': '<i class="fas fa-check-circle text-green-500"></i>',
+                    'tesoreria_pago': '<i class="fas fa-calendar-alt" style="color: var(--tes-pago-text);"></i>',
+                    'tesoreria_cobro': '<i class="fas fa-calendar-alt" style="color: var(--tes-cobro-text);"></i>'
                 };
                 
                 return icons[type] || icons['info'];
@@ -6576,6 +6581,15 @@
                         </div>
                     </div>
                 `).join('');
+            }
+
+            // Abre la sección indicada en el hash (#tesoreria) y lo limpia, para que el
+            // siguiente push con la misma URL vuelva a disparar la navegación.
+            openHashSection() {
+                if (location.hash !== '#tesoreria') return false;
+                history.replaceState(null, '', location.pathname + location.search);
+                this.handleNavigation('tesoreria');
+                return true;
             }
 
             handleNavigation(section) {
