@@ -89,6 +89,7 @@
   'flow-menu': '<path d="M4 7h16"/><path d="M4 12h11"/><path d="M4 17h16" opacity=".42"/>',
   'flow-settings': '<path d="M3.6 8.4h5.2M12.6 8.4h7.8"/><circle cx="10.7" cy="8.4" r="1.9"/><path d="M3.6 15.6h9.4M16.8 15.6h3.6"/><circle cx="14.9" cy="15.6" r="1.9"/>',
   'flow-calendar': '<rect x="3.2" y="5.2" width="17.6" height="15.6" rx="2.2"/><path d="M3.2 10h17.6"/><path d="M8 3.4v3.4M16 3.4v3.4"/><path d="M7.4 13.4h2M11 13.4h2M14.6 13.4h2M7.4 16.8h2M11 16.8h2" opacity=".42"/>',
+  'flow-repeat': '<path d="M4.5 11V9.6A3.1 3.1 0 0 1 7.6 6.5h11.4"/><path d="m16.2 3.7 2.8 2.8-2.8 2.8"/><path d="M19.5 13v1.4a3.1 3.1 0 0 1-3.1 3.1H5" opacity=".42"/><path d="m7.8 20.3-2.8-2.8 2.8-2.8" opacity=".42"/>',
   'flow-calendar-check': '<rect x="3.2" y="5.2" width="17.6" height="15.6" rx="2.2"/><path d="M3.2 10h17.6"/><path d="M8 3.4v3.4M16 3.4v3.4"/><path d="m8.2 15.4 2.6 2.6 5-5.2"/>',
   'flow-clock': '<path d="M11.3 4A8 8 0 1 0 17.66 6.34"/><path d="M12 7.4V12l3.2 2.2"/>',
   'flow-mail': '<rect x="2.6" y="5" width="18.8" height="14" rx="2.2"/><path d="m3.2 7.4 7.7 5.4a2 2 0 0 0 2.2 0l7.7-5.4"/>',
@@ -250,6 +251,9 @@
     'flow-out': 'flow-out',
     'flow-liability': 'flow-liability',
     'flow-equity': 'flow-equity',
+    'fa-repeat': 'flow-repeat',
+    'fa-redo': 'flow-repeat',
+    'flow-repeat': 'flow-repeat',
   };
 
   var FA_TOKENS = /^(fa|fas|far|fab|fal|fad|fa-fw|fa-spin|fa-pulse|fa-[a-z0-9-]+)$/;

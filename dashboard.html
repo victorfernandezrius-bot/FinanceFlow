@@ -592,6 +592,74 @@
 /* Forzar texto legible SOLO en el modal de planes, sin afectar al resto del dashboard */
         #plan-selector-modal h3 { color: #111827 !important; }
         #plan-selector-modal p { color: #374151 !important; }
+
+        /* ===== Tesorería (cobros y pagos recurrentes) ===== */
+        :root {
+            --tes-cobro: #16A34A;
+            --tes-cobro-soft: rgba(22, 163, 74, 0.12);
+            --tes-pago: #EF4444;
+            --tes-pago-soft: rgba(239, 68, 68, 0.12);
+            --tes-accent: #0158C9;
+            --tes-navy: #0B2A55;
+            --tes-amber: #F5B301;
+        }
+        html.dark {
+            --tes-cobro: #61CE70;
+            --tes-cobro-soft: rgba(97, 206, 112, 0.16);
+            --tes-pago: #F87171;
+            --tes-pago-soft: rgba(248, 113, 113, 0.16);
+            --tes-accent: #5EC6FF;
+        }
+        .tes-num { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+        .tes-switch {
+            position: relative; width: 40px; height: 22px; flex-shrink: 0;
+            border-radius: 999px; border: none; cursor: pointer; padding: 0;
+            background: var(--border-color);
+            transition: background-color 160ms ease;
+        }
+        .tes-switch[aria-checked="true"] { background: var(--tes-accent); }
+        .tes-switch:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 2px; }
+        .tes-switch-thumb {
+            position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+            border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+            transition: transform 160ms ease;
+        }
+        .tes-switch[aria-checked="true"] .tes-switch-thumb { transform: translateX(18px); }
+        .tes-segmented {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px;
+            border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color);
+        }
+        .tes-segmented button {
+            border: none; background: transparent; border-radius: 6px; padding: 6px 4px;
+            font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+            transition: background-color 140ms ease, color 140ms ease;
+        }
+        .tes-segmented button[aria-checked="true"] {
+            background: var(--bg-elevated, #fff); color: var(--tes-accent);
+            box-shadow: 0 1px 2px rgba(0,0,0,.12);
+        }
+        html.dark .tes-segmented button[aria-checked="true"] { background: #374151; color: #5EC6FF; }
+        .tes-segmented button:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 1px; }
+        .tes-repeat-badge { color: var(--tes-accent); margin-left: 6px; font-size: 0.8em; }
+        #tes-dialog-panel {
+            background: var(--bg-elevated, #fff); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: 12px;
+        }
+        .tes-btn {
+            border-radius: 8px; padding: 8px 14px; font-size: 0.875rem; font-weight: 600;
+            cursor: pointer; border: 1px solid transparent;
+            transition: background-color 140ms ease, opacity 140ms ease;
+        }
+        .tes-btn:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 2px; }
+        .tes-btn-primary { background: #0158C9; color: #fff; }
+        .tes-btn-primary:hover { background: #2B7BE4; }
+        .tes-btn-danger { background: var(--tes-pago); color: #fff; }
+        .tes-btn-danger:hover { opacity: .9; }
+        .tes-btn-ghost { background: transparent; color: var(--text-primary); border-color: var(--border-color); }
+        .tes-btn-ghost:hover { background: var(--bg-secondary); }
+        @media (prefers-reduced-motion: reduce) {
+            .tes-switch, .tes-switch-thumb, .tes-segmented button, .tes-btn { transition: none; }
+        }
     </style>
 </head>
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
@@ -1976,6 +2044,17 @@
         </div>
     </div>
 
+    <!-- Tesorería: diálogo de confirmación propio (sustituye a confirm()) -->
+    <div id="tes-dialog" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden" style="z-index:70;" role="dialog" aria-modal="true" aria-labelledby="tes-dialog-title">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div id="tes-dialog-panel" class="max-w-md w-full p-6 shadow-xl">
+                <h3 id="tes-dialog-title" class="text-lg font-semibold mb-2"></h3>
+                <p id="tes-dialog-message" class="text-sm mb-5" style="color: var(--text-secondary);"></p>
+                <div id="tes-dialog-actions" class="flex flex-wrap justify-end gap-2"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal para crear/editar movimientos -->
     <div id="movement-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
         <div class="flex items-center justify-center min-h-screen p-4">
@@ -2016,6 +2095,41 @@
                         
                         <div id="movement-accounts-section">
                             <!-- Se llenará dinámicamente según el tipo de movimiento -->
+                        </div>
+
+                        <!-- Tesorería: marcar el movimiento como cobro/pago recurrente -->
+                        <div id="recurrence-section" class="hidden">
+                            <div class="border-t pt-4 space-y-3">
+                                <p id="recurrence-hint" class="text-xs text-gray-500 hidden"></p>
+                                <p id="recurrence-linked" class="text-xs text-gray-500 hidden">
+                                    <i class="fas flow-repeat tes-repeat-badge" style="margin-left:0;margin-right:4px;"></i>
+                                    Vinculado a una serie recurrente. Gestiónala desde Tesorería.
+                                </p>
+                                <div id="recurrence-controls" class="hidden">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <span id="recurrence-label" class="text-sm font-medium text-gray-700">Es un pago recurrente</span>
+                                        <button type="button" id="recurrence-toggle" class="tes-switch" role="switch" aria-checked="false" aria-labelledby="recurrence-label">
+                                            <span class="tes-switch-thumb"></span>
+                                        </button>
+                                    </div>
+                                    <div id="recurrence-options" class="hidden space-y-3 mt-3">
+                                        <div>
+                                            <span id="recurrence-freq-label" class="block text-sm font-medium text-gray-700 mb-1">Frecuencia</span>
+                                            <div id="recurrence-freq" class="tes-segmented" role="radiogroup" aria-labelledby="recurrence-freq-label">
+                                                <button type="button" role="radio" aria-checked="true" tabindex="0" data-freq="mensual">Mensual</button>
+                                                <button type="button" role="radio" aria-checked="false" tabindex="-1" data-freq="trimestral">Trimestral</button>
+                                                <button type="button" role="radio" aria-checked="false" tabindex="-1" data-freq="semestral">Semestral</button>
+                                                <button type="button" role="radio" aria-checked="false" tabindex="-1" data-freq="anual">Anual</button>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-sm text-gray-700">
+                                            <label for="recurrence-aviso">Avisarme</label>
+                                            <input type="number" id="recurrence-aviso" min="0" max="7" step="1" value="2" class="w-16 border border-gray-300 rounded-md px-2 py-1 text-center">
+                                            <span>días antes</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
@@ -2516,6 +2630,9 @@
                 document.getElementById('movement-type').addEventListener('change', (e) => {
                     this.handleMovementTypeChange(e.target.value);
                 });
+
+                // Tesorería: bloque "cobro/pago recurrente" del formulario de movimiento
+                this.setupRecurrenceControls();
 
                 // Filtros de cuentas
                 document.querySelectorAll('.account-filter').forEach(button => {
@@ -6469,7 +6586,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${movement.descripcion}${movement.compromiso_id ? '<i class="fas flow-repeat tes-repeat-badge" title="Cobro/pago recurrente" aria-label="Recurrente"></i>' : ''}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6586,7 +6703,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${movement.descripcion}${movement.compromiso_id ? '<i class="fas flow-repeat tes-repeat-badge" title="Cobro/pago recurrente" aria-label="Recurrente"></i>' : ''}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6826,6 +6943,7 @@
                         const destSelect = document.querySelector('#movement-accounts-section select:last-child');
                         if (destSelect) destSelect.value = movement.cuenta_destino_id;
                     }
+                    this.updateRecurrenceSection();
                 }, 100);
                 
                 // MUY IMPORTANTE: NO asignar movementBeingEdited → se creará uno nuevo al guardar
@@ -6868,6 +6986,7 @@
                         const destSelect = document.querySelector('#movement-accounts-section select:last-child');
                         if (destSelect) destSelect.value = movement.cuenta_destino_id;
                     }
+                    this.updateRecurrenceSection();
                 }, 100);
                 
                 // Guardar ID para actualizar en lugar de crear
@@ -7903,6 +8022,11 @@
                 // Establecer fecha actual por defecto (en hora local, no UTC)
                 const today = this._formatDateLocal(new Date());
                 document.getElementById('movement-date').value = today;
+
+                this.resetRecurrenceControls();
+                // Precarga (sin bloquear) de la config premium y de las series existentes
+                this.tesoreriaGetConfig();
+                this.tesoreriaLoadCompromisos().catch(() => {});
                 
                 modal.classList.remove('hidden');
             }
@@ -7927,6 +8051,7 @@
                 // Limpiar sección de cuentas
                 const accountsSection = document.getElementById('movement-accounts-section');
                 if (accountsSection) accountsSection.innerHTML = '';
+                this.resetRecurrenceControls();
             }
 
             handleAccountTypeChange(type) {
@@ -7980,6 +8105,279 @@
                 const pagos = document.getElementById('account-admite-pagos');
                 if (cobros && !esIngreso) cobros.checked = false;
                 if (pagos && !esGasto) pagos.checked = false;
+            }
+
+            // ===== TESORERÍA · recurrencia en el formulario de movimiento =====
+
+            setupRecurrenceControls() {
+                const toggle = document.getElementById('recurrence-toggle');
+                const group = document.getElementById('recurrence-freq');
+                const accountsSection = document.getElementById('movement-accounts-section');
+                if (!toggle || !group) return;
+
+                toggle.addEventListener('click', async () => {
+                    const on = toggle.getAttribute('aria-checked') !== 'true';
+                    if (on) {
+                        // Normalmente ya está en caché (se precarga al abrir el modal)
+                        const cfg = this._tesoreriaConfig || await this.tesoreriaGetConfig();
+                        if (cfg.premium_required && !Auth.isPremium()) {
+                            this.showPlanSelector();
+                            return;
+                        }
+                    }
+                    this.setRecurrenceToggle(on);
+                });
+
+                const select = (btn) => {
+                    group.querySelectorAll('[role="radio"]').forEach(b => {
+                        const sel = b === btn;
+                        b.setAttribute('aria-checked', sel ? 'true' : 'false');
+                        b.tabIndex = sel ? 0 : -1;
+                    });
+                };
+                group.addEventListener('click', (e) => {
+                    const btn = e.target.closest('[role="radio"]');
+                    if (btn) select(btn);
+                });
+                group.addEventListener('keydown', (e) => {
+                    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+                    if (!(e.key in keys)) return;
+                    e.preventDefault();
+                    const btns = [...group.querySelectorAll('[role="radio"]')];
+                    const i = btns.findIndex(b => b.getAttribute('aria-checked') === 'true');
+                    const next = btns[(i + keys[e.key] + btns.length) % btns.length];
+                    select(next);
+                    next.focus();
+                });
+
+                // Las <select> de cuenta se regeneran con innerHTML: delegar el evento
+                accountsSection?.addEventListener('change', (e) => {
+                    if (e.target.matches('#source-account, #destination-account')) this.updateRecurrenceSection();
+                });
+            }
+
+            setRecurrenceToggle(on) {
+                const toggle = document.getElementById('recurrence-toggle');
+                if (!toggle) return;
+                toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+                document.getElementById('recurrence-options')?.classList.toggle('hidden', !on);
+            }
+
+            resetRecurrenceControls() {
+                this.setRecurrenceToggle(false);
+                const group = document.getElementById('recurrence-freq');
+                group?.querySelectorAll('[role="radio"]').forEach(b => {
+                    const sel = b.dataset.freq === 'mensual';
+                    b.setAttribute('aria-checked', sel ? 'true' : 'false');
+                    b.tabIndex = sel ? 0 : -1;
+                });
+                const aviso = document.getElementById('recurrence-aviso');
+                if (aviso) aviso.value = 2;
+                document.getElementById('recurrence-section')?.classList.add('hidden');
+            }
+
+            // Cuenta de ingreso (cobro) o de gasto (pago) seleccionada en el formulario
+            _recurrenceAccountId(tipo) {
+                if (tipo === 'ingreso') return document.getElementById('source-account')?.value || '';
+                if (tipo === 'gasto') return document.getElementById('destination-account')?.value || '';
+                return '';
+            }
+
+            updateRecurrenceSection() {
+                const section = document.getElementById('recurrence-section');
+                if (!section) return;
+                const tipo = document.getElementById('movement-type')?.value;
+                const hint = document.getElementById('recurrence-hint');
+                const linked = document.getElementById('recurrence-linked');
+                const controls = document.getElementById('recurrence-controls');
+                const show = (el, v) => el?.classList.toggle('hidden', !v);
+
+                if (tipo !== 'ingreso' && tipo !== 'gasto') {
+                    section.classList.add('hidden');
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+
+                // Editando un movimiento que ya pertenece a una serie
+                const editing = this.movementBeingEdited
+                    ? this.accountingManager.getMovement(this.movementBeingEdited) : null;
+                if (editing?.compromiso_id) {
+                    section.classList.remove('hidden');
+                    show(linked, true); show(hint, false); show(controls, false);
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+
+                const accountId = this._recurrenceAccountId(tipo);
+                if (!accountId) {
+                    section.classList.add('hidden');
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+                const acc = this.accountingManager.getAccount(accountId);
+                const admite = tipo === 'ingreso' ? !!acc?.admite_cobros : !!acc?.admite_pagos;
+                section.classList.remove('hidden');
+                show(linked, false);
+                if (!admite) {
+                    hint.textContent = tipo === 'ingreso'
+                        ? "Activa 'cobros recurrentes' en esta cuenta para programarlo"
+                        : "Activa 'pagos recurrentes' en esta cuenta para programarlo";
+                    show(hint, true); show(controls, false);
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+                show(hint, false); show(controls, true);
+                document.getElementById('recurrence-label').textContent =
+                    tipo === 'ingreso' ? 'Es un cobro recurrente' : 'Es un pago recurrente';
+            }
+
+            // null si el toggle no está activo o no aplica; si no, la selección del usuario
+            getRecurrenceSelection(movementData) {
+                const toggle = document.getElementById('recurrence-toggle');
+                const section = document.getElementById('recurrence-section');
+                if (!toggle || toggle.getAttribute('aria-checked') !== 'true') return null;
+                if (!section || section.classList.contains('hidden')) return null;
+                if (movementData.tipo !== 'ingreso' && movementData.tipo !== 'gasto') return null;
+                const cuentaId = movementData.tipo === 'ingreso' ? movementData.cuenta_id : movementData.cuenta_destino_id;
+                if (!cuentaId) return null;
+                const freqBtn = document.querySelector('#recurrence-freq [aria-checked="true"]');
+                let aviso = parseInt(document.getElementById('recurrence-aviso')?.value, 10);
+                if (!Number.isFinite(aviso)) aviso = 2;
+                aviso = Math.min(7, Math.max(0, aviso));
+                return {
+                    tipo: movementData.tipo === 'ingreso' ? 'cobro' : 'pago',
+                    cuenta_id: cuentaId,
+                    frecuencia: freqBtn?.dataset.freq || 'mensual',
+                    aviso_dias: aviso
+                };
+            }
+
+            // Crea la serie o reutiliza la existente (misma cuenta y tipo). Devuelve
+            // { compromiso_id, created, tipo } o null si el usuario cancela.
+            async tesoreriaResolveRecurrence(movementData, movementId, sel) {
+                const compromisos = await this.tesoreriaLoadCompromisos(true);
+                const existente = compromisos.find(c => c.activo && c.tipo === sel.tipo && c.cuenta_id === sel.cuenta_id);
+                const importe = Math.round(Number(movementData.cantidad) * 100) / 100;
+                const etiqueta = sel.tipo === 'cobro' ? 'cobro' : 'pago';
+
+                if (existente) {
+                    const eleccion = await this.tesoreriaDialog({
+                        title: `Ya tienes un ${etiqueta} recurrente en esta cuenta`,
+                        message: `${existente.concepto}: ${this.formatCurrency(existente.importe)}, ${existente.frecuencia}. ¿Actualizar importe y frecuencia a ${this.formatCurrency(importe)}, ${sel.frecuencia}?`,
+                        actions: [
+                            { label: 'Cancelar', value: null, variant: 'ghost' },
+                            { label: 'Crear otro distinto', value: 'nuevo', variant: 'ghost' },
+                            { label: 'Actualizar', value: 'actualizar', variant: 'primary' }
+                        ]
+                    });
+                    if (!eleccion) return null;
+                    if (eleccion === 'actualizar') {
+                        const saved = await DataClient.saveCompromiso(this.currentUserId(), {
+                            ...existente, importe, frecuencia: sel.frecuencia, aviso_dias: sel.aviso_dias
+                        });
+                        this._tesoreriaUpsertCache(saved);
+                        return { compromiso_id: existente.id, created: false, tipo: etiqueta };
+                    }
+                }
+
+                const saved = await DataClient.saveCompromiso(this.currentUserId(), {
+                    id: crypto.randomUUID(),
+                    tipo: sel.tipo,
+                    cuenta_id: sel.cuenta_id,
+                    concepto: (movementData.descripcion || '').trim(),
+                    importe,
+                    frecuencia: sel.frecuencia,
+                    fecha_ancla: movementData.fecha,
+                    aviso_dias: sel.aviso_dias,
+                    activo: true,
+                    movimiento_origen_id: movementId
+                });
+                this._tesoreriaUpsertCache(saved);
+                return { compromiso_id: saved.id, created: true, tipo: etiqueta };
+            }
+
+            currentUserId() {
+                return Auth.getCurrentUser()?.id;
+            }
+
+            async tesoreriaGetConfig() {
+                if (!this._tesoreriaConfigPromise) {
+                    this._tesoreriaConfigPromise = DataClient.getTesoreriaConfig()
+                        .then(cfg => { this._tesoreriaConfig = cfg; return cfg; })
+                        // Si falla, no bloquear en cliente: el servidor aplica el gating igualmente
+                        .catch(() => { this._tesoreriaConfigPromise = null; return { premium_required: false }; });
+                }
+                return this._tesoreriaConfigPromise;
+            }
+
+            // Caché de compromisos. force=true vuelve a pedirlos al servidor.
+            async tesoreriaLoadCompromisos(force = false) {
+                if (this._compromisos && !force) return this._compromisos;
+                try {
+                    const list = await DataClient.listCompromisos(this.currentUserId());
+                    this._compromisos = (list || []).map(c => ({ ...c, activo: c.activo === true || c.activo === 1 }));
+                } catch (err) {
+                    if (err.code === 'premium_required') { this._compromisos = []; return []; }
+                    throw err;
+                }
+                return this._compromisos;
+            }
+
+            _tesoreriaUpsertCache(c) {
+                if (!c) return;
+                const norm = { ...c, activo: c.activo === true || c.activo === 1 };
+                this._compromisos = this._compromisos || [];
+                const i = this._compromisos.findIndex(x => x.id === norm.id);
+                if (i >= 0) this._compromisos[i] = norm; else this._compromisos.push(norm);
+            }
+
+            async tesoreriaDeleteCompromisoSilently(id) {
+                try {
+                    await DataClient.deleteCompromiso(this.currentUserId(), id);
+                    this._compromisos = (this._compromisos || []).filter(c => c.id !== id);
+                } catch (err) {
+                    console.error('No se pudo deshacer el compromiso', err);
+                }
+            }
+
+            // Diálogo propio (no confirm()). actions: [{ label, value, variant: 'primary'|'danger'|'ghost' }]
+            // Devuelve una promesa con el value elegido; Escape o clic fuera → null.
+            tesoreriaDialog({ title, message, actions }) {
+                const modal = document.getElementById('tes-dialog');
+                const panel = document.getElementById('tes-dialog-panel');
+                const actionsEl = document.getElementById('tes-dialog-actions');
+                document.getElementById('tes-dialog-title').textContent = title;
+                document.getElementById('tes-dialog-message').textContent = message;
+                actionsEl.innerHTML = '';
+                const previousFocus = document.activeElement;
+
+                return new Promise((resolve) => {
+                    const close = (value) => {
+                        modal.classList.add('hidden');
+                        document.removeEventListener('keydown', onKey, true);
+                        modal.removeEventListener('click', onBackdrop);
+                        previousFocus?.focus?.();
+                        resolve(value);
+                    };
+                    const onKey = (e) => {
+                        if (e.key === 'Escape') { e.stopPropagation(); close(null); }
+                    };
+                    const onBackdrop = (e) => { if (!panel.contains(e.target)) close(null); };
+                    let primary = null;
+                    actions.forEach(a => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        b.className = `tes-btn tes-btn-${a.variant || 'ghost'}`;
+                        b.textContent = a.label;
+                        b.addEventListener('click', () => close(a.value));
+                        actionsEl.appendChild(b);
+                        if (a.variant === 'primary' || a.variant === 'danger') primary = b;
+                    });
+                    document.addEventListener('keydown', onKey, true);
+                    modal.addEventListener('click', onBackdrop);
+                    modal.classList.remove('hidden');
+                    (primary || actionsEl.lastElementChild)?.focus();
+                });
             }
 
             handleMovementTypeChange(type) {
@@ -8095,6 +8493,7 @@
                         break;
                     }
                 }
+                this.updateRecurrenceSection();
             }
 
             async handleAccountSubmit(e) {
@@ -8215,8 +8614,16 @@
                     // Verificar si estamos editando o creando
                     const movementId = this.movementBeingEdited;
                     
+                    // Tesorería: ¿el usuario lo ha marcado como cobro/pago recurrente?
+                    const recurrente = this.getRecurrenceSelection(movementData);
+
                     if (movementId) {
                         // ACTUALIZAR movimiento existente
+                        if (recurrente) {
+                            const vinculo = await this.tesoreriaResolveRecurrence(movementData, movementId, recurrente);
+                            if (!vinculo) return; // cancelado en el diálogo: el modal sigue abierto
+                            movementData.compromiso_id = vinculo.compromiso_id;
+                        }
                         const success = await this.accountingManager.updateMovement(movementId, movementData);
                         this.movementBeingEdited = null;
                         
@@ -8266,9 +8673,30 @@
                             this.showToast(`Pago registrado: ${this.formatCurrency(importeCapital)} capital + ${this.formatCurrency(importeInteres)} intereses`, 'success');
                         } else {
                             // Comportamiento normal sin desglose
-                            await this.accountingManager.createMovement(movementData);
-                            this.movementBeingEdited = null;
-                            this.showToast('Movimiento registrado correctamente', 'success');
+                            if (recurrente) {
+                                // El movimiento es la primera ocurrencia (ya realizada) de la serie
+                                const movId = crypto.randomUUID();
+                                const vinculo = await this.tesoreriaResolveRecurrence(movementData, movId, recurrente);
+                                if (!vinculo) return; // cancelado en el diálogo: el modal sigue abierto
+                                const res = await this.accountingManager.createMovement({
+                                    ...movementData, id: movId, compromiso_id: vinculo.compromiso_id
+                                });
+                                if (!res || !res.success) {
+                                    // No dejar una serie huérfana si el movimiento no se ha podido guardar
+                                    if (vinculo.created) {
+                                        await this.tesoreriaDeleteCompromisoSilently(vinculo.compromiso_id);
+                                    }
+                                    throw new Error(res?.error || 'No se pudo guardar el movimiento');
+                                }
+                                this.movementBeingEdited = null;
+                                this.showToast(vinculo.created
+                                    ? `Movimiento registrado y ${vinculo.tipo} recurrente programado`
+                                    : `Movimiento registrado y ${vinculo.tipo} recurrente actualizado`, 'success');
+                            } else {
+                                await this.accountingManager.createMovement(movementData);
+                                this.movementBeingEdited = null;
+                                this.showToast('Movimiento registrado correctamente', 'success');
+                            }
                         }
                     }
                     
