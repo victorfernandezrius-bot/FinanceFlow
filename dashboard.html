@@ -19,6 +19,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- flag-icons: banderas SVG (se ven bien en todos los SO, incluido Windows) para el selector de divisa -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css">
+    <!-- Cartera de Inversión: estilos de la sección (tokens del dashboard, modo oscuro) -->
+    <link rel="stylesheet" href="./public/cartera.css">
     <!-- SimpleWebAuthn (browser) para activar el login biométrico Face ID / Touch ID -->
     <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13/dist/bundle/index.umd.min.js"></script>
     <style>
@@ -592,6 +594,241 @@
 /* Forzar texto legible SOLO en el modal de planes, sin afectar al resto del dashboard */
         #plan-selector-modal h3 { color: #111827 !important; }
         #plan-selector-modal p { color: #374151 !important; }
+
+        /* ===== Tesorería (cobros y pagos recurrentes) ===== */
+        /* Marcas (barras/puntos): par verde/rojo validado para daltonismo por
+           luminosidad (deutan/protan ΔE ≥ 8.7 claro, 9.1 oscuro). Texto: tonos con
+           contraste AA sobre la superficie. Nunca se usa el color de marca en texto. */
+        :root {
+            --tes-cobro-mark: #15803D;
+            --tes-pago-mark: #F87171;
+            --tes-cobro-text: #15803D;
+            --tes-pago-text: #DC2626;
+            --tes-cobro-soft: rgba(21, 128, 61, 0.10);
+            --tes-pago-soft: rgba(220, 38, 38, 0.08);
+            --tes-accent: #0158C9;
+            --tes-navy: #0B2A55;
+            --tes-amber: #F5B301;
+        }
+        html.dark {
+            --tes-cobro-mark: #20B15A;
+            --tes-pago-mark: #D32F2F;
+            --tes-cobro-text: #61CE70;
+            --tes-pago-text: #F87171;
+            --tes-cobro-soft: rgba(32, 177, 90, 0.16);
+            --tes-pago-soft: rgba(211, 47, 47, 0.18);
+            --tes-accent: #5EC6FF;
+        }
+        .tes-num { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+        .tes-switch {
+            position: relative; width: 40px; height: 22px; flex-shrink: 0;
+            border-radius: 999px; border: none; cursor: pointer; padding: 0;
+            background: var(--border-color);
+            transition: background-color 160ms ease;
+        }
+        .tes-switch[aria-checked="true"] { background: var(--tes-accent); }
+        .tes-switch:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 2px; }
+        .tes-switch-thumb {
+            position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+            border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25);
+            transition: transform 160ms ease;
+        }
+        .tes-switch[aria-checked="true"] .tes-switch-thumb { transform: translateX(18px); }
+        .tes-segmented {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px;
+            border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color);
+        }
+        .tes-segmented button {
+            border: none; background: transparent; border-radius: 6px; padding: 6px 4px;
+            font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); cursor: pointer;
+            transition: background-color 140ms ease, color 140ms ease;
+        }
+        .tes-segmented button[aria-checked="true"] {
+            background: var(--bg-elevated, #fff); color: var(--tes-accent);
+            box-shadow: 0 1px 2px rgba(0,0,0,.12);
+        }
+        html.dark .tes-segmented button[aria-checked="true"] { background: #374151; color: #5EC6FF; }
+        .tes-segmented button:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 1px; }
+        .tes-repeat-badge { color: var(--tes-accent); margin-left: 6px; font-size: 0.8em; }
+        #tes-dialog-panel {
+            background: var(--bg-elevated, #fff); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: 12px;
+        }
+        .tes-btn {
+            border-radius: 8px; padding: 8px 14px; font-size: 0.875rem; font-weight: 600;
+            cursor: pointer; border: 1px solid transparent;
+            transition: background-color 140ms ease, opacity 140ms ease;
+        }
+        .tes-btn:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 2px; }
+        .tes-btn-primary { background: #0158C9; color: #fff; }
+        .tes-btn-primary:hover { background: #2B7BE4; }
+        .tes-btn-danger { background: #DC2626; color: #fff; }
+        .tes-btn-danger:hover { opacity: .9; }
+        .tes-btn-ghost { background: transparent; color: var(--text-primary); border-color: var(--border-color); }
+        .tes-btn-ghost:hover { background: var(--bg-secondary); }
+        .tes-card {
+            background: var(--bg-elevated, #fff); border: 1px solid var(--border-color);
+            border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+            padding: 1rem; margin-bottom: 1.25rem;
+        }
+        @media (min-width: 640px) { .tes-card { padding: 1.5rem; } }
+        .tes-card-head { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        .tes-card-title { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; color: var(--text-primary); }
+        .tes-muted { color: var(--text-secondary); font-size: .85rem; }
+        .tes-text-cobro { color: var(--tes-cobro-text); }
+        .tes-text-pago { color: var(--tes-pago-text); }
+        .tes-horizonte { min-width: min(100%, 360px); }
+        .tes-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+        @media (min-width: 1024px) { .tes-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .tes-kpi {
+            border: 1px solid var(--border-color); border-radius: var(--radius-card);
+            padding: .85rem 1rem; display: flex; flex-direction: column; gap: .2rem; min-width: 0;
+            background: var(--bg-primary, #fff);
+        }
+        .tes-kpi-label { font-size: .78rem; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: .4rem; }
+        .tes-kpi-value { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.35rem; line-height: 1.2; color: var(--text-primary); overflow-wrap: anywhere; }
+        .tes-kpi-sub { font-size: .75rem; color: var(--text-secondary); }
+        .tes-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
+        .tes-dot-cobro { background: var(--tes-cobro-mark); }
+        .tes-dot-pago { background: var(--tes-pago-mark); }
+        .tes-kpi-hero { background: var(--tes-navy); border-color: var(--tes-navy); }
+        .tes-kpi-hero .tes-kpi-label, .tes-kpi-hero .tes-kpi-sub { color: rgba(255,255,255,.78); }
+        .tes-kpi-hero .tes-kpi-value { color: #fff; }
+        .tes-kpi-hero::before { content: ''; display: block; width: 28px; height: 3px; border-radius: 2px; background: var(--tes-amber); margin-bottom: .35rem; }
+        .tes-kpi-hero.tes-neg .tes-kpi-value { color: #FCA5A5; }
+        .tes-kpi-warn { color: #FDE68A; font-size: .75rem; font-weight: 600; display: flex; gap: .3rem; align-items: center; }
+        .tes-chart-head { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
+        .tes-legend { display: flex; gap: 1rem; font-size: .8rem; color: var(--text-secondary); align-items: center; }
+        .tes-legend span { display: inline-flex; align-items: center; gap: .35rem; }
+        .tes-chart { position: relative; width: 100%; }
+        .tes-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+        .tes-chart .tes-axis text { fill: var(--text-secondary); font-size: 11px; font-family: var(--font-body); font-variant-numeric: tabular-nums; }
+        .tes-chart .tes-grid line { stroke: var(--border-color); stroke-width: 1; }
+        .tes-chart .tes-baseline { stroke: var(--text-secondary); stroke-opacity: .5; stroke-width: 1; }
+        .tes-bar { cursor: pointer; outline: none; }
+        .tes-bar .tes-hit { fill: transparent; }
+        .tes-bar:hover .tes-hit, .tes-bar:focus-visible .tes-hit { fill: var(--text-primary); fill-opacity: .05; }
+        .tes-bar:focus-visible .tes-mark { stroke: var(--text-primary); stroke-width: 2; }
+        .tes-mark-cobro { fill: var(--tes-cobro-mark); }
+        .tes-mark-pago { fill: var(--tes-pago-mark); }
+        .tes-grow { transform-box: fill-box; transform-origin: 50% 100%; animation: tes-grow 320ms cubic-bezier(.2,.7,.3,1) both; }
+        @keyframes tes-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+        .tes-tooltip {
+            position: absolute; pointer-events: none; z-index: 5; max-width: 240px;
+            background: var(--bg-elevated, #fff); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 16px rgba(2,20,50,.14);
+            padding: .5rem .65rem; font-size: .78rem; line-height: 1.35; opacity: 0; transition: opacity 120ms ease;
+        }
+        .tes-tooltip.tes-show { opacity: 1; }
+        .tes-tooltip strong { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-size: .95rem; }
+        .tes-skel { border-radius: 8px; background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border-color) 37%, var(--bg-secondary) 63%); background-size: 400% 100%; animation: tes-shimmer 1.4s ease infinite; }
+        @keyframes tes-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        .tes-state { text-align: center; padding: 2rem 1rem; }
+        .tes-state h4 { font-family: var(--font-display); font-weight: 700; color: var(--text-primary); margin: .5rem 0 .35rem; }
+        .tes-state p { color: var(--text-secondary); font-size: .9rem; max-width: 460px; margin: 0 auto 1rem; }
+        .tes-state-icon { font-size: 2rem; color: var(--tes-accent); }
+        .tes-nav { display: flex; gap: .4rem; align-items: center; }
+        .tes-icon-btn {
+            width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+            border-radius: var(--radius-control); border: 1px solid var(--border-color);
+            background: transparent; color: var(--text-primary); cursor: pointer;
+            transition: background-color 140ms ease;
+        }
+        .tes-icon-btn:hover { background: var(--bg-secondary); }
+        .tes-icon-btn:focus-visible, .tes-chip:focus-visible, .tes-more:focus-visible, .tes-cell:focus-visible { outline: 2px solid var(--tes-accent); outline-offset: 2px; }
+        .tes-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .5rem; }
+        .tes-day {
+            border: 1px solid var(--border-color); border-radius: var(--radius-control);
+            padding: .5rem; min-height: 132px; display: flex; flex-direction: column; gap: .35rem;
+            background: var(--bg-primary, #fff); min-width: 0;
+        }
+        .tes-day-head { display: flex; align-items: baseline; gap: .35rem; }
+        .tes-day-name { font-size: .72rem; font-weight: 600; text-transform: capitalize; color: var(--text-secondary); }
+        .tes-day-num { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; color: var(--text-primary); }
+        .tes-today { border-color: var(--tes-accent); box-shadow: inset 0 0 0 1px var(--tes-accent); }
+        .tes-today-pill { margin-left: auto; font-size: .66rem; font-weight: 700; color: #fff; background: #0158C9; border-radius: 999px; padding: 1px 7px; }
+        .tes-day-empty { font-size: .75rem; color: var(--text-secondary); opacity: .6; }
+        .tes-chip {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
+            border: none; border-left: 3px solid var(--tes-cobro-mark); border-radius: 6px;
+            padding: .3rem .45rem; background: var(--tes-cobro-soft); cursor: pointer; min-width: 0;
+        }
+        .tes-chip-pago { border-left-color: var(--tes-pago-mark); background: var(--tes-pago-soft); }
+        .tes-chip-txt { font-size: .74rem; font-weight: 600; color: var(--text-primary); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tes-chip-amt { font-size: .74rem; font-weight: 700; font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+        .tes-more {
+            font-size: .74rem; font-weight: 700; color: var(--tes-accent); background: transparent;
+            border: 1px dashed var(--border-color); border-radius: 6px; padding: .2rem .4rem; cursor: pointer;
+        }
+        .tes-note { margin-top: .75rem; }
+        @media (max-width: 767px) {
+            .tes-week {
+                display: flex; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
+                padding-bottom: .35rem; -webkit-overflow-scrolling: touch;
+            }
+            .tes-day { flex: 0 0 42%; scroll-snap-align: start; }
+        }
+        .tes-cal-head, .tes-cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+        .tes-cal-head { margin-bottom: 4px; }
+        .tes-cal-head span { text-align: center; font-size: .72rem; font-weight: 700; color: var(--text-secondary); padding: .25rem 0; }
+        .tes-cal-row { margin-bottom: 4px; }
+        .tes-cell {
+            min-height: 84px; border: 1px solid var(--border-color); border-radius: var(--radius-control);
+            padding: .35rem .45rem; display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+            background: var(--bg-primary, #fff); text-align: left; min-width: 0; font: inherit; color: inherit;
+        }
+        button.tes-cell { cursor: pointer; transition: background-color 140ms ease; }
+        button.tes-cell:hover { background: var(--bg-secondary); }
+        .tes-cell.tes-out { opacity: .38; }
+        .tes-cell.tes-today { border-color: var(--tes-accent); box-shadow: inset 0 0 0 1px var(--tes-accent); }
+        .tes-cell-num { font-family: var(--font-display); font-weight: 700; font-size: .85rem; color: var(--text-primary); }
+        .tes-cell.tes-today .tes-cell-num { color: var(--tes-accent); }
+        .tes-cell-amt { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: .74rem; display: flex; align-items: center; gap: .25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tes-cell-mob { display: none; }
+        .tes-cell-dots { display: flex; gap: 3px; }
+        .tes-cell-net { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: .66rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tes-month-foot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); }
+        .tes-month-foot div { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+        .tes-month-foot .tes-kpi-value { font-size: 1.05rem; }
+        @media (max-width: 767px) {
+            .tes-cell { min-height: 54px; padding: .3rem; align-items: center; }
+            .tes-cell-desk { display: none; }
+            .tes-cell-mob { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; }
+            .tes-month-foot .tes-kpi-value { font-size: .9rem; }
+        }
+        .tes-form { display: flex; flex-direction: column; gap: .9rem; padding: .5rem 0 1rem; }
+        .tes-form label { font-size: .8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: .25rem; }
+        .tes-input {
+            width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-control);
+            padding: .5rem .65rem; background: var(--bg-primary, #fff); color: var(--text-primary); font: inherit;
+        }
+        .tes-input:focus { outline: 2px solid var(--tes-accent); outline-offset: 1px; }
+        .tes-form-error { color: var(--tes-pago-text); font-size: .8rem; font-weight: 600; }
+        .tes-foot-actions { display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 1.25rem 1.25rem; border-top: 1px solid var(--border-color); }
+        /* Modal de desglose */
+        #tes-desglose-panel {
+            background: var(--bg-elevated, #fff); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: 12px;
+            max-height: calc(100vh - 2rem); display: flex; flex-direction: column;
+        }
+        .tes-desglose-body { overflow-y: auto; padding: 0 1.25rem; }
+        .tes-row { display: flex; gap: .75rem; justify-content: space-between; align-items: flex-start; padding: .7rem 0; border-top: 1px solid var(--border-color); }
+        .tes-row:first-child { border-top: none; }
+        .tes-row-main { min-width: 0; }
+        .tes-row-title { font-weight: 600; font-size: .9rem; overflow-wrap: anywhere; }
+        .tes-row-meta { font-size: .76rem; color: var(--text-secondary); margin-top: .1rem; }
+        .tes-row-amount { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+        .tes-row-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
+        .tes-link { background: none; border: none; padding: 0; font-size: .78rem; font-weight: 600; color: var(--tes-accent); cursor: pointer; }
+        .tes-link:hover { text-decoration: underline; }
+        .tes-link-danger { color: var(--tes-pago-text); }
+        .tes-badge { display: inline-block; font-size: .68rem; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: var(--bg-secondary); color: var(--text-secondary); margin-left: .35rem; vertical-align: middle; }
+        .tes-group-title { font-size: .75rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--text-secondary); margin: 1rem 0 .1rem; display: flex; align-items: center; gap: .4rem; }
+        .tes-total { display: flex; justify-content: space-between; font-weight: 700; padding: .75rem 1.25rem; border-top: 1px solid var(--border-color); }
+        @media (prefers-reduced-motion: reduce) {
+            .tes-switch, .tes-switch-thumb, .tes-segmented button, .tes-btn, .tes-tooltip, .tes-icon-btn, button.tes-cell { transition: none; }
+            .tes-grow, .tes-skel { animation: none; }
+        }
     </style>
 </head>
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
@@ -730,6 +967,16 @@
                     <a href="#" id="nav-movements" title="Movimientos" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-exchange-alt mr-3"></i>
                         <span class="nav-label">Movimientos</span>
+                    </a>
+                    
+                    <a href="#" id="nav-tesoreria" title="Tesorería" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <i class="fas fa-calendar-alt mr-3"></i>
+                        <span class="nav-label">Tesorería</span>
+                    </a>
+                    
+                    <a href="#" id="nav-cartera" title="Cartera de inversión" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <i class="fas fa-chart-pie mr-3"></i>
+                        <span class="nav-label">Cartera de inversión</span>
                     </a>
                     
                     <a href="#" id="nav-reports" title="Reportes" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
@@ -1155,6 +1402,81 @@
                 </div>
             </div>
             
+            <!-- Tesorería: calendario de cobros y pagos -->
+            <div id="section-tesoreria" class="section-content hidden">
+                <div class="section-container">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900">Tesorería</h2>
+                            <p class="text-gray-600">Tus cobros y pagos previstos y el efectivo con el que contarás</p>
+                        </div>
+                        <button type="button" onclick="dashboard.openMovementModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+                            <i class="fas fa-plus mr-2"></i>
+                            Nuevo Movimiento
+                        </button>
+                    </div>
+
+                    <div id="tes-locked" class="tes-card hidden">
+                        <div class="tes-state">
+                            <i class="fas fa-crown tes-state-icon" style="color: var(--premium-accent);"></i>
+                            <h4>La Tesorería es una función Premium</h4>
+                            <p>Anticipa tus cobros y pagos recurrentes y comprueba si tu saldo los cubre.</p>
+                            <button type="button" class="tes-btn tes-btn-primary" onclick="dashboard.showPlanSelector()">Ver planes</button>
+                        </div>
+                    </div>
+
+                    <div id="tes-content">
+                        <!-- 5a · Resumen de flujo de caja -->
+                        <section id="tes-resumen" class="tes-card" aria-labelledby="tes-resumen-title">
+                            <div class="tes-card-head">
+                                <h3 id="tes-resumen-title" class="tes-card-title">Flujo de caja previsto</h3>
+                                <div id="tes-horizonte" class="tes-segmented tes-horizonte" role="radiogroup" aria-label="Horizonte">
+                                    <button type="button" role="radio" aria-checked="false" tabindex="-1" data-h="mes">Este mes</button>
+                                    <button type="button" role="radio" aria-checked="true" tabindex="0" data-h="30">30 días</button>
+                                    <button type="button" role="radio" aria-checked="false" tabindex="-1" data-h="90">90 días</button>
+                                    <button type="button" role="radio" aria-checked="false" tabindex="-1" data-h="12m">12 meses</button>
+                                </div>
+                            </div>
+                            <div id="tes-resumen-body" aria-live="polite"></div>
+                        </section>
+
+                        <!-- 5b · Línea temporal de la semana -->
+                        <section id="tes-semana" class="tes-card" aria-labelledby="tes-semana-title">
+                            <div class="tes-card-head">
+                                <div>
+                                    <h3 id="tes-semana-title" class="tes-card-title">Esta semana</h3>
+                                    <p id="tes-semana-rango" class="tes-muted"></p>
+                                </div>
+                                <div class="tes-nav">
+                                    <button type="button" class="tes-icon-btn" data-semana="-1" aria-label="Semana anterior"><i class="fas fa-arrow-left"></i></button>
+                                    <button type="button" class="tes-btn tes-btn-ghost" data-semana="hoy">Hoy</button>
+                                    <button type="button" class="tes-icon-btn" data-semana="1" aria-label="Semana siguiente"><i class="fas fa-arrow-right"></i></button>
+                                </div>
+                            </div>
+                            <div id="tes-semana-body" aria-live="polite"></div>
+                        </section>
+
+                        <!-- 5c · Calendario mensual -->
+                        <section id="tes-mes" class="tes-card" aria-labelledby="tes-mes-title">
+                            <div class="tes-card-head">
+                                <h3 id="tes-mes-title" class="tes-card-title">Calendario</h3>
+                                <div class="tes-nav">
+                                    <button type="button" class="tes-icon-btn" data-mes="-1" aria-label="Mes anterior"><i class="fas fa-arrow-left"></i></button>
+                                    <button type="button" class="tes-btn tes-btn-ghost" data-mes="hoy">Hoy</button>
+                                    <button type="button" class="tes-icon-btn" data-mes="1" aria-label="Mes siguiente"><i class="fas fa-arrow-right"></i></button>
+                                </div>
+                            </div>
+                            <div id="tes-mes-body" aria-live="polite"></div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cartera de Inversión: el contenido lo monta js/cartera-section.js al abrirla -->
+            <div id="section-cartera" class="section-content hidden">
+                <div class="section-container" id="cartera-root"></div>
+            </div>
+
             <!-- Reports Section -->
             <div id="section-reports" class="section-content hidden">
                 <div class="section-container">
@@ -1924,6 +2246,25 @@
                             </div>
                         </div>
                         
+                        <!-- Tesorería: la cuenta admite cobros (ingreso) / pagos (gasto) recurrentes -->
+                        <div id="cashflow-flags-section" class="hidden">
+                            <div class="border-t pt-4">
+                                <div id="cashflow-cobros-row" class="flex items-center hidden">
+                                    <input type="checkbox" id="account-admite-cobros" name="admite_cobros" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                    <label for="account-admite-cobros" class="ml-2 block text-sm font-medium text-gray-700">
+                                        Esta cuenta puede contener cobros recurrentes
+                                    </label>
+                                </div>
+                                <div id="cashflow-pagos-row" class="flex items-center hidden">
+                                    <input type="checkbox" id="account-admite-pagos" name="admite_pagos" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                                    <label for="account-admite-pagos" class="ml-2 block text-sm font-medium text-gray-700">
+                                        Esta cuenta puede contener pagos recurrentes
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">Permite marcar sus movimientos como recurrentes y verlos en el calendario de Tesorería.</p>
+                            </div>
+                        </div>
+
                         <div id="initial-balance-field" class="hidden">
                             <label for="account-initial-balance" class="block text-sm font-medium text-gray-700">Saldo Inicial</label>
                             <input type="number" id="account-initial-balance" name="initial_balance" step="0.01" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2">
@@ -1953,6 +2294,36 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tesorería: desglose de un periodo / día -->
+    <div id="tes-desglose" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden" style="z-index:60;" role="dialog" aria-modal="true" aria-labelledby="tes-desglose-title">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div id="tes-desglose-panel" class="max-w-lg w-full shadow-xl">
+                <div class="flex items-start justify-between gap-3" style="padding: 1.25rem 1.25rem .5rem;">
+                    <div>
+                        <h3 id="tes-desglose-title" class="text-lg font-semibold"></h3>
+                        <p id="tes-desglose-sub" class="tes-muted"></p>
+                    </div>
+                    <button type="button" id="tes-desglose-close" class="text-gray-400 hover:text-gray-600" aria-label="Cerrar">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div id="tes-desglose-body" class="tes-desglose-body"></div>
+                <div id="tes-desglose-foot"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tesorería: diálogo de confirmación propio (sustituye a confirm()) -->
+    <div id="tes-dialog" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden" style="z-index:70;" role="dialog" aria-modal="true" aria-labelledby="tes-dialog-title">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div id="tes-dialog-panel" class="max-w-md w-full p-6 shadow-xl">
+                <h3 id="tes-dialog-title" class="text-lg font-semibold mb-2"></h3>
+                <p id="tes-dialog-message" class="text-sm mb-5" style="color: var(--text-secondary);"></p>
+                <div id="tes-dialog-actions" class="flex flex-wrap justify-end gap-2"></div>
             </div>
         </div>
     </div>
@@ -1997,6 +2368,41 @@
                         
                         <div id="movement-accounts-section">
                             <!-- Se llenará dinámicamente según el tipo de movimiento -->
+                        </div>
+
+                        <!-- Tesorería: marcar el movimiento como cobro/pago recurrente -->
+                        <div id="recurrence-section" class="hidden">
+                            <div class="border-t pt-4 space-y-3">
+                                <p id="recurrence-hint" class="text-xs text-gray-500 hidden"></p>
+                                <p id="recurrence-linked" class="text-xs text-gray-500 hidden">
+                                    <i class="fas flow-repeat tes-repeat-badge" style="margin-left:0;margin-right:4px;"></i>
+                                    Vinculado a una serie recurrente. Gestiónala desde Tesorería.
+                                </p>
+                                <div id="recurrence-controls" class="hidden">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <span id="recurrence-label" class="text-sm font-medium text-gray-700">Es un pago recurrente</span>
+                                        <button type="button" id="recurrence-toggle" class="tes-switch" role="switch" aria-checked="false" aria-labelledby="recurrence-label">
+                                            <span class="tes-switch-thumb"></span>
+                                        </button>
+                                    </div>
+                                    <div id="recurrence-options" class="hidden space-y-3 mt-3">
+                                        <div>
+                                            <span id="recurrence-freq-label" class="block text-sm font-medium text-gray-700 mb-1">Frecuencia</span>
+                                            <div id="recurrence-freq" class="tes-segmented" role="radiogroup" aria-labelledby="recurrence-freq-label">
+                                                <button type="button" role="radio" aria-checked="true" tabindex="0" data-freq="mensual">Mensual</button>
+                                                <button type="button" role="radio" aria-checked="false" tabindex="-1" data-freq="trimestral">Trimestral</button>
+                                                <button type="button" role="radio" aria-checked="false" tabindex="-1" data-freq="semestral">Semestral</button>
+                                                <button type="button" role="radio" aria-checked="false" tabindex="-1" data-freq="anual">Anual</button>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-sm text-gray-700">
+                                            <label for="recurrence-aviso">Avisarme</label>
+                                            <input type="number" id="recurrence-aviso" min="0" max="7" step="1" value="2" class="w-16 border border-gray-300 rounded-md px-2 py-1 text-center">
+                                            <span>días antes</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     
@@ -2194,6 +2600,7 @@
         import Auth from './js/auth.js';
         import AccountingManager from './js/accounting-manager.js';
         import DataClient from './src/services/data-client.js';
+        import CarteraSection from './js/cartera-section.js';
 
         // Texto explicativo del Índice Flow — peso, fórmula en lenguaje llano y cómo leer
         // cada sub-índice. Usado por renderFinancialHealth() y renderFlowDetailContent().
@@ -2371,7 +2778,10 @@
                 safe(this.renderImportStatementSection, 'renderImportStatementSection');
                 safe(this.showNotificationsContainer, 'showNotificationsContainer');
 
-                this.showSection('dashboard');
+                // Deep link desde un push de tesorería (/dashboard.html#tesoreria): se abre al
+                // final del arranque para que nada lo devuelva al Dashboard.
+                if (!this.openHashSection()) this.showSection('dashboard');
+                window.addEventListener('hashchange', () => this.openHashSection());
 
                 // Migración push /public/ -> / y luego reconciliación de huérfanas
                 // (no bloquean el arranque; se autorreintentan en la siguiente carga).
@@ -2482,6 +2892,9 @@
                     const fixedCostFields = document.getElementById('fixed-cost-fields');
                     if (e.target.checked) {
                         fixedCostFields.classList.remove('hidden');
+                        // Un coste fijo es un pago recurrente: marcarlo por defecto (desmarcable)
+                        const admitePagos = document.getElementById('account-admite-pagos');
+                        if (admitePagos) admitePagos.checked = true;
                     } else {
                         fixedCostFields.classList.add('hidden');
                         // Limpiar campos
@@ -2494,6 +2907,9 @@
                 document.getElementById('movement-type').addEventListener('change', (e) => {
                     this.handleMovementTypeChange(e.target.value);
                 });
+
+                // Tesorería: bloque "cobro/pago recurrente" del formulario de movimiento
+                this.setupRecurrenceControls();
 
                 // Filtros de cuentas
                 document.querySelectorAll('.account-filter').forEach(button => {
@@ -4900,7 +5316,9 @@
                     'import_completed': '<i class="fas fa-download text-green-500"></i>',
                     'info': '<i class="fas fa-info-circle text-blue-500"></i>',
                     'warning': '<i class="fas fa-exclamation-triangle text-yellow-500"></i>',
-                    'success': '<i class="fas fa-check-circle text-green-500"></i>'
+                    'success': '<i class="fas fa-check-circle text-green-500"></i>',
+                    'tesoreria_pago': '<i class="fas fa-calendar-alt" style="color: var(--tes-pago-text);"></i>',
+                    'tesoreria_cobro': '<i class="fas fa-calendar-alt" style="color: var(--tes-cobro-text);"></i>'
                 };
                 
                 return icons[type] || icons['info'];
@@ -6178,6 +6596,15 @@
                 `).join('');
             }
 
+            // Abre la sección indicada en el hash (#tesoreria) y lo limpia, para que el
+            // siguiente push con la misma URL vuelva a disparar la navegación.
+            openHashSection() {
+                if (location.hash !== '#tesoreria') return false;
+                history.replaceState(null, '', location.pathname + location.search);
+                this.handleNavigation('tesoreria');
+                return true;
+            }
+
             handleNavigation(section) {
                 this.showSection(section);
                 
@@ -6248,6 +6675,13 @@
                     case 'movements':
                         this.renderMovementsList();
                         this.renderImportStatementSection();
+                        break;
+                    case 'cartera':
+                        if (!this._cartera) this._cartera = new CarteraSection(this, { DataClient });
+                        this._cartera.init();
+                        break;
+                    case 'tesoreria':
+                        this.initTesoreriaSection();
                         break;
                     case 'reports':
                         this.renderReports();
@@ -6447,7 +6881,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${movement.descripcion}${movement.compromiso_id ? '<i class="fas flow-repeat tes-repeat-badge" title="Cobro/pago recurrente" aria-label="Recurrente"></i>' : ''}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6564,7 +6998,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${movement.descripcion}${movement.compromiso_id ? '<i class="fas flow-repeat tes-repeat-badge" title="Cobro/pago recurrente" aria-label="Recurrente"></i>' : ''}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6804,6 +7238,7 @@
                         const destSelect = document.querySelector('#movement-accounts-section select:last-child');
                         if (destSelect) destSelect.value = movement.cuenta_destino_id;
                     }
+                    this.updateRecurrenceSection();
                 }, 100);
                 
                 // MUY IMPORTANTE: NO asignar movementBeingEdited → se creará uno nuevo al guardar
@@ -6846,6 +7281,7 @@
                         const destSelect = document.querySelector('#movement-accounts-section select:last-child');
                         if (destSelect) destSelect.value = movement.cuenta_destino_id;
                     }
+                    this.updateRecurrenceSection();
                 }, 100);
                 
                 // Guardar ID para actualizar en lugar de crear
@@ -7807,6 +8243,13 @@
                         document.getElementById('fixed-cost-section').classList.add('hidden');
                     }
 
+                    // Tesorería: flags de cobros/pagos recurrentes
+                    this.updateCashflowFlagsSection(account.tipo);
+                    const admiteCobrosCb = document.getElementById('account-admite-cobros');
+                    const admitePagosCb = document.getElementById('account-admite-pagos');
+                    if (admiteCobrosCb) admiteCobrosCb.checked = account.tipo === 'ingreso' && !!account.admite_cobros;
+                    if (admitePagosCb) admitePagosCb.checked = account.tipo === 'gasto' && !!account.admite_pagos;
+
                     // Rellenar campo bancario si es activo
                     if (account.tipo === 'activo') {
                         const bankSection = document.getElementById('bank-account-section');
@@ -7850,6 +8293,7 @@
                 document.getElementById('initial-balance-field')?.classList.add('hidden');
                 document.getElementById('fixed-cost-section')?.classList.add('hidden');
                 document.getElementById('fixed-cost-fields')?.classList.add('hidden');
+                this.updateCashflowFlagsSection(null);
 
                 const bankCheckbox = document.getElementById('is-bank-account');
                 if (bankCheckbox) bankCheckbox.checked = false;
@@ -7873,6 +8317,11 @@
                 // Establecer fecha actual por defecto (en hora local, no UTC)
                 const today = this._formatDateLocal(new Date());
                 document.getElementById('movement-date').value = today;
+
+                this.resetRecurrenceControls();
+                // Precarga (sin bloquear) de la config premium y de las series existentes
+                this.tesoreriaGetConfig();
+                this.tesoreriaLoadCompromisos().catch(() => {});
                 
                 modal.classList.remove('hidden');
             }
@@ -7897,6 +8346,7 @@
                 // Limpiar sección de cuentas
                 const accountsSection = document.getElementById('movement-accounts-section');
                 if (accountsSection) accountsSection.innerHTML = '';
+                this.resetRecurrenceControls();
             }
 
             handleAccountTypeChange(type) {
@@ -7932,6 +8382,1135 @@
                     document.getElementById('is-fixed-cost').checked = false;
                     document.getElementById('fixed-cost-fields').classList.add('hidden');
                 }
+
+                this.updateCashflowFlagsSection(type);
+            }
+
+            // Tesorería: muestra el flag que corresponde al tipo (ingreso → cobros,
+            // gasto → pagos) y desmarca el que no aplica. Oculto para el resto.
+            updateCashflowFlagsSection(type) {
+                const section = document.getElementById('cashflow-flags-section');
+                if (!section) return;
+                const esIngreso = type === 'ingreso';
+                const esGasto = type === 'gasto';
+                section.classList.toggle('hidden', !esIngreso && !esGasto);
+                document.getElementById('cashflow-cobros-row')?.classList.toggle('hidden', !esIngreso);
+                document.getElementById('cashflow-pagos-row')?.classList.toggle('hidden', !esGasto);
+                const cobros = document.getElementById('account-admite-cobros');
+                const pagos = document.getElementById('account-admite-pagos');
+                if (cobros && !esIngreso) cobros.checked = false;
+                if (pagos && !esGasto) pagos.checked = false;
+            }
+
+            // ===== TESORERÍA · sección (resumen, semana, mes) =====
+            // Fechas SIEMPRE como 'YYYY-MM-DD' y aritmética en UTC sobre los componentes
+            // (misma regla que api/tesoreria-logic.js). "Hoy" en Europe/Madrid.
+
+            tesHoy() {
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit'
+                }).format(new Date());
+            }
+
+            _tesUTC(iso) {
+                const [y, m, d] = iso.split('-').map(Number);
+                return new Date(Date.UTC(y, m - 1, d));
+            }
+
+            tesAddDays(iso, n) {
+                const d = this._tesUTC(iso);
+                d.setUTCDate(d.getUTCDate() + n);
+                return d.toISOString().slice(0, 10);
+            }
+
+            tesMonthEnd(iso) {
+                const [y, m] = iso.split('-').map(Number);
+                return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+            }
+
+            tesAddMonths(iso, n) {
+                const [y, m, d] = iso.split('-').map(Number);
+                const idx = (m - 1) + n;
+                const ty = y + Math.floor(idx / 12);
+                const tm = ((idx % 12) + 12) % 12 + 1;
+                const last = new Date(Date.UTC(ty, tm, 0)).getUTCDate();
+                return `${ty}-${String(tm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+            }
+
+            // Lunes de la semana (semana española: lunes → domingo)
+            tesMonday(iso) {
+                const dow = (this._tesUTC(iso).getUTCDay() + 6) % 7;
+                return this.tesAddDays(iso, -dow);
+            }
+
+            tesFmtDate(iso, opts = { day: 'numeric', month: 'short' }) {
+                return new Intl.DateTimeFormat('es-ES', { timeZone: 'UTC', ...opts }).format(this._tesUTC(iso));
+            }
+
+            _tesFmtShort(v) {
+                const currency = (window.Auth && Auth.currentUser && Auth.currentUser.currency) || 'EUR';
+                try {
+                    return new Intl.NumberFormat('es-ES', { style: 'currency', currency, maximumFractionDigits: 0 }).format(v);
+                } catch (e) {
+                    return new Intl.NumberFormat('es-ES', { maximumFractionDigits: 0 }).format(v);
+                }
+            }
+
+            _tesEsc(str) {
+                return this._escapeHtml(String(str ?? ''));
+            }
+
+            _tesFrecuenciaLabel(f) {
+                return { mensual: 'Mensual', trimestral: 'Trimestral', semestral: 'Semestral', anual: 'Anual' }[f] || f || '';
+            }
+
+            async initTesoreriaSection() {
+                if (!this._tes) {
+                    this._tes = { horizonte: '30', semana: null, mes: null, cache: new Map(), tokens: {} };
+                    this.setupTesoreriaControls();
+                }
+                // Al entrar, datos frescos (pueden haber cambiado movimientos o cuentas)
+                this._tes.cache.clear();
+
+                const cfg = await this.tesoreriaGetConfig();
+                const locked = cfg.premium_required && !Auth.isPremium();
+                document.getElementById('tes-locked')?.classList.toggle('hidden', !locked);
+                document.getElementById('tes-content')?.classList.toggle('hidden', locked);
+                if (locked) {
+                    this.showPlanSelector();
+                    return;
+                }
+
+                const hoy = this.tesHoy();
+                if (!this._tes.semana) this._tes.semana = this.tesMonday(hoy);
+                if (!this._tes.mes) this._tes.mes = hoy.slice(0, 7);
+
+                // Las series se usan para el estado vacío y para editar/detener desde el desglose
+                try { await this.tesoreriaLoadCompromisos(true); } catch (e) { /* cada parte mostrará su error */ }
+                this.tesRenderAll();
+            }
+
+            tesRenderAll() {
+                this.tesRenderResumen();
+                if (typeof this.tesRenderSemana === 'function') this.tesRenderSemana();
+                if (typeof this.tesRenderMes === 'function') this.tesRenderMes();
+            }
+
+            // Tras editar/detener una serie: invalidar caché y repintar
+            tesRefresh() {
+                if (!this._tes) return;
+                this._tes.cache.clear();
+                this.tesRenderAll();
+            }
+
+            setupTesoreriaControls() {
+                const group = document.getElementById('tes-horizonte');
+                const select = (btn) => {
+                    group.querySelectorAll('[role="radio"]').forEach(b => {
+                        const sel = b === btn;
+                        b.setAttribute('aria-checked', sel ? 'true' : 'false');
+                        b.tabIndex = sel ? 0 : -1;
+                    });
+                    if (this._tes.horizonte !== btn.dataset.h) {
+                        this._tes.horizonte = btn.dataset.h;
+                        this.tesRenderResumen();
+                    }
+                };
+                group?.addEventListener('click', (e) => {
+                    const btn = e.target.closest('[role="radio"]');
+                    if (btn) select(btn);
+                });
+                group?.addEventListener('keydown', (e) => {
+                    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+                    if (!(e.key in keys)) return;
+                    e.preventDefault();
+                    const btns = [...group.querySelectorAll('[role="radio"]')];
+                    const i = btns.findIndex(b => b.getAttribute('aria-checked') === 'true');
+                    const next = btns[(i + keys[e.key] + btns.length) % btns.length];
+                    select(next);
+                    next.focus();
+                });
+
+                // Semana: navegación y apertura del desglose del día
+                document.getElementById('tes-semana')?.addEventListener('click', (e) => {
+                    const nav = e.target.closest('[data-semana]');
+                    if (nav) {
+                        const v = nav.dataset.semana;
+                        this._tes.semana = v === 'hoy' ? this.tesMonday(this.tesHoy()) : this.tesAddDays(this._tes.semana, 7 * Number(v));
+                        this.tesRenderSemana();
+                        return;
+                    }
+                    const dia = e.target.closest('[data-dia]');
+                    if (dia) this.tesOpenDia(dia.dataset.dia, this._tes.semanaAgenda || []);
+                });
+
+                // Mes: navegación y desglose del día
+                document.getElementById('tes-mes')?.addEventListener('click', (e) => {
+                    const nav = e.target.closest('[data-mes]');
+                    if (nav) {
+                        const v = nav.dataset.mes;
+                        this._tes.mes = v === 'hoy'
+                            ? this.tesHoy().slice(0, 7)
+                            : this.tesAddMonths(`${this._tes.mes}-01`, Number(v)).slice(0, 7);
+                        this.tesRenderMes();
+                        return;
+                    }
+                    const dia = e.target.closest('[data-dia]');
+                    if (dia) this.tesOpenDia(dia.dataset.dia, this._tes.mesAgenda || []);
+                });
+
+                // Acciones del desglose: editar/detener serie, ir a la cuenta del coste fijo
+                document.getElementById('tes-desglose')?.addEventListener('click', (e) => {
+                    const btn = e.target.closest('[data-accion]');
+                    if (!btn) return;
+                    const accion = btn.dataset.accion;
+                    if (accion === 'editar') this.tesEditarSerie(btn.dataset.comp);
+                    else if (accion === 'detener') this.tesDetenerSerie(btn.dataset.comp);
+                    else if (accion === 'cuenta') {
+                        this.tesCloseDesglose();
+                        this.handleNavigation('accounts');
+                        this.openAccountModal(btn.dataset.cuenta);
+                    }
+                });
+
+                const modal = document.getElementById('tes-desglose');
+                document.getElementById('tes-desglose-close')?.addEventListener('click', () => this.tesCloseDesglose());
+                // Cerrar solo si el clic cae en el fondo (no vale "fuera del panel": una acción
+                // puede haber sustituido ya el nodo pulsado y quedaría desconectado del panel)
+                modal?.addEventListener('click', (e) => {
+                    if (e.target === modal || e.target === modal.firstElementChild) this.tesCloseDesglose();
+                });
+                document.addEventListener('keydown', (e) => {
+                    const dialogOpen = !document.getElementById('tes-dialog')?.classList.contains('hidden');
+                    if (e.key === 'Escape' && !modal.classList.contains('hidden') && !dialogOpen) this.tesCloseDesglose();
+                });
+
+                // Redibujar el gráfico cuando cambia el ancho de la tarjeta (giro del móvil,
+                // sidebar, o primera vez que la sección pasa de oculta a visible).
+                const resumen = document.getElementById('tes-resumen');
+                if (resumen && 'ResizeObserver' in window) {
+                    let t, lastW = 0;
+                    new ResizeObserver(entries => {
+                        const w = Math.round(entries[0].contentRect.width);
+                        if (!w || w === lastW) return;
+                        lastW = w;
+                        clearTimeout(t);
+                        t = setTimeout(() => { if (this._tes.lastResumen) this.tesDrawChart(); }, 100);
+                    }).observe(resumen);
+                }
+            }
+
+            // Agenda del Worker con caché por rango (una sola petición en vuelo por rango)
+            tesGetAgenda(desde, hasta) {
+                const key = `${desde}|${hasta}`;
+                if (!this._tes.cache.has(key)) {
+                    const p = DataClient.getAgenda(desde, hasta).catch(err => {
+                        this._tes.cache.delete(key);
+                        throw err;
+                    });
+                    this._tes.cache.set(key, p);
+                }
+                return this._tes.cache.get(key);
+            }
+
+            // ¿Hay algo que proyectar? (series activas o cuentas de coste fijo)
+            tesHasSources() {
+                const comps = (this._compromisos || []).some(c => c.activo);
+                const fijos = this.accountingManager.getAccounts('gasto')
+                    .some(a => a.is_fixed_cost && Number(a.fixed_monthly_amount) > 0 && a.fixed_due_day);
+                return comps || fijos;
+            }
+
+            _tesToken(part) {
+                this._tes.tokens[part] = (this._tes.tokens[part] || 0) + 1;
+                return this._tes.tokens[part];
+            }
+
+            _tesSkeleton(kind) {
+                if (kind === 'resumen') {
+                    return `<div aria-busy="true" aria-label="Cargando">
+                        <div class="tes-kpis">${'<div class="tes-skel" style="height:86px"></div>'.repeat(4)}</div>
+                        <div class="tes-skel" style="height:240px"></div>
+                    </div>`;
+                }
+                return `<div class="tes-skel" style="height:${kind === 'mes' ? 360 : 150}px" aria-busy="true" aria-label="Cargando"></div>`;
+            }
+
+            _tesError(err, retryFn) {
+                const msg = err?.message || 'No se pudo cargar la información';
+                return `<div class="tes-state" role="alert">
+                    <i class="fas fa-exclamation-triangle tes-state-icon" style="color: var(--tes-pago-text);"></i>
+                    <h4>No se pudo cargar</h4>
+                    <p>${this._tesEsc(msg)}</p>
+                    <button type="button" class="tes-btn tes-btn-ghost" onclick="dashboard.${retryFn}()">Reintentar</button>
+                </div>`;
+            }
+
+            _tesEmpty() {
+                return `<div class="tes-state">
+                    <i class="fas fa-calendar-alt tes-state-icon"></i>
+                    <h4>Aún no tienes cobros ni pagos programados</h4>
+                    <p>Marca una cuenta como 'admite pagos' y registra un movimiento como pago recurrente. También aparecerán aquí tus costes fijos.</p>
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button type="button" class="tes-btn tes-btn-primary" onclick="dashboard.openMovementModal()">Registrar movimiento</button>
+                        <button type="button" class="tes-btn tes-btn-ghost" onclick="dashboard.handleNavigation('accounts')">Ir a cuentas</button>
+                    </div>
+                </div>`;
+            }
+
+            tesRango(h) {
+                const hoy = this.tesHoy();
+                let hasta;
+                if (h === 'mes') hasta = this.tesMonthEnd(hoy);
+                else if (h === '90') hasta = this.tesAddDays(hoy, 90);
+                else if (h === '12m') hasta = this.tesAddDays(this.tesAddMonths(hoy, 12), -1);
+                else hasta = this.tesAddDays(hoy, 30);
+                return { desde: hoy, hasta, bucket: h === '12m' ? 'mes' : 'semana' };
+            }
+
+            // Periodos del gráfico: semanas (lunes→domingo) o meses naturales, recortados al rango
+            tesBuckets(desde, hasta, bucket, items) {
+                const out = [];
+                if (bucket === 'semana') {
+                    for (let lun = this.tesMonday(desde); lun <= hasta; lun = this.tesAddDays(lun, 7)) {
+                        const dom = this.tesAddDays(lun, 6);
+                        const d0 = lun < desde ? desde : lun;
+                        out.push({ desde: d0, hasta: dom > hasta ? hasta : dom, label: this.tesFmtDate(d0) });
+                    }
+                } else {
+                    for (let m = desde.slice(0, 7) + '-01'; m <= hasta; m = this.tesAddMonths(m, 1)) {
+                        const fin = this.tesMonthEnd(m);
+                        const mesTxt = this.tesFmtDate(m, { month: 'short' });
+                        out.push({
+                            desde: m < desde ? desde : m, hasta: fin > hasta ? hasta : fin,
+                            label: m.slice(5, 7) === '01' || out.length === 0 ? `${mesTxt} ${m.slice(2, 4)}` : mesTxt
+                        });
+                    }
+                }
+                for (const b of out) {
+                    b.items = items.filter(i => i.fecha >= b.desde && i.fecha <= b.hasta);
+                    b.cobros = b.items.filter(i => i.tipo === 'cobro').reduce((s, i) => s + i.importe, 0);
+                    b.pagos = b.items.filter(i => i.tipo === 'pago').reduce((s, i) => s + i.importe, 0);
+                }
+                return out;
+            }
+
+            async tesRenderResumen() {
+                const body = document.getElementById('tes-resumen-body');
+                if (!body || !this._tes) return;
+                const token = this._tesToken('resumen');
+                body.innerHTML = this._tesSkeleton('resumen');
+                const { desde, hasta, bucket } = this.tesRango(this._tes.horizonte);
+                let data;
+                try {
+                    data = await this.tesGetAgenda(desde, hasta);
+                } catch (err) {
+                    if (token === this._tes.tokens.resumen) body.innerHTML = this._tesError(err, 'tesRenderResumen');
+                    return;
+                }
+                if (token !== this._tes.tokens.resumen) return; // el usuario cambió de horizonte
+
+                if (!data.agenda.length && !this.tesHasSources()) {
+                    this._tes.lastResumen = null;
+                    body.innerHTML = this._tesEmpty();
+                    return;
+                }
+
+                const r = data.resumen;
+                const neg = r.efectivo_proyectado < 0;
+                const hastaTxt = this.tesFmtDate(data.hasta, { day: 'numeric', month: 'short', year: 'numeric' });
+                const n = (x, s, p) => `${x} ${x === 1 ? s : p}`;
+                body.innerHTML = `
+                    <div class="tes-kpis">
+                        <div class="tes-kpi">
+                            <span class="tes-kpi-label">Saldo bancario hoy</span>
+                            <span class="tes-kpi-value">${this.formatCurrency(r.saldo_bancario)}</span>
+                            <span class="tes-kpi-sub">Tus cuentas bancarias</span>
+                        </div>
+                        <div class="tes-kpi">
+                            <span class="tes-kpi-label"><span class="tes-dot tes-dot-cobro"></span>Cobros previstos</span>
+                            <span class="tes-kpi-value tes-text-cobro">${this.formatCurrency(r.cobros_total)}</span>
+                            <span class="tes-kpi-sub">${n(r.detalle_cobros.length, 'cobro', 'cobros')}</span>
+                        </div>
+                        <div class="tes-kpi">
+                            <span class="tes-kpi-label"><span class="tes-dot tes-dot-pago"></span>Pagos previstos</span>
+                            <span class="tes-kpi-value tes-text-pago">${this.formatCurrency(r.pagos_total)}</span>
+                            <span class="tes-kpi-sub">${n(r.detalle_pagos.length, 'pago', 'pagos')}</span>
+                        </div>
+                        <div class="tes-kpi tes-kpi-hero ${neg ? 'tes-neg' : ''}">
+                            <span class="tes-kpi-label">Efectivo proyectado</span>
+                            <span class="tes-kpi-value">${this.formatCurrency(r.efectivo_proyectado)}</span>
+                            ${neg
+                                ? `<span class="tes-kpi-warn"><i class="fas fa-exclamation-triangle"></i>Tu saldo no cubre los pagos previstos</span>`
+                                : `<span class="tes-kpi-sub">Saldo + cobros − pagos al ${this._tesEsc(hastaTxt)}</span>`}
+                        </div>
+                    </div>
+                    <div class="tes-chart-head">
+                        <div>
+                            <h4 class="tes-card-title" style="font-size:.95rem;">Cobros y pagos por ${bucket === 'mes' ? 'mes' : 'semana'}</h4>
+                            <p class="tes-muted">Flujo neto del periodo:
+                                <span class="tes-num" style="font-weight:700;color:var(--text-primary);">${r.flujo_neto > 0 ? '+' : ''}${this.formatCurrency(r.flujo_neto)}</span>
+                            </p>
+                        </div>
+                        <div class="tes-legend" aria-hidden="true">
+                            <span><span class="tes-dot tes-dot-cobro"></span>Cobros</span>
+                            <span><span class="tes-dot tes-dot-pago"></span>Pagos</span>
+                        </div>
+                    </div>
+                    <div id="tes-chart" class="tes-chart"></div>
+                    <p class="tes-muted" style="margin-top:.5rem;">Toca una barra para ver el detalle.</p>`;
+
+                this._tes.lastResumen = { buckets: this.tesBuckets(data.desde, data.hasta, bucket, data.agenda), bucket, animate: true };
+                this.tesDrawChart();
+            }
+
+            // Gráfico de barras verticales en SVG propio: cobros (izq.) y pagos (dcha.) por periodo
+            tesDrawChart() {
+                const host = document.getElementById('tes-chart');
+                const st = this._tes.lastResumen;
+                if (!host || !st) return;
+                if (!host.clientWidth) return; // oculto: el ResizeObserver lo dibujará al mostrarse
+                const { buckets, bucket } = st;
+                const W = Math.max(280, Math.round(host.clientWidth || 600));
+                const H = 240;
+                const m = { t: 12, r: 8, b: 28, l: 64 };
+                const pw = W - m.l - m.r, ph = H - m.t - m.b;
+                const max = Math.max(0, ...buckets.map(b => Math.max(b.cobros, b.pagos)));
+
+                // Escala "bonita": paso 1/2/2,5/5 × 10^k con 3-5 divisiones y el techo más ajustado
+                const niceScale = (v) => {
+                    if (v <= 0) return { step: 250, ticks: 4 };
+                    const p = Math.pow(10, Math.floor(Math.log10(v / 4)));
+                    let best = null;
+                    for (const k of [0.1, 1, 10]) {
+                        for (const f of [1, 2, 2.5, 5]) {
+                            const step = f * p * k, ticks = Math.ceil(v / step);
+                            if (ticks < 3 || ticks > 5 || (f === 2.5 && step < 10)) continue; // ejes sin decimales
+                            if (!best || step * ticks < best.step * best.ticks) best = { step, ticks };
+                        }
+                    }
+                    return best || { step: p * 10, ticks: Math.max(1, Math.ceil(v / (p * 10))) };
+                };
+                const { step, ticks } = niceScale(max);
+                const top = step * ticks;
+                const y = v => m.t + ph - (v / top) * ph;
+
+                const n = buckets.length;
+                const gw = pw / n;
+                const barW = Math.max(3, Math.min(28, (gw * 0.72 - 2) / 2));
+                const labelEvery = Math.ceil(44 / gw);
+                const esc = s => this._tesEsc(s);
+                const periodo = b => bucket === 'mes'
+                    ? this.tesFmtDate(b.desde, { month: 'long', year: 'numeric' })
+                    : `semana del ${this.tesFmtDate(b.desde)} al ${this.tesFmtDate(b.hasta)}`;
+                const barPath = (x, yTop, w, h) => {
+                    const r = Math.min(4, w / 2, h);
+                    return `M${x},${yTop + h}V${yTop + r}Q${x},${yTop} ${x + r},${yTop}H${x + w - r}Q${x + w},${yTop} ${x + w},${yTop + r}V${yTop + h}Z`;
+                };
+
+                let grid = '', axis = '', bars = '';
+                for (let i = 0; i <= ticks; i++) {
+                    const v = step * i, yy = y(v);
+                    if (i > 0) grid += `<line x1="${m.l}" x2="${W - m.r}" y1="${yy}" y2="${yy}"/>`;
+                    axis += `<text x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${esc(this._tesFmtShort(v))}</text>`;
+                }
+                buckets.forEach((b, i) => {
+                    const gx = m.l + i * gw;
+                    const cx = gx + gw / 2;
+                    if (i % labelEvery === 0) {
+                        axis += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(b.label)}</text>`;
+                    }
+                    [['cobro', b.cobros, cx - 1 - barW], ['pago', b.pagos, cx + 1]].forEach(([tipo, val, bx]) => {
+                        const hitX = tipo === 'cobro' ? gx : cx;
+                        const h = val > 0 ? Math.max(2, (val / top) * ph) : 0;
+                        const nombre = tipo === 'cobro' ? 'Cobros' : 'Pagos';
+                        const aria = `${nombre}, ${periodo(b)}: ${this.formatCurrency(val)}`;
+                        const interactive = val > 0;
+                        bars += `<g class="tes-bar" ${interactive ? `tabindex="0" role="button"` : 'aria-hidden="true"'}
+                                    aria-label="${esc(aria)}" data-i="${i}" data-t="${tipo}">
+                                    <rect class="tes-hit" x="${hitX}" y="${m.t}" width="${gw / 2}" height="${ph}" rx="4"/>
+                                    ${h > 0 ? `<path class="tes-mark tes-mark-${tipo} ${st.animate ? 'tes-grow' : ''}" d="${barPath(bx, y(0) - h, barW, h)}"/>` : ''}
+                                </g>`;
+                    });
+                });
+                st.animate = false;
+
+                host.innerHTML = `
+                    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Cobros y pagos previstos por ${bucket === 'mes' ? 'mes' : 'semana'}">
+                        <g class="tes-grid">${grid}</g>
+                        <g class="tes-axis">${axis}</g>
+                        <line class="tes-baseline" x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}"/>
+                        <g>${bars}</g>
+                    </svg>
+                    <div class="tes-tooltip" role="tooltip"></div>`;
+
+                const tip = host.querySelector('.tes-tooltip');
+                const show = (g, clientX, clientY) => {
+                    const b = buckets[+g.dataset.i], tipo = g.dataset.t;
+                    const items = b.items.filter(it => it.tipo === tipo);
+                    tip.innerHTML = `<div class="tes-muted" style="font-size:.72rem;">${esc(periodo(b))}</div>
+                        <div style="display:flex;align-items:center;gap:.35rem;margin-top:.15rem;">
+                            <span class="tes-dot tes-dot-${tipo}"></span>${tipo === 'cobro' ? 'Cobros' : 'Pagos'}
+                            <strong style="margin-left:auto;">${esc(this.formatCurrency(tipo === 'cobro' ? b.cobros : b.pagos))}</strong>
+                        </div>
+                        <div class="tes-muted" style="font-size:.72rem;">${items.length} ${items.length === 1 ? 'concepto' : 'conceptos'} · clic para ver detalle</div>`;
+                    const hr = host.getBoundingClientRect();
+                    let px, py;
+                    if (clientX == null) {
+                        const gr = g.querySelector('.tes-mark')?.getBoundingClientRect() || g.getBoundingClientRect();
+                        px = gr.left + gr.width / 2 - hr.left; py = gr.top - hr.top;
+                    } else { px = clientX - hr.left; py = clientY - hr.top; }
+                    tip.classList.add('tes-show');
+                    const tw = tip.offsetWidth, th = tip.offsetHeight;
+                    tip.style.left = `${Math.min(Math.max(0, px - tw / 2), hr.width - tw)}px`;
+                    tip.style.top = `${Math.max(0, py - th - 12)}px`;
+                };
+                const hide = () => tip.classList.remove('tes-show');
+                const open = (g) => {
+                    const b = buckets[+g.dataset.i], tipo = g.dataset.t;
+                    hide();
+                    this.tesOpenDesglose({
+                        titulo: `${tipo === 'cobro' ? 'Cobros' : 'Pagos'} previstos`,
+                        subtitulo: periodo(b).replace(/^./, c => c.toUpperCase()),
+                        items: b.items.filter(it => it.tipo === tipo)
+                    });
+                };
+                host.querySelectorAll('.tes-bar[tabindex]').forEach(g => {
+                    g.addEventListener('mousemove', e => show(g, e.clientX, e.clientY));
+                    g.addEventListener('mouseleave', hide);
+                    g.addEventListener('focus', () => show(g));
+                    g.addEventListener('blur', hide);
+                    g.addEventListener('click', () => open(g));
+                    g.addEventListener('keydown', e => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(g); }
+                    });
+                });
+            }
+
+            tesOpenDia(iso, agenda) {
+                const fecha = this.tesFmtDate(iso, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                this.tesOpenDesglose({
+                    titulo: 'Cobros y pagos del día',
+                    subtitulo: fecha.charAt(0).toUpperCase() + fecha.slice(1),
+                    items: agenda.filter(i => i.fecha === iso)
+                });
+            }
+
+            // Chip compacto de una ocurrencia (semana)
+            _tesChip(it) {
+                const signo = it.tipo === 'pago' ? '−' : '+';
+                const label = `${it.tipo === 'pago' ? 'Pago' : 'Cobro'}: ${it.concepto}, ${this.formatCurrency(it.importe)}`;
+                return `<button type="button" class="tes-chip tes-chip-${it.tipo}" data-dia="${it.fecha}" aria-label="${this._tesEsc(label)}">
+                    <span class="tes-chip-txt">${this._tesEsc(it.concepto)}</span>
+                    <span class="tes-chip-amt tes-text-${it.tipo}">${signo}${this._tesEsc(this.formatCurrency(it.importe))}</span>
+                </button>`;
+            }
+
+            async tesRenderSemana() {
+                const body = document.getElementById('tes-semana-body');
+                if (!body || !this._tes) return;
+                const token = this._tesToken('semana');
+                const lun = this._tes.semana, dom = this.tesAddDays(lun, 6);
+                const hoy = this.tesHoy();
+                const esActual = hoy >= lun && hoy <= dom;
+                document.getElementById('tes-semana-title').textContent = esActual ? 'Esta semana' : 'Semana';
+                document.getElementById('tes-semana-rango').textContent =
+                    `Del ${this.tesFmtDate(lun, { day: 'numeric', month: 'long' })} al ${this.tesFmtDate(dom, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+                body.innerHTML = this._tesSkeleton('semana');
+
+                let data;
+                try {
+                    data = await this.tesGetAgenda(lun, dom);
+                } catch (err) {
+                    if (token === this._tes.tokens.semana) body.innerHTML = this._tesError(err, 'tesRenderSemana');
+                    return;
+                }
+                if (token !== this._tes.tokens.semana) return;
+                this._tes.semanaAgenda = data.agenda;
+
+                const dias = [];
+                for (let i = 0; i < 7; i++) {
+                    const iso = this.tesAddDays(lun, i);
+                    dias.push({ iso, items: data.agenda.filter(it => it.fecha === iso) });
+                }
+                const html = dias.map(d => {
+                    const nombre = this.tesFmtDate(d.iso, { weekday: 'short' }).replace('.', '');
+                    const largo = this.tesFmtDate(d.iso, { weekday: 'long', day: 'numeric', month: 'long' });
+                    const esHoy = d.iso === hoy;
+                    const resto = d.items.length - 2;
+                    return `<div class="tes-day ${esHoy ? 'tes-today' : ''}" role="listitem" ${esHoy ? 'aria-current="date"' : ''}
+                                aria-label="${this._tesEsc(largo)}: ${d.items.length ? d.items.length + (d.items.length === 1 ? ' movimiento previsto' : ' movimientos previstos') : 'sin movimientos'}">
+                        <div class="tes-day-head">
+                            <span class="tes-day-name">${this._tesEsc(nombre)}</span>
+                            <span class="tes-day-num">${Number(d.iso.slice(8))}</span>
+                            ${esHoy ? '<span class="tes-today-pill">Hoy</span>' : ''}
+                        </div>
+                        ${d.items.length ? d.items.slice(0, 2).map(it => this._tesChip(it)).join('') : '<span class="tes-day-empty">—</span>'}
+                        ${resto > 0 ? `<button type="button" class="tes-more" data-dia="${d.iso}" aria-label="Ver ${resto} más">+${resto}</button>` : ''}
+                    </div>`;
+                }).join('');
+
+                let nota = '';
+                if (!data.agenda.length) {
+                    nota = this.tesHasSources()
+                        ? '<p class="tes-muted tes-note">Sin cobros ni pagos previstos esta semana.</p>'
+                        : `<p class="tes-muted tes-note">Aún no tienes cobros ni pagos programados. Marca una cuenta como 'admite pagos' y registra un movimiento como pago recurrente.
+                             <button type="button" class="tes-link" onclick="dashboard.openMovementModal()">Registrar movimiento</button></p>`;
+                }
+                body.innerHTML = `<div class="tes-week" role="list">${html}</div>${nota}`;
+
+                // En móvil (scroll horizontal) llevar el día de hoy a la vista
+                const strip = body.querySelector('.tes-week');
+                const today = strip.querySelector('.tes-today');
+                if (today && strip.scrollWidth > strip.clientWidth) strip.scrollLeft = today.offsetLeft - strip.offsetLeft;
+            }
+
+            async tesRenderMes() {
+                const body = document.getElementById('tes-mes-body');
+                if (!body || !this._tes) return;
+                const token = this._tesToken('mes');
+                const primero = `${this._tes.mes}-01`, ultimo = this.tesMonthEnd(primero);
+                const titulo = this.tesFmtDate(primero, { month: 'long', year: 'numeric' });
+                document.getElementById('tes-mes-title').textContent = titulo.charAt(0).toUpperCase() + titulo.slice(1);
+                body.innerHTML = this._tesSkeleton('mes');
+
+                let data;
+                try {
+                    data = await this.tesGetAgenda(primero, ultimo);
+                } catch (err) {
+                    if (token === this._tes.tokens.mes) body.innerHTML = this._tesError(err, 'tesRenderMes');
+                    return;
+                }
+                if (token !== this._tes.tokens.mes) return;
+                this._tes.mesAgenda = data.agenda;
+
+                const hoy = this.tesHoy();
+                const porDia = new Map();
+                for (const it of data.agenda) {
+                    const d = porDia.get(it.fecha) || { cobros: 0, pagos: 0, n: 0 };
+                    if (it.tipo === 'cobro') d.cobros += it.importe; else d.pagos += it.importe;
+                    d.n++;
+                    porDia.set(it.fecha, d);
+                }
+                const nombres = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+                const head = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+                    .map((l, i) => `<span><abbr title="${nombres[i]}" style="text-decoration:none;">${l}</abbr></span>`).join('');
+                let rows = '';
+                for (let lun = this.tesMonday(primero); lun <= ultimo; lun = this.tesAddDays(lun, 7)) {
+                    let cells = '';
+                    for (let i = 0; i < 7; i++) {
+                        const iso = this.tesAddDays(lun, i);
+                        const fuera = iso.slice(0, 7) !== this._tes.mes;
+                        const d = fuera ? null : porDia.get(iso);
+                        const cls = `tes-cell ${fuera ? 'tes-out' : ''} ${iso === hoy ? 'tes-today' : ''}`;
+                        const num = `<span class="tes-cell-num">${Number(iso.slice(8))}</span>`;
+                        if (!d) {
+                            cells += `<div class="${cls}" ${fuera ? 'aria-hidden="true"' : ''}>${num}</div>`;
+                            continue;
+                        }
+                        const neto = d.cobros - d.pagos;
+                        const largo = this.tesFmtDate(iso, { weekday: 'long', day: 'numeric', month: 'long' });
+                        const partes = [];
+                        if (d.cobros) partes.push(`cobros ${this.formatCurrency(d.cobros)}`);
+                        if (d.pagos) partes.push(`pagos ${this.formatCurrency(d.pagos)}`);
+                        cells += `<button type="button" class="${cls}" data-dia="${iso}" ${iso === hoy ? 'aria-current="date"' : ''}
+                                    aria-label="${this._tesEsc(`${largo}: ${partes.join(', ')}. Ver detalle`)}">
+                            ${num}
+                            <span class="tes-cell-desk">
+                                ${d.cobros ? `<span class="tes-cell-amt tes-text-cobro"><span class="tes-dot tes-dot-cobro"></span>+${this._tesEsc(this.formatCurrency(d.cobros))}</span>` : ''}
+                                ${d.pagos ? `<span class="tes-cell-amt tes-text-pago"><span class="tes-dot tes-dot-pago"></span>−${this._tesEsc(this.formatCurrency(d.pagos))}</span>` : ''}
+                            </span>
+                            <span class="tes-cell-mob" aria-hidden="true">
+                                <span class="tes-cell-dots">
+                                    ${d.cobros ? '<span class="tes-dot tes-dot-cobro"></span>' : ''}
+                                    ${d.pagos ? '<span class="tes-dot tes-dot-pago"></span>' : ''}
+                                </span>
+                                <span class="tes-cell-net">${neto > 0 ? '+' : neto < 0 ? '−' : ''}${this._tesEsc(this._tesFmtShort(Math.abs(neto)))}</span>
+                            </span>
+                        </button>`;
+                    }
+                    rows += `<div class="tes-cal-row">${cells}</div>`;
+                }
+
+                const r = data.resumen;
+                let nota = '';
+                if (!data.agenda.length) {
+                    nota = this.tesHasSources()
+                        ? '<p class="tes-muted tes-note">Sin cobros ni pagos previstos este mes.</p>'
+                        : `<p class="tes-muted tes-note">Aún no tienes cobros ni pagos programados. Marca una cuenta como 'admite pagos' y registra un movimiento como pago recurrente.
+                             <button type="button" class="tes-link" onclick="dashboard.openMovementModal()">Registrar movimiento</button></p>`;
+                }
+                body.innerHTML = `
+                    <div class="tes-cal-head" aria-hidden="true">${head}</div>
+                    <div class="tes-cal">${rows}</div>
+                    ${nota}
+                    <div class="tes-month-foot">
+                        <div><span class="tes-kpi-label"><span class="tes-dot tes-dot-cobro"></span>Cobros del mes</span>
+                             <span class="tes-kpi-value tes-text-cobro">${this.formatCurrency(r.cobros_total)}</span></div>
+                        <div><span class="tes-kpi-label"><span class="tes-dot tes-dot-pago"></span>Pagos del mes</span>
+                             <span class="tes-kpi-value tes-text-pago">${this.formatCurrency(r.pagos_total)}</span></div>
+                        <div><span class="tes-kpi-label">Neto del mes</span>
+                             <span class="tes-kpi-value">${r.flujo_neto > 0 ? '+' : ''}${this.formatCurrency(r.flujo_neto)}</span></div>
+                    </div>`;
+            }
+
+            // Acciones de una fila del desglose
+            tesRowActions(it) {
+                if (it.origen === 'coste_fijo') {
+                    return `<div class="tes-row-actions">
+                        <button type="button" class="tes-link" data-accion="cuenta" data-cuenta="${this._tesEsc(it.cuenta_id)}">Editar en la cuenta</button>
+                    </div>`;
+                }
+                if (!it.compromiso_id) return '';
+                const id = this._tesEsc(it.compromiso_id);
+                return `<div class="tes-row-actions">
+                    <button type="button" class="tes-link" data-accion="editar" data-comp="${id}">Editar serie</button>
+                    <button type="button" class="tes-link tes-link-danger" data-accion="detener" data-comp="${id}">Detener serie</button>
+                </div>`;
+            }
+
+            async _tesGetCompromiso(id) {
+                let c = (this._compromisos || []).find(x => x.id === id);
+                if (!c) c = (await this.tesoreriaLoadCompromisos(true)).find(x => x.id === id);
+                if (!c) throw new Error('No se ha encontrado la serie');
+                return c;
+            }
+
+            // Formulario "Editar serie" dentro del modal de desglose
+            async tesEditarSerie(id) {
+                let c;
+                try { c = await this._tesGetCompromiso(id); }
+                catch (err) { this.showToast(err.message, 'error'); return; }
+                const esc = s => this._tesEsc(s);
+                const freqs = ['mensual', 'trimestral', 'semestral', 'anual'];
+                document.getElementById('tes-desglose-title').textContent = 'Editar serie';
+                document.getElementById('tes-desglose-sub').textContent =
+                    `${c.concepto} · ${c.tipo === 'cobro' ? 'Cobro' : 'Pago'} recurrente desde el ${this.tesFmtDate(c.fecha_ancla, { day: 'numeric', month: 'long', year: 'numeric' })}`;
+                document.getElementById('tes-desglose-body').innerHTML = `
+                    <form id="tes-serie-form" class="tes-form" novalidate>
+                        <div>
+                            <label for="tes-serie-importe">Importe</label>
+                            <input id="tes-serie-importe" class="tes-input tes-num" type="number" step="0.01" min="0.01" inputmode="decimal" value="${esc(c.importe)}" required>
+                        </div>
+                        <div>
+                            <span id="tes-serie-freq-label" class="block" style="font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.25rem;">Frecuencia</span>
+                            <div id="tes-serie-freq" class="tes-segmented" role="radiogroup" aria-labelledby="tes-serie-freq-label">
+                                ${freqs.map(f => `<button type="button" role="radio" data-freq="${f}" aria-checked="${f === c.frecuencia}" tabindex="${f === c.frecuencia ? 0 : -1}">${this._tesFrecuenciaLabel(f)}</button>`).join('')}
+                            </div>
+                        </div>
+                        <div class="flex gap-3">
+                            <div style="flex:1;">
+                                <label for="tes-serie-aviso">Avisarme (días antes)</label>
+                                <input id="tes-serie-aviso" class="tes-input" type="number" min="0" max="7" step="1" value="${esc(c.aviso_dias ?? 2)}">
+                            </div>
+                            <div style="flex:1.4;">
+                                <label for="tes-serie-fin">Fecha fin (opcional)</label>
+                                <input id="tes-serie-fin" class="tes-input" type="date" min="${esc(c.fecha_ancla)}" value="${esc(c.fecha_fin || '')}">
+                            </div>
+                        </div>
+                        <p id="tes-serie-error" class="tes-form-error hidden" role="alert"></p>
+                    </form>`;
+                document.getElementById('tes-desglose-foot').innerHTML = `
+                    <div class="tes-foot-actions">
+                        <button type="button" class="tes-btn tes-btn-ghost" id="tes-serie-cancelar">Cancelar</button>
+                        <button type="submit" form="tes-serie-form" class="tes-btn tes-btn-primary" id="tes-serie-guardar">Guardar cambios</button>
+                    </div>`;
+
+                const group = document.getElementById('tes-serie-freq');
+                const selectFreq = (btn) => group.querySelectorAll('[role="radio"]').forEach(b => {
+                    b.setAttribute('aria-checked', b === btn ? 'true' : 'false');
+                    b.tabIndex = b === btn ? 0 : -1;
+                });
+                group.addEventListener('click', e => { const b = e.target.closest('[role="radio"]'); if (b) selectFreq(b); });
+                group.addEventListener('keydown', e => {
+                    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+                    if (!(e.key in keys)) return;
+                    e.preventDefault();
+                    const btns = [...group.querySelectorAll('[role="radio"]')];
+                    const i = btns.findIndex(b => b.getAttribute('aria-checked') === 'true');
+                    const next = btns[(i + keys[e.key] + btns.length) % btns.length];
+                    selectFreq(next); next.focus();
+                });
+                document.getElementById('tes-serie-cancelar').addEventListener('click', () => {
+                    const d = this._tesDesglose;
+                    if (d) this.tesOpenDesglose(d); else this.tesCloseDesglose();
+                });
+                document.getElementById('tes-serie-form').addEventListener('input', () => {
+                    document.getElementById('tes-serie-error')?.classList.add('hidden');
+                });
+                document.getElementById('tes-serie-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const errEl = document.getElementById('tes-serie-error');
+                    const showErr = (m) => { errEl.textContent = m; errEl.classList.remove('hidden'); };
+                    const importe = Math.round(parseFloat(document.getElementById('tes-serie-importe').value) * 100) / 100;
+                    const aviso = parseInt(document.getElementById('tes-serie-aviso').value, 10);
+                    const fin = document.getElementById('tes-serie-fin').value || null;
+                    if (!(importe > 0)) return showErr('El importe debe ser mayor que 0');
+                    if (!Number.isInteger(aviso) || aviso < 0 || aviso > 7) return showErr('Los días de aviso deben estar entre 0 y 7');
+                    if (fin && fin < c.fecha_ancla) return showErr('La fecha de fin no puede ser anterior a la primera fecha de la serie');
+                    const freq = group.querySelector('[aria-checked="true"]')?.dataset.freq || c.frecuencia;
+                    const btn = document.getElementById('tes-serie-guardar');
+                    btn.disabled = true;
+                    try {
+                        const saved = await DataClient.saveCompromiso(this.currentUserId(), {
+                            ...c, importe, frecuencia: freq, aviso_dias: aviso, fecha_fin: fin
+                        });
+                        this._tesoreriaUpsertCache(saved);
+                        this.tesCloseDesglose();
+                        this.showToast('Serie actualizada', 'success');
+                        this.tesRefresh();
+                    } catch (err) {
+                        showErr(err.message || 'No se pudo guardar');
+                        btn.disabled = false;
+                    }
+                });
+                document.getElementById('tes-serie-importe').focus();
+            }
+
+            async tesDetenerSerie(id) {
+                let c;
+                try { c = await this._tesGetCompromiso(id); }
+                catch (err) { this.showToast(err.message, 'error'); return; }
+                const ok = await this.tesoreriaDialog({
+                    title: '¿Detener esta serie?',
+                    message: `"${c.concepto}" dejará de aparecer en tu calendario y no recibirás más avisos. Los movimientos ya registrados no cambian.`,
+                    actions: [
+                        { label: 'Cancelar', value: false, variant: 'ghost' },
+                        { label: 'Detener serie', value: true, variant: 'danger' }
+                    ]
+                });
+                if (!ok) return;
+                try {
+                    const saved = await DataClient.saveCompromiso(this.currentUserId(), { ...c, activo: false });
+                    this._tesoreriaUpsertCache(saved);
+                    this.tesCloseDesglose();
+                    this.showToast('Serie detenida', 'success');
+                    this.tesRefresh();
+                } catch (err) {
+                    this.showToast(err.message || 'No se pudo detener la serie', 'error');
+                }
+            }
+
+            // Desglose de un periodo/día. items: ocurrencias de la agenda (cobros y/o pagos).
+            tesOpenDesglose({ titulo, subtitulo, items }) {
+                const modal = document.getElementById('tes-desglose');
+                if (!modal) return;
+                this._tesDesglose = { titulo, subtitulo, items };
+                document.getElementById('tes-desglose-title').textContent = titulo;
+                document.getElementById('tes-desglose-sub').textContent = subtitulo || '';
+                const body = document.getElementById('tes-desglose-body');
+                const foot = document.getElementById('tes-desglose-foot');
+                const esc = s => this._tesEsc(s);
+                const fila = (it) => {
+                    const meta = [
+                        this.tesFmtDate(it.fecha, { weekday: 'short', day: 'numeric', month: 'short' }),
+                        it.cuenta_nombre || '',
+                        this._tesFrecuenciaLabel(it.frecuencia)
+                    ].filter(Boolean).map(esc).join(' · ');
+                    const acciones = typeof this.tesRowActions === 'function' ? this.tesRowActions(it) : '';
+                    return `<div class="tes-row">
+                        <div class="tes-row-main">
+                            <div class="tes-row-title">${esc(it.concepto)}${it.origen === 'coste_fijo' ? '<span class="tes-badge">Coste fijo</span>' : ''}</div>
+                            <div class="tes-row-meta">${meta}</div>
+                            ${acciones}
+                        </div>
+                        <div class="tes-row-amount tes-text-${it.tipo}">${it.tipo === 'pago' ? '−' : '+'}${esc(this.formatCurrency(it.importe))}</div>
+                    </div>`;
+                };
+                const grupos = ['cobro', 'pago'].map(t => ({ t, list: items.filter(i => i.tipo === t) })).filter(g => g.list.length);
+                const suma = list => list.reduce((s, i) => s + i.importe, 0);
+                if (!items.length) {
+                    body.innerHTML = `<p class="tes-muted" style="padding:1rem 0;">No hay cobros ni pagos previstos.</p>`;
+                    foot.innerHTML = '';
+                } else {
+                    body.innerHTML = grupos.map(g => `
+                        ${grupos.length > 1 ? `<div class="tes-group-title"><span class="tes-dot tes-dot-${g.t}"></span>${g.t === 'cobro' ? 'Cobros' : 'Pagos'}</div>` : ''}
+                        <div>${g.list.map(fila).join('')}</div>`).join('');
+                    foot.innerHTML = grupos.length > 1
+                        ? `<div class="tes-total"><span>Neto</span><span class="tes-num">${esc(this.formatCurrency(suma(grupos[0].list) - suma(grupos[1].list)))}</span></div>`
+                        : `<div class="tes-total"><span>Total</span><span class="tes-num tes-text-${grupos[0].t}">${esc(this.formatCurrency(suma(grupos[0].list)))}</span></div>`;
+                }
+                this._tesDesgloseReturn = document.activeElement;
+                modal.classList.remove('hidden');
+                document.getElementById('tes-desglose-close')?.focus();
+            }
+
+            tesCloseDesglose() {
+                document.getElementById('tes-desglose')?.classList.add('hidden');
+                this._tesDesgloseReturn?.focus?.();
+                this._tesDesgloseReturn = null;
+            }
+
+            // ===== TESORERÍA · recurrencia en el formulario de movimiento =====
+
+            setupRecurrenceControls() {
+                const toggle = document.getElementById('recurrence-toggle');
+                const group = document.getElementById('recurrence-freq');
+                const accountsSection = document.getElementById('movement-accounts-section');
+                if (!toggle || !group) return;
+
+                toggle.addEventListener('click', async () => {
+                    const on = toggle.getAttribute('aria-checked') !== 'true';
+                    if (on) {
+                        // Normalmente ya está en caché (se precarga al abrir el modal)
+                        const cfg = this._tesoreriaConfig || await this.tesoreriaGetConfig();
+                        if (cfg.premium_required && !Auth.isPremium()) {
+                            this.showPlanSelector();
+                            return;
+                        }
+                    }
+                    this.setRecurrenceToggle(on);
+                });
+
+                const select = (btn) => {
+                    group.querySelectorAll('[role="radio"]').forEach(b => {
+                        const sel = b === btn;
+                        b.setAttribute('aria-checked', sel ? 'true' : 'false');
+                        b.tabIndex = sel ? 0 : -1;
+                    });
+                };
+                group.addEventListener('click', (e) => {
+                    const btn = e.target.closest('[role="radio"]');
+                    if (btn) select(btn);
+                });
+                group.addEventListener('keydown', (e) => {
+                    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+                    if (!(e.key in keys)) return;
+                    e.preventDefault();
+                    const btns = [...group.querySelectorAll('[role="radio"]')];
+                    const i = btns.findIndex(b => b.getAttribute('aria-checked') === 'true');
+                    const next = btns[(i + keys[e.key] + btns.length) % btns.length];
+                    select(next);
+                    next.focus();
+                });
+
+                // Las <select> de cuenta se regeneran con innerHTML: delegar el evento
+                accountsSection?.addEventListener('change', (e) => {
+                    if (e.target.matches('#source-account, #destination-account')) this.updateRecurrenceSection();
+                });
+            }
+
+            setRecurrenceToggle(on) {
+                const toggle = document.getElementById('recurrence-toggle');
+                if (!toggle) return;
+                toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+                document.getElementById('recurrence-options')?.classList.toggle('hidden', !on);
+            }
+
+            resetRecurrenceControls() {
+                this.setRecurrenceToggle(false);
+                const group = document.getElementById('recurrence-freq');
+                group?.querySelectorAll('[role="radio"]').forEach(b => {
+                    const sel = b.dataset.freq === 'mensual';
+                    b.setAttribute('aria-checked', sel ? 'true' : 'false');
+                    b.tabIndex = sel ? 0 : -1;
+                });
+                const aviso = document.getElementById('recurrence-aviso');
+                if (aviso) aviso.value = 2;
+                document.getElementById('recurrence-section')?.classList.add('hidden');
+            }
+
+            // Cuenta de ingreso (cobro) o de gasto (pago) seleccionada en el formulario
+            _recurrenceAccountId(tipo) {
+                if (tipo === 'ingreso') return document.getElementById('source-account')?.value || '';
+                if (tipo === 'gasto') return document.getElementById('destination-account')?.value || '';
+                return '';
+            }
+
+            updateRecurrenceSection() {
+                const section = document.getElementById('recurrence-section');
+                if (!section) return;
+                const tipo = document.getElementById('movement-type')?.value;
+                const hint = document.getElementById('recurrence-hint');
+                const linked = document.getElementById('recurrence-linked');
+                const controls = document.getElementById('recurrence-controls');
+                const show = (el, v) => el?.classList.toggle('hidden', !v);
+
+                if (tipo !== 'ingreso' && tipo !== 'gasto') {
+                    section.classList.add('hidden');
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+
+                // Editando un movimiento que ya pertenece a una serie
+                const editing = this.movementBeingEdited
+                    ? this.accountingManager.getMovement(this.movementBeingEdited) : null;
+                if (editing?.compromiso_id) {
+                    section.classList.remove('hidden');
+                    show(linked, true); show(hint, false); show(controls, false);
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+
+                const accountId = this._recurrenceAccountId(tipo);
+                if (!accountId) {
+                    section.classList.add('hidden');
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+                const acc = this.accountingManager.getAccount(accountId);
+                const admite = tipo === 'ingreso' ? !!acc?.admite_cobros : !!acc?.admite_pagos;
+                section.classList.remove('hidden');
+                show(linked, false);
+                if (!admite) {
+                    hint.textContent = tipo === 'ingreso'
+                        ? "Activa 'cobros recurrentes' en esta cuenta para programarlo"
+                        : "Activa 'pagos recurrentes' en esta cuenta para programarlo";
+                    show(hint, true); show(controls, false);
+                    this.setRecurrenceToggle(false);
+                    return;
+                }
+                show(hint, false); show(controls, true);
+                document.getElementById('recurrence-label').textContent =
+                    tipo === 'ingreso' ? 'Es un cobro recurrente' : 'Es un pago recurrente';
+            }
+
+            // null si el toggle no está activo o no aplica; si no, la selección del usuario
+            getRecurrenceSelection(movementData) {
+                const toggle = document.getElementById('recurrence-toggle');
+                const section = document.getElementById('recurrence-section');
+                if (!toggle || toggle.getAttribute('aria-checked') !== 'true') return null;
+                if (!section || section.classList.contains('hidden')) return null;
+                if (movementData.tipo !== 'ingreso' && movementData.tipo !== 'gasto') return null;
+                const cuentaId = movementData.tipo === 'ingreso' ? movementData.cuenta_id : movementData.cuenta_destino_id;
+                if (!cuentaId) return null;
+                const freqBtn = document.querySelector('#recurrence-freq [aria-checked="true"]');
+                let aviso = parseInt(document.getElementById('recurrence-aviso')?.value, 10);
+                if (!Number.isFinite(aviso)) aviso = 2;
+                aviso = Math.min(7, Math.max(0, aviso));
+                return {
+                    tipo: movementData.tipo === 'ingreso' ? 'cobro' : 'pago',
+                    cuenta_id: cuentaId,
+                    frecuencia: freqBtn?.dataset.freq || 'mensual',
+                    aviso_dias: aviso
+                };
+            }
+
+            // Crea la serie o reutiliza la existente (misma cuenta y tipo). Devuelve
+            // { compromiso_id, created, tipo } o null si el usuario cancela.
+            async tesoreriaResolveRecurrence(movementData, movementId, sel) {
+                const compromisos = await this.tesoreriaLoadCompromisos(true);
+                const existente = compromisos.find(c => c.activo && c.tipo === sel.tipo && c.cuenta_id === sel.cuenta_id);
+                const importe = Math.round(Number(movementData.cantidad) * 100) / 100;
+                const etiqueta = sel.tipo === 'cobro' ? 'cobro' : 'pago';
+
+                if (existente) {
+                    const eleccion = await this.tesoreriaDialog({
+                        title: `Ya tienes un ${etiqueta} recurrente en esta cuenta`,
+                        message: `${existente.concepto}: ${this.formatCurrency(existente.importe)}, ${existente.frecuencia}. ¿Actualizar importe y frecuencia a ${this.formatCurrency(importe)}, ${sel.frecuencia}?`,
+                        actions: [
+                            { label: 'Cancelar', value: null, variant: 'ghost' },
+                            { label: 'Crear otro distinto', value: 'nuevo', variant: 'ghost' },
+                            { label: 'Actualizar', value: 'actualizar', variant: 'primary' }
+                        ]
+                    });
+                    if (!eleccion) return null;
+                    if (eleccion === 'actualizar') {
+                        const saved = await DataClient.saveCompromiso(this.currentUserId(), {
+                            ...existente, importe, frecuencia: sel.frecuencia, aviso_dias: sel.aviso_dias
+                        });
+                        this._tesoreriaUpsertCache(saved);
+                        return { compromiso_id: existente.id, created: false, tipo: etiqueta };
+                    }
+                }
+
+                const saved = await DataClient.saveCompromiso(this.currentUserId(), {
+                    id: crypto.randomUUID(),
+                    tipo: sel.tipo,
+                    cuenta_id: sel.cuenta_id,
+                    concepto: (movementData.descripcion || '').trim(),
+                    importe,
+                    frecuencia: sel.frecuencia,
+                    fecha_ancla: movementData.fecha,
+                    aviso_dias: sel.aviso_dias,
+                    activo: true,
+                    movimiento_origen_id: movementId
+                });
+                this._tesoreriaUpsertCache(saved);
+                return { compromiso_id: saved.id, created: true, tipo: etiqueta };
+            }
+
+            currentUserId() {
+                return Auth.getCurrentUser()?.id;
+            }
+
+            async tesoreriaGetConfig() {
+                if (!this._tesoreriaConfigPromise) {
+                    this._tesoreriaConfigPromise = DataClient.getTesoreriaConfig()
+                        .then(cfg => { this._tesoreriaConfig = cfg; return cfg; })
+                        // Si falla, no bloquear en cliente: el servidor aplica el gating igualmente
+                        .catch(() => { this._tesoreriaConfigPromise = null; return { premium_required: false }; });
+                }
+                return this._tesoreriaConfigPromise;
+            }
+
+            // Caché de compromisos. force=true vuelve a pedirlos al servidor.
+            async tesoreriaLoadCompromisos(force = false) {
+                if (this._compromisos && !force) return this._compromisos;
+                try {
+                    const list = await DataClient.listCompromisos(this.currentUserId());
+                    this._compromisos = (list || []).map(c => ({ ...c, activo: c.activo === true || c.activo === 1 }));
+                } catch (err) {
+                    if (err.code === 'premium_required') { this._compromisos = []; return []; }
+                    throw err;
+                }
+                return this._compromisos;
+            }
+
+            _tesoreriaUpsertCache(c) {
+                if (!c) return;
+                const norm = { ...c, activo: c.activo === true || c.activo === 1 };
+                this._compromisos = this._compromisos || [];
+                const i = this._compromisos.findIndex(x => x.id === norm.id);
+                if (i >= 0) this._compromisos[i] = norm; else this._compromisos.push(norm);
+            }
+
+            async tesoreriaDeleteCompromisoSilently(id) {
+                try {
+                    await DataClient.deleteCompromiso(this.currentUserId(), id);
+                    this._compromisos = (this._compromisos || []).filter(c => c.id !== id);
+                } catch (err) {
+                    console.error('No se pudo deshacer el compromiso', err);
+                }
+            }
+
+            // Diálogo propio (no confirm()). actions: [{ label, value, variant: 'primary'|'danger'|'ghost' }]
+            // Devuelve una promesa con el value elegido; Escape o clic fuera → null.
+            tesoreriaDialog({ title, message, actions }) {
+                const modal = document.getElementById('tes-dialog');
+                const actionsEl = document.getElementById('tes-dialog-actions');
+                document.getElementById('tes-dialog-title').textContent = title;
+                document.getElementById('tes-dialog-message').textContent = message;
+                actionsEl.innerHTML = '';
+                const previousFocus = document.activeElement;
+
+                return new Promise((resolve) => {
+                    const close = (value) => {
+                        modal.classList.add('hidden');
+                        document.removeEventListener('keydown', onKey, true);
+                        modal.removeEventListener('click', onBackdrop);
+                        previousFocus?.focus?.();
+                        resolve(value);
+                    };
+                    const onKey = (e) => {
+                        if (e.key === 'Escape') { e.stopPropagation(); close(null); }
+                    };
+                    const onBackdrop = (e) => { if (e.target === modal || e.target === modal.firstElementChild) close(null); };
+                    let primary = null;
+                    actions.forEach(a => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        b.className = `tes-btn tes-btn-${a.variant || 'ghost'}`;
+                        b.textContent = a.label;
+                        b.addEventListener('click', () => close(a.value));
+                        actionsEl.appendChild(b);
+                        if (a.variant === 'primary' || a.variant === 'danger') primary = b;
+                    });
+                    document.addEventListener('keydown', onKey, true);
+                    modal.addEventListener('click', onBackdrop);
+                    modal.classList.remove('hidden');
+                    (primary || actionsEl.lastElementChild)?.focus();
+                });
             }
 
             handleMovementTypeChange(type) {
@@ -8047,6 +9626,7 @@
                         break;
                     }
                 }
+                this.updateRecurrenceSection();
             }
 
             async handleAccountSubmit(e) {
@@ -8077,6 +9657,10 @@
                 if (accountType === 'activo') {
                     accountData.is_bank_account = formData.get('is_bank_account') === 'on';
                 }
+
+                // Tesorería: flags de cobros/pagos recurrentes (siempre explícitos para poder desmarcar)
+                accountData.admite_cobros = accountType === 'ingreso' && formData.get('admite_cobros') === 'on';
+                accountData.admite_pagos = accountType === 'gasto' && formData.get('admite_pagos') === 'on';
 
                 try {
                     // Verificar si estamos editando o creando
@@ -8163,8 +9747,16 @@
                     // Verificar si estamos editando o creando
                     const movementId = this.movementBeingEdited;
                     
+                    // Tesorería: ¿el usuario lo ha marcado como cobro/pago recurrente?
+                    const recurrente = this.getRecurrenceSelection(movementData);
+
                     if (movementId) {
                         // ACTUALIZAR movimiento existente
+                        if (recurrente) {
+                            const vinculo = await this.tesoreriaResolveRecurrence(movementData, movementId, recurrente);
+                            if (!vinculo) return; // cancelado en el diálogo: el modal sigue abierto
+                            movementData.compromiso_id = vinculo.compromiso_id;
+                        }
                         const success = await this.accountingManager.updateMovement(movementId, movementData);
                         this.movementBeingEdited = null;
                         
@@ -8214,9 +9806,30 @@
                             this.showToast(`Pago registrado: ${this.formatCurrency(importeCapital)} capital + ${this.formatCurrency(importeInteres)} intereses`, 'success');
                         } else {
                             // Comportamiento normal sin desglose
-                            await this.accountingManager.createMovement(movementData);
-                            this.movementBeingEdited = null;
-                            this.showToast('Movimiento registrado correctamente', 'success');
+                            if (recurrente) {
+                                // El movimiento es la primera ocurrencia (ya realizada) de la serie
+                                const movId = crypto.randomUUID();
+                                const vinculo = await this.tesoreriaResolveRecurrence(movementData, movId, recurrente);
+                                if (!vinculo) return; // cancelado en el diálogo: el modal sigue abierto
+                                const res = await this.accountingManager.createMovement({
+                                    ...movementData, id: movId, compromiso_id: vinculo.compromiso_id
+                                });
+                                if (!res || !res.success) {
+                                    // No dejar una serie huérfana si el movimiento no se ha podido guardar
+                                    if (vinculo.created) {
+                                        await this.tesoreriaDeleteCompromisoSilently(vinculo.compromiso_id);
+                                    }
+                                    throw new Error(res?.error || 'No se pudo guardar el movimiento');
+                                }
+                                this.movementBeingEdited = null;
+                                this.showToast(vinculo.created
+                                    ? `Movimiento registrado y ${vinculo.tipo} recurrente programado`
+                                    : `Movimiento registrado y ${vinculo.tipo} recurrente actualizado`, 'success');
+                            } else {
+                                await this.accountingManager.createMovement(movementData);
+                                this.movementBeingEdited = null;
+                                this.showToast('Movimiento registrado correctamente', 'success');
+                            }
                         }
                     }
                     

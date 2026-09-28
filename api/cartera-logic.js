@@ -197,6 +197,8 @@ export function positionFrom(a) {
         comision_total_pagada: a.buyComision + a.sellComision,
         // Comisiones de ENTRADA acumuladas (Bloque 4: total invertido).
         comision_entrada_total: a.buyComision,
+        // Cantidad comprada en total: para prorratear la comisión de entrada al vender.
+        cantidad_comprada: a.buyQty,
         // Total invertido = cantidad abierta × precio medio + comisiones de entrada.
         total_invertido: cantidad_abierta * precio_medio + a.buyComision,
         primera_compra: a.primera_compra || null,

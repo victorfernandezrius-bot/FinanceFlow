@@ -20,6 +20,8 @@ APP_URL = "https://app.contabilidadpersonal.com"
 GOOGLE_CLIENT_ID = "1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleusercontent.com"
 # Clave pública VAPID para Web Push (pública; la privada va como secret VAPID_PRIVATE_KEY)
 VAPID_PUBLIC_KEY = "BP6sAnJPgQWmT4963pl7rWZBLt55TP3NX1m0VKc_jf9rDI8tfOhmYuOT8CmAZsxxJHTO2jHuYh31sS3hVzihFUc"
+# Tesorería (calendario de cobros y pagos) solo para Premium en producción
+CASHFLOW_PREMIUM = "true"
 
 # Cron diario de avisos push (08:00 UTC ≈ 9-10h en España)
 [triggers]
@@ -56,6 +58,8 @@ crons = []
 APP_URL = "https://financeflow-staging.victor-a97.workers.dev"
 GOOGLE_CLIENT_ID = "1083377371647-l5pegbvv994jvj24op0lrml0fu4hhkun.apps.googleusercontent.com"
 VAPID_PUBLIC_KEY = "BP6sAnJPgQWmT4963pl7rWZBLt55TP3NX1m0VKc_jf9rDI8tfOhmYuOT8CmAZsxxJHTO2jHuYh31sS3hVzihFUc"
+# En staging la Tesorería está abierta a todos los usuarios
+CASHFLOW_PREMIUM = "false"
 
 [[env.staging.d1_databases]]
 binding = "DB"

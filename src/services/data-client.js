@@ -21,6 +21,7 @@ const KEYS = {
     premiumTrial: (u) => `premium_trial_${u}`,
     importInfo:   (u, b) => `import_info_${u}_${b}`,
     notifications:(u) => `notifications_${u}`,
+    compromisos:  (u) => `user_compromisos_${u}`,
 };
 
 // Helpers localStorage
@@ -217,6 +218,77 @@ const DataClient = {
             method: 'DELETE'
         });
         return r.ok;
+    },
+
+    // ===== TESORERÍA (compromisos de cobro/pago recurrentes) =====
+    // A diferencia del resto, las escrituras LANZAN Error con el mensaje del
+    // servidor (validaciones en español) para poder mostrarlo al usuario.
+    async _tesoreriaError(r) {
+        let msg = 'Error de conexión con Tesorería';
+        try { const b = await r.json(); if (b?.error) msg = b.error; } catch { /* sin cuerpo */ }
+        const err = new Error(msg === 'premium_required' ? 'La Tesorería es una función Premium' : msg);
+        err.status = r.status;
+        err.code = msg;
+        return err;
+    },
+
+    async getTesoreriaConfig() {
+        if (MODE === 'local') return { premium_required: false };
+        const r = await authFetch(`${window.API_URL}/tesoreria/config`);
+        if (!r.ok) throw await this._tesoreriaError(r);
+        return r.json();
+    },
+
+    async listCompromisos(userId) {
+        if (MODE === 'local') return lsGet(KEYS.compromisos(userId), []);
+        const r = await authFetch(`${window.API_URL}/tesoreria/compromisos`);
+        if (!r.ok) throw await this._tesoreriaError(r);
+        return r.json();
+    },
+
+    async saveCompromiso(userId, compromiso) {
+        if (MODE === 'local') {
+            const list = lsGet(KEYS.compromisos(userId), []);
+            const now = new Date().toISOString();
+            const saved = { aviso_dias: 2, activo: true, created_at: now, ...compromiso, updated_at: now };
+            const i = list.findIndex(c => c.id === saved.id);
+            if (i >= 0) list[i] = { ...list[i], ...saved }; else list.push(saved);
+            lsSet(KEYS.compromisos(userId), list);
+            return saved;
+        }
+        const r = await authFetch(`${window.API_URL}/tesoreria/compromisos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(compromiso)
+        });
+        if (!r.ok) throw await this._tesoreriaError(r);
+        return r.json();
+    },
+
+    async deleteCompromiso(userId, compromisoId) {
+        if (MODE === 'local') {
+            lsSet(KEYS.compromisos(userId), lsGet(KEYS.compromisos(userId), []).filter(c => c.id !== compromisoId));
+            const movs = lsGet(KEYS.movements(userId), []);
+            movs.forEach(m => { if (m.compromiso_id === compromisoId) m.compromiso_id = null; });
+            lsSet(KEYS.movements(userId), movs);
+            return true;
+        }
+        const r = await authFetch(`${window.API_URL}/tesoreria/compromisos/${encodeURIComponent(compromisoId)}`, {
+            method: 'DELETE'
+        });
+        if (!r.ok) throw await this._tesoreriaError(r);
+        return true;
+    },
+
+    // La agenda (ocurrencias + resumen) se calcula en el Worker; en modo local no hay motor.
+    async getAgenda(desde, hasta) {
+        if (MODE === 'local') throw new Error('La Tesorería necesita conexión con el servidor');
+        const params = new URLSearchParams();
+        if (desde) params.set('desde', desde);
+        if (hasta) params.set('hasta', hasta);
+        const r = await authFetch(`${window.API_URL}/tesoreria/agenda?${params}`);
+        if (!r.ok) throw await this._tesoreriaError(r);
+        return r.json();
     },
 
     // ===== CATEGORIZATION RULES =====

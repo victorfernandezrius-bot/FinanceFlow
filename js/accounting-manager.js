@@ -66,6 +66,8 @@ class AccountingManager {
             ...acc,
             is_fixed_cost: acc.is_fixed_cost === true || acc.is_fixed_cost === 1,
             is_bank_account: acc.is_bank_account === true || acc.is_bank_account === 1,
+            admite_cobros: acc.admite_cobros === true || acc.admite_cobros === 1,
+            admite_pagos: acc.admite_pagos === true || acc.admite_pagos === 1,
             fixed_monthly_amount: acc.fixed_monthly_amount != null ? Number(acc.fixed_monthly_amount) : null,
             fixed_due_day: acc.fixed_due_day != null ? Number(acc.fixed_due_day) : null,
             saldo_inicial: Number(acc.saldo_inicial) || 0,
@@ -93,7 +95,8 @@ class AccountingManager {
 
     async createAccount(accountData) {
         try {
-            const { nombre, tipo, descripcion, saldo_inicial, is_fixed_cost, fixed_monthly_amount, fixed_due_day, is_bank_account } = accountData;
+            const { nombre, tipo, descripcion, saldo_inicial, is_fixed_cost, fixed_monthly_amount, fixed_due_day, is_bank_account,
+                    admite_cobros, admite_pagos } = accountData;
 
             // Validar autenticación
             if (!Auth.isAuthenticated()) {
@@ -166,6 +169,9 @@ class AccountingManager {
                 fixed_due_day: (tipo === 'gasto' && is_fixed_cost) ? parseInt(fixed_due_day) : null,
                 // Campo de cuenta bancaria
                 is_bank_account: tipo === 'activo' ? (is_bank_account || false) : false,
+                // Tesorería: cobros recurrentes solo en ingresos, pagos recurrentes solo en gastos
+                admite_cobros: tipo === 'ingreso' ? !!admite_cobros : false,
+                admite_pagos: tipo === 'gasto' ? !!admite_pagos : false,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             };
@@ -230,6 +236,9 @@ class AccountingManager {
             id: account.id,
             updated_at: new Date().toISOString()
         };
+        // Tesorería: el flag solo tiene sentido en el tipo que le corresponde
+        updatedAccount.admite_cobros = updatedAccount.tipo === 'ingreso' && !!updatedAccount.admite_cobros;
+        updatedAccount.admite_pagos = updatedAccount.tipo === 'gasto' && !!updatedAccount.admite_pagos;
 
         // Si cambió el saldo inicial, ajustar el saldo actual proporcionalmente
         // saldo_actual = saldo_inicial + movimientos_acumulados
