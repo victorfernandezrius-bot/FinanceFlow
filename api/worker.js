@@ -1052,11 +1052,14 @@ async function providerDiagnostics(env, opts = {}) {
 // representativos. Se reporta para explicarlo en pantalla, no se disimula.
 function _avisosCartera(ctx) {
     const falta_aportacion_inicial = ctx.cashTotal < -EPS && !ctx.tiene_aportaciones;
-    const pesos_fiables = ctx.totalValue > EPS && (ctx.marketValue <= EPS || ctx.totalValue >= ctx.marketValue * 0.05);
+    // Cartera vacía (sin posiciones ni liquidez): no hay nada que pesar, no es un error.
+    const vacia = !ctx.positions.length && Math.abs(ctx.cashTotal) < EPS;
+    const pesos_fiables = vacia || (ctx.totalValue > EPS && (ctx.marketValue <= EPS || ctx.totalValue >= ctx.marketValue * 0.05));
     const avisos = [];
     if (falta_aportacion_inicial) {
+        const imp = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(ctx.cashTotal);
         avisos.push('No has registrado ninguna aportación de efectivo, así que la liquidez sale negativa por todo lo invertido '
-            + `(${ctx.cashTotal.toFixed(2)}). Registra una aportación por el capital con el que empezaste y los pesos cuadrarán.`);
+            + `(${imp}). Registra una aportación por el capital con el que empezaste y los pesos cuadrarán.`);
     } else if (ctx.cash.some(c => c.negativo)) {
         avisos.push('El saldo de liquidez es negativo: has invertido más de lo aportado (cuenta con margen o falta registrar una aportación).');
     }
@@ -2322,11 +2325,17 @@ export default {
                 // Bloque 4: peso_sobre_cartera con la definición única (necesita valor de
                 // mercado y liquidez) y tiempo abierto de cada posición.
                 const ctxH = await _carteraContext(env, uid);
-                const valorPorTicker = {};
-                ctxH.positions.forEach(p => { valorPorTicker[p.ticker] = p.valor; });
+                const valorPorTicker = {}, mercadoPorTicker = {};
+                ctxH.positions.forEach(p => {
+                    valorPorTicker[p.ticker] = p.valor;
+                    mercadoPorTicker[p.ticker] = { precio_actual: p.precio_actual, valor_estimado_coste: p.valor_estimado_coste, stale: p.stale };
+                });
                 const hoyH = new Date().toISOString().slice(0, 10);
                 out = out.map(p => ({
                     ...p,
+                    // precio_actual null + valor_estimado_coste: sin cotización (típico en renta
+                    // fija o derivados): el valor es a coste y la UI debe decirlo.
+                    ...(mercadoPorTicker[p.ticker] || { precio_actual: null, valor_estimado_coste: false, stale: false }),
                     valor: valorPorTicker[p.ticker] ?? null,
                     peso_sobre_cartera: weightPct(valorPorTicker[p.ticker], ctxH.totalValue),
                     peso_sobre_invertido: weightPct(valorPorTicker[p.ticker], ctxH.marketValue),

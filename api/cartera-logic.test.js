@@ -204,7 +204,7 @@ test('buildJournal: los totales ya NO traen un peso_total tautológico del 100%'
 });
 
 // ---------- Bloque 3: tiempo abierto ----------
-import { formatDuration, diffYMD, positionFrom, aggregate as agg2 } from './cartera-logic.js';
+import { formatDuration, diffYMD, positionFrom, aggregate as agg2, computeClose } from './cartera-logic.js';
 
 test('formatDuration: formatos del enunciado', () => {
     assert.equal(formatDuration('2025-01-01', '2025-01-19'), '18 días');
@@ -350,4 +350,17 @@ test('escenario completo: liquidez, pesos al 100%, pie del diario real y tiempo 
     const alloc = computeAllocation(pos, { AAPL: { price: 150 }, MSFT: { price: 220 } }, bal.por_moneda.EUR.saldo);
     assert.ok(Math.abs(alloc.items.reduce((a, i) => a + i.peso_sobre_cartera, 0) - 100) < 1e-9);
     assert.equal(alloc.items.find(i => i.es_liquidez).valor, 7980);
+});
+
+// ---------- Dashboard: vista previa del cierre = misma fórmula que computeClose ----------
+test('positionFrom.cantidad_comprada permite prorratear la comisión de entrada como computeClose', () => {
+    const ops = [buy('A', 10, 100, 10, '2025-01-01'), sell('A', 6, 150, 2, '2025-03-01')];
+    const p = positionFrom(agg2(ops).get('A'));
+    assert.equal(p.cantidad_comprada, 10);
+    // Lo que calcula la UI antes de cerrar (4 abiertas de 10 compradas → 40 % de la comisión de 10)...
+    const comEnt = p.comision_entrada_total * (p.cantidad_abierta / p.cantidad_comprada);
+    const preview = (120 - p.precio_medio) * p.cantidad_abierta - comEnt - 1;
+    // ...coincide con el Worker.
+    const c = computeClose(ops, 'A', 120, 1);
+    assert.ok(Math.abs(preview - c.beneficio) < 1e-9);
 });

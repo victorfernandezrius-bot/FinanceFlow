@@ -19,6 +19,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- flag-icons: banderas SVG (se ven bien en todos los SO, incluido Windows) para el selector de divisa -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css">
+    <!-- Cartera de Inversión: estilos de la sección (tokens del dashboard, modo oscuro) -->
+    <link rel="stylesheet" href="./public/cartera.css">
     <!-- SimpleWebAuthn (browser) para activar el login biométrico Face ID / Touch ID -->
     <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13/dist/bundle/index.umd.min.js"></script>
     <style>
@@ -972,6 +974,11 @@
                         <span class="nav-label">Tesorería</span>
                     </a>
                     
+                    <a href="#" id="nav-cartera" title="Cartera de inversión" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <i class="fas fa-chart-pie mr-3"></i>
+                        <span class="nav-label">Cartera de inversión</span>
+                    </a>
+                    
                     <a href="#" id="nav-reports" title="Reportes" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-chart-bar mr-3"></i>
                         <span class="nav-label">Reportes</span>
@@ -1463,6 +1470,11 @@
                         </section>
                     </div>
                 </div>
+            </div>
+
+            <!-- Cartera de Inversión: el contenido lo monta js/cartera-section.js al abrirla -->
+            <div id="section-cartera" class="section-content hidden">
+                <div class="section-container" id="cartera-root"></div>
             </div>
 
             <!-- Reports Section -->
@@ -2588,6 +2600,7 @@
         import Auth from './js/auth.js';
         import AccountingManager from './js/accounting-manager.js';
         import DataClient from './src/services/data-client.js';
+        import CarteraSection from './js/cartera-section.js';
 
         // Texto explicativo del Índice Flow — peso, fórmula en lenguaje llano y cómo leer
         // cada sub-índice. Usado por renderFinancialHealth() y renderFlowDetailContent().
@@ -6662,6 +6675,10 @@
                     case 'movements':
                         this.renderMovementsList();
                         this.renderImportStatementSection();
+                        break;
+                    case 'cartera':
+                        if (!this._cartera) this._cartera = new CarteraSection(this, { DataClient });
+                        this._cartera.init();
                         break;
                     case 'tesoreria':
                         this.initTesoreriaSection();
