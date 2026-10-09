@@ -3,6 +3,7 @@
 
 import Auth from './auth.js';
 import DataClient from '../src/services/data-client.js';
+import { buildCSV, buildExcelWorkbook, buildSheetJSBlob, loadExcelJS, loadLogo, XLSX_MIME } from './report-export.js';
 
 class AccountingManager {
     constructor() {
@@ -1648,404 +1649,526 @@ class AccountingManager {
         return { success: false };
     }
     
+    // ===== DATOS DE INFORMES (fuente única para pantalla y exportación) =====
+    // Reportes (renderBalance / renderEstadoResultados) y la exportación usan estas
+    // mismas funciones, así que una cifra exportada no puede discrepar de la pantalla
+    // para la misma fecha o periodo.
+
+    // Fecha local YYYY-MM-DD (nunca toISOString: daría el día en UTC).
+    _formatDateLocal(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    // Redondeo a 2 decimales para importes exportados (evita 3778.400000000001).
+    _round2(n) {
+        const x = Number(n) || 0;
+        const r = Math.round((Math.abs(x) + Number.EPSILON) * 100) / 100;
+        return x < 0 && r !== 0 ? -r : r;
+    }
+
+    // Efecto de un movimiento en el saldo de una cuenta. Es la misma lógica de signos
+    // que calcSaldo (Balance) y que el Libro Mayor de la app.
+    _movementEffectOnAccount(m, accountId) {
+        let delta = 0;
+        if (m.tipo === 'ingreso') {
+            if (m.cuenta_destino_id === accountId) delta += m.cantidad; // activo sube
+            if (m.cuenta_id === accountId) delta += m.cantidad;         // ingreso acumulado
+        } else if (m.tipo === 'gasto') {
+            if (m.cuenta_id === accountId) delta -= m.cantidad;         // activo/pasivo que paga
+            if (m.cuenta_destino_id === accountId) delta += m.cantidad; // gasto acumulado
+        } else if (m.tipo === 'transferencia') {
+            if (m.cuenta_id === accountId) delta -= m.cantidad;
+            if (m.cuenta_destino_id === accountId) delta += m.cantidad;
+        }
+        return delta;
+    }
+
+    // Saldo de una cuenta a una fecha (incluida). Sin fecha → saldo_actual.
+    // Es el calcSaldo que usaba renderBalance, sin cambios.
+    calculateAccountBalanceAt(account, dateTo, allMovements = this.getMovements()) {
+        if (!dateTo) return account.saldo_actual;
+        let saldo = account.saldo_inicial || 0;
+        const movs = allMovements.filter(m =>
+            m.fecha <= dateTo &&
+            (m.cuenta_id === account.id || m.cuenta_destino_id === account.id)
+        );
+        movs.forEach(m => {
+            if (m.tipo === 'ingreso') {
+                if (m.cuenta_destino_id === account.id) saldo += m.cantidad; // activo sube
+                if (m.cuenta_id === account.id) saldo += m.cantidad;         // ingreso acumulado
+            } else if (m.tipo === 'gasto') {
+                if (m.cuenta_id === account.id) saldo -= m.cantidad;         // activo baja
+                if (m.cuenta_destino_id === account.id) saldo += m.cantidad; // gasto acumulado
+            } else if (m.tipo === 'transferencia') {
+                if (m.cuenta_id === account.id) saldo -= m.cantidad;
+                if (m.cuenta_destino_id === account.id) saldo += m.cantidad;
+            }
+        });
+        return saldo;
+    }
+
+    // Balance: Activos − Pasivos + Patrimonio Neto. Las cuentas de patrimonio son
+    // bienes del usuario y suman. El resultado del periodo ya está dentro de los
+    // saldos de activo y pasivo, por eso no se añade aparte.
+    getBalanceData(filters = {}) {
+        const accounts = this.getAccounts();
+        const allMovements = this.getMovements();
+        const calcSaldo = (account) => this.calculateAccountBalanceAt(account, filters.dateTo, allMovements);
+
+        const activos = accounts.filter(acc => acc.tipo === 'activo').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
+        const pasivos = accounts.filter(acc => acc.tipo === 'pasivo').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
+        const patrimonio = accounts.filter(acc => acc.tipo === 'patrimonio').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
+
+        const activos_total = activos.reduce((s, a) => s + a.saldo_calc, 0);
+        const pasivos_total = Math.abs(pasivos.reduce((s, a) => s + a.saldo_calc, 0));
+        const patrimonio_total = patrimonio.reduce((s, a) => s + a.saldo_calc, 0);
+
+        return {
+            activos, pasivos, patrimonio,
+            activos_total, pasivos_total, patrimonio_total,
+            balance_total: activos_total - pasivos_total + patrimonio_total
+        };
+    }
+
+    // Estado de Resultados del periodo. Sin fechas → mes actual (hora local).
+    getIncomeStatementData(filters = {}) {
+        let dateFrom, dateTo;
+        if (filters.dateFrom || filters.dateTo) {
+            dateFrom = filters.dateFrom || '';
+            dateTo = filters.dateTo || '';
+        } else {
+            const now = new Date();
+            dateFrom = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+            dateTo = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+        }
+
+        // Totales del periodo
+        const stats = this.calculateIncomeStatementForPeriod({ dateFrom, dateTo });
+
+        // Movimientos del periodo
+        let movements = this.getMovements();
+        if (dateFrom) movements = movements.filter(m => m.fecha >= dateFrom);
+        if (dateTo) movements = movements.filter(m => m.fecha <= dateTo);
+
+        const accounts = this.getAccounts();
+
+        // Importe del periodo por cada cuenta de ingreso y gasto (también las que están a 0)
+        const ingresos = accounts.filter(acc => acc.tipo === 'ingreso').map(acc => ({
+            ...acc,
+            saldo_periodo: movements
+                .filter(m => m.tipo === 'ingreso' && m.cuenta_id === acc.id)
+                .reduce((sum, m) => sum + m.cantidad, 0)
+        }));
+
+        const gastos = accounts.filter(acc => acc.tipo === 'gasto').map(acc => ({
+            ...acc,
+            saldo_periodo: movements
+                .filter(m => m.tipo === 'gasto' && m.cuenta_destino_id === acc.id)
+                .reduce((sum, m) => sum + m.cantidad, 0)
+        }));
+
+        return {
+            dateFrom, dateTo, stats, ingresos, gastos,
+            resultado: stats.ingresos_total - stats.gastos_total
+        };
+    }
+
+    // Libro mayor de una cuenta en un intervalo. Saldo inicial = saldo al día anterior
+    // a "desde" (o saldo_inicial si no hay "desde"). Cada movimiento es un aumento o
+    // una disminución según su efecto real en el saldo de la cuenta.
+    getLedgerData(account, filters = {}) {
+        const dateFrom = filters.dateFrom || '';
+        const dateTo = filters.dateTo || '';
+        const nameById = {};
+        this.getAccounts().forEach(a => { nameById[a.id] = a.nombre; });
+
+        const own = this.getMovements().filter(m =>
+            m.cuenta_id === account.id || m.cuenta_destino_id === account.id);
+
+        let opening = account.saldo_inicial || 0;
+        if (dateFrom) {
+            own.filter(m => m.fecha < dateFrom)
+               .forEach(m => { opening += this._movementEffectOnAccount(m, account.id); });
+        }
+
+        const inRange = own
+            .filter(m => (!dateFrom || m.fecha >= dateFrom) && (!dateTo || m.fecha <= dateTo))
+            .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+
+        let saldo = opening;
+        let totalAumentos = 0;
+        let totalDisminuciones = 0;
+        const rows = inRange.map(m => {
+            const delta = this._movementEffectOnAccount(m, account.id);
+            saldo += delta;
+            const aumento = delta > 0 ? delta : 0;
+            const disminucion = delta < 0 ? -delta : 0;
+            totalAumentos += aumento;
+            totalDisminuciones += disminucion;
+            const otherId = m.cuenta_id === account.id ? m.cuenta_destino_id : m.cuenta_id;
+            return {
+                fecha: m.fecha,
+                concepto: m.descripcion || m.tipo,
+                contrapartida: nameById[otherId] || '',
+                aumento, disminucion, saldo
+            };
+        });
+
+        // Comprobación interna: inicial + aumentos − disminuciones = final
+        const esperado = this._round2(opening + totalAumentos - totalDisminuciones);
+        if (esperado !== this._round2(saldo)) {
+            console.warn(`[Libro mayor] La cuenta "${account.nombre}" no cuadra: ` +
+                `${opening} + ${totalAumentos} − ${totalDisminuciones} ≠ ${saldo}`);
+        }
+
+        return { account, dateFrom, dateTo, opening, rows, closing: saldo, totalAumentos, totalDisminuciones };
+    }
+
     // ===== EXPORTACIÓN DE DATOS =====
-    
+    // Cada informe se prepara como un "modelo" (solo datos, ya redondeados y con los
+    // mismos cálculos que la pantalla) y js/report-export.js lo escribe como CSV o Excel.
+
     async exportData(type, format, options = {}) {
         if (!Auth.isPremium()) {
             throw new Error('La exportación de datos requiere Premium');
         }
-        
-        const { startDate, endDate } = options;
-        
-        try {
-            let data = [];
-            let filename = '';
-            
-            switch (type) {
-                case 'movements':
-                    data = this.prepareMovementsForExport(startDate, endDate);
-                    filename = `movimientos_${this.formatDateForFilename(startDate)}_${this.formatDateForFilename(endDate)}`;
-                    break;
-                case 'accounts':
-                    data = this.prepareAccountsForExport();
-                    filename = `cuentas_${this.formatDateForFilename()}`;
-                    break;
-                case 'balance':
-                    data = this.prepareBalanceForExport();
-                    filename = `balance_${this.formatDateForFilename()}`;
-                    break;
-                default:
-                    throw new Error('Tipo de exportación no válido');
+
+        const report = this.buildExportReport(type, options);
+
+        if (format === 'csv') {
+            const blob = new Blob([buildCSV(report)], { type: 'text/csv;charset=utf-8;' });
+            this.downloadBlob(blob, `${report.filename}.csv`);
+            return { success: true, filename: `${report.filename}.csv`, records: report.records, format: 'CSV' };
+        }
+
+        if (format === 'excel') {
+            let blob;
+            let fallback = false;
+            try {
+                const ExcelJS = await loadExcelJS();
+                const logo = await loadLogo();
+                const workbook = buildExcelWorkbook(ExcelJS, report, logo);
+                blob = new Blob([await workbook.xlsx.writeBuffer()], { type: XLSX_MIME });
+            } catch (error) {
+                // Sin ExcelJS (CDN caído, bloqueado...): mismo contenido, sin formato
+                console.error('Exportación Excel con formato no disponible, se usa SheetJS:', error);
+                blob = buildSheetJSBlob(window.XLSX, report);
+                fallback = true;
             }
-            
-            if (format === 'csv') {
-                return this.exportToCSV(data, filename);
-            } else if (format === 'excel') {
-                return this.exportToExcel(data, filename, type);
-            } else {
-                throw new Error('Formato de exportación no válido');
+            this.downloadBlob(blob, `${report.filename}.xlsx`);
+            return { success: true, filename: `${report.filename}.xlsx`, records: report.records, format: 'Excel (.xlsx)', fallback };
+        }
+
+        throw new Error('Formato de exportación no válido');
+    }
+
+    // Construye el modelo del informe. options: { startDate, endDate, accountIds }
+    // accountIds: null/undefined = todas las cuentas; array = libro mayor de esas cuentas.
+    buildExportReport(type, options = {}) {
+        const startDate = options.startDate || '';
+        const endDate = options.endDate || '';
+        const user = this.auth.currentUser || {};
+        const base = {
+            userName: user.name || user.email || '',
+            generatedAt: new Date(),
+            currency: this._exportCurrency()
+        };
+
+        switch (type) {
+            case 'balance':
+                return this._buildBalanceReport(base, endDate);
+            case 'income_statement':
+                return this._buildIncomeStatementReport(base, startDate, endDate);
+            case 'accounts': {
+                const ids = options.accountIds;
+                const allIds = this.getAccounts().map(a => a.id);
+                if (Array.isArray(ids) && ids.length === 0) {
+                    throw new Error('Selecciona al menos una cuenta');
+                }
+                if (Array.isArray(ids) && !allIds.every(id => ids.includes(id))) {
+                    return this._buildLedgerReport(base, ids, startDate, endDate);
+                }
+                return this._buildAccountsReport(base, endDate);
             }
-            
-        } catch (error) {
-            console.error('Error en exportación:', error);
-            throw error;
+            case 'movements':
+                return this._buildMovementsReport(base, startDate, endDate);
+            default:
+                throw new Error('Tipo de exportación no válido');
         }
     }
-    
-    prepareMovementsForExport(startDate, endDate) {
-        let movements = this.getMovements();
-        
-        // Filtrar por fechas si se especifican
-        if (startDate) {
-            movements = movements.filter(m => m.fecha >= startDate);
+
+    // Divisa del usuario, con el mismo locale que formatCurrency del dashboard
+    _exportCurrency() {
+        const localeMap = {
+            EUR: 'es-ES', USD: 'en-US', MXN: 'es-MX', COP: 'es-CO', ARS: 'es-AR',
+            CLP: 'es-CL', PEN: 'es-PE', UYU: 'es-UY', BOB: 'es-BO', PYG: 'es-PY',
+            BRL: 'pt-BR', GTQ: 'es-GT', CRC: 'es-CR', DOP: 'es-DO', HNL: 'es-HN',
+            NIO: 'es-NI', PAB: 'es-PA', VES: 'es-VE'
+        };
+        let code = (this.auth.currentUser && this.auth.currentUser.currency) || 'EUR';
+        let locale = localeMap[code] || 'es-ES';
+        let parts;
+        try {
+            parts = new Intl.NumberFormat(locale, { style: 'currency', currency: code }).formatToParts(1);
+        } catch (e) {
+            code = 'EUR';
+            locale = 'es-ES';
+            parts = new Intl.NumberFormat(locale, { style: 'currency', currency: code }).formatToParts(1);
         }
-        if (endDate) {
-            movements = movements.filter(m => m.fecha <= endDate);
-        }
-        
-        // Ordenar por fecha
-        movements.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-        
-        // Obtener cuentas para los nombres
+        const iSym = parts.findIndex(p => p.type === 'currency');
+        const iNum = parts.findIndex(p => p.type === 'integer');
+        return {
+            code,
+            locale,
+            symbol: iSym > -1 ? parts[iSym].value : code,
+            symbolFirst: iSym > -1 && iSym < iNum
+        };
+    }
+
+    // 'YYYY-MM-DD' → 'dd/mm/aaaa' sin pasar por Date (evita desfases de zona horaria)
+    _dmy(iso) {
+        if (!iso) return '';
+        const [y, m, d] = String(iso).slice(0, 10).split('-');
+        return (y && m && d) ? `${d}/${m}/${y}` : String(iso);
+    }
+
+    // Día anterior a una fecha 'YYYY-MM-DD' (hora local)
+    _dayBefore(iso) {
+        const [y, m, d] = iso.split('-').map(Number);
+        return this._formatDateLocal(new Date(y, m - 1, d - 1));
+    }
+
+    _firstDate(movements) {
+        return movements.reduce((min, m) => (!min || m.fecha < min ? m.fecha : min), '');
+    }
+
+    _buildBalanceReport(base, balanceDate) {
+        const d = this.getBalanceData(balanceDate ? { dateTo: balanceDate } : {});
+        const r = (x) => this._round2(x);
+        const today = this._formatDateLocal(base.generatedAt);
+        return {
+            ...base,
+            kind: 'balance',
+            title: 'BALANCE DE SITUACIÓN',
+            sheetName: 'Balance',
+            filename: `FinanceFlow_Balance_${balanceDate || today}`,
+            periodLabel: balanceDate ? `Balance a ${this._dmy(balanceDate)}` : `Saldos actuales a ${this._dmy(today)}`,
+            records: d.activos.length + d.patrimonio.length + d.pasivos.length,
+            data: {
+                activos: d.activos.map(a => ({ nombre: a.nombre, importe: r(a.saldo_calc) })),
+                patrimonio: d.patrimonio.map(a => ({ nombre: a.nombre, importe: r(a.saldo_calc) })),
+                pasivos: d.pasivos.map(a => ({ nombre: a.nombre, importe: r(Math.abs(a.saldo_calc)) })),
+                totals: {
+                    activos: r(d.activos_total),
+                    patrimonio: r(d.patrimonio_total),
+                    pasivos: r(d.pasivos_total),
+                    balance: r(d.balance_total)
+                }
+            }
+        };
+    }
+
+    _buildIncomeStatementReport(base, startDate, endDate) {
+        const d = this.getIncomeStatementData({ dateFrom: startDate, dateTo: endDate });
+        const r = (x) => this._round2(x);
+        const today = this._formatDateLocal(base.generatedAt);
+        const from = d.dateFrom || this._firstDate(this.getMovements()) || today;
+        const to = d.dateTo || today;
+        let periodLabel;
+        if (d.dateFrom && d.dateTo) periodLabel = `Del ${this._dmy(d.dateFrom)} al ${this._dmy(d.dateTo)}`;
+        else if (d.dateFrom) periodLabel = `Desde el ${this._dmy(d.dateFrom)}`;
+        else periodLabel = `Hasta el ${this._dmy(d.dateTo)}`;
+        return {
+            ...base,
+            kind: 'income_statement',
+            title: 'CUENTA DE PÉRDIDAS Y GANANCIAS',
+            sheetName: 'PyG',
+            filename: `FinanceFlow_PyG_${from}_${to}`,
+            periodLabel,
+            records: d.ingresos.length + d.gastos.length,
+            data: {
+                ingresos: d.ingresos.map(a => ({ nombre: a.nombre, importe: r(a.saldo_periodo) })),
+                gastos: d.gastos.map(a => ({ nombre: a.nombre, importe: r(a.saldo_periodo) })),
+                totals: {
+                    ingresos: r(d.stats.ingresos_total),
+                    gastos: r(d.stats.gastos_total),
+                    resultado: r(d.resultado)
+                }
+            }
+        };
+    }
+
+    // Todas las cuentas: los mismos datos de siempre, redondeados. Con "hasta", el
+    // saldo es a esa fecha con el mismo cálculo que el Balance.
+    _buildAccountsReport(base, endDate) {
         const accounts = this.getAccounts();
-        const accountsMap = {};
+        const allMovements = this.getMovements();
+        const r = (x) => this._round2(x);
+        const today = this._formatDateLocal(base.generatedAt);
+
+        const saldoDe = (acc) => endDate
+            ? this.calculateAccountBalanceAt(acc, endDate, allMovements)
+            : (parseFloat(acc.saldo_actual) || 0);
+
+        const rows = accounts.map(acc => ({
+            nombre: acc.nombre,
+            tipo: acc.tipo,
+            saldoInicial: r(parseFloat(acc.saldo_inicial) || 0),
+            saldo: r(saldoDe(acc)),
+            descripcion: acc.descripcion || ''
+        }));
+
+        // Totales por tipo, en orden de aparición (como antes)
+        const sumas = {};
+        const orden = [];
         accounts.forEach(acc => {
-            accountsMap[acc.id] = acc.nombre;
+            if (!(acc.tipo in sumas)) { sumas[acc.tipo] = 0; orden.push(acc.tipo); }
+            sumas[acc.tipo] += saldoDe(acc);
         });
-        
-        // Preparar datos para exportación contable profesional
-        let saldoAcumulado = 0;
-        
-        return movements.map(movement => {
-            saldoAcumulado += parseFloat(movement.cantidad) || 0;
-            
+
+        return {
+            ...base,
+            kind: 'accounts',
+            title: 'SALDOS DE CUENTAS',
+            sheetName: 'Cuentas',
+            filename: `FinanceFlow_Cuentas_${endDate || today}`,
+            periodLabel: endDate ? `Saldos a ${this._dmy(endDate)}` : `Saldos actuales a ${this._dmy(today)}`,
+            records: rows.length,
+            data: {
+                rows,
+                saldoLabel: endDate ? `Saldo a ${this._dmy(endDate)}` : 'Saldo Actual',
+                totalsByType: orden.map(tipo => ({ tipo, total: r(sumas[tipo]) }))
+            }
+        };
+    }
+
+    // Libro mayor de las cuentas elegidas en el intervalo
+    _buildLedgerReport(base, accountIds, startDate, endDate) {
+        const selected = this.getAccounts().filter(a => accountIds.includes(a.id));
+        if (selected.length === 0) {
+            throw new Error('Selecciona al menos una cuenta');
+        }
+        const r = (x) => this._round2(x);
+        const today = this._formatDateLocal(base.generatedAt);
+
+        // Nombres repetidos ("coche" gasto y "coche" patrimonio) → se añade el tipo
+        const veces = {};
+        selected.forEach(a => {
+            const k = String(a.nombre || '').trim().toLowerCase();
+            veces[k] = (veces[k] || 0) + 1;
+        });
+
+        const ledgers = selected.map(acc => {
+            const L = this.getLedgerData(acc, { dateFrom: startDate, dateTo: endDate });
+            const k = String(acc.nombre || '').trim().toLowerCase();
             return {
-                'Fecha': this.formatDateForExport(movement.fecha),
-                'Cuenta': accountsMap[movement.cuenta_id] || 'No especificada',
-                'Tipo': movement.tipo,
-                'Categoría': movement.tipo === 'ingreso' ? 'Ingresos' : movement.tipo === 'gasto' ? 'Gastos' : 'Transferencia',
-                'Descripción': movement.descripcion,
-                'Importe': parseFloat(movement.cantidad) || 0,
-                'Saldo': saldoAcumulado
+                label: veces[k] > 1 ? `${acc.nombre} (${acc.tipo})` : acc.nombre,
+                tipo: acc.tipo,
+                openingDate: startDate ? this._dayBefore(startDate) : '',
+                closingDate: endDate || '',
+                opening: r(L.opening),
+                closing: r(L.closing),
+                totalAumentos: r(L.totalAumentos),
+                totalDisminuciones: r(L.totalDisminuciones),
+                rows: L.rows.map(x => ({
+                    fecha: x.fecha,
+                    concepto: x.concepto,
+                    contrapartida: x.contrapartida,
+                    aumento: r(x.aumento),
+                    disminucion: r(x.disminucion),
+                    saldo: r(x.saldo)
+                }))
             };
         });
-    }
-    
-    prepareAccountsForExport() {
-        const accounts = this.getAccounts();
-        
-        return accounts.map(account => ({
-            'Nombre': account.nombre,
-            'Tipo': account.tipo,
-            'Saldo Inicial': parseFloat(account.saldo_inicial) || 0,
-            'Saldo Actual': parseFloat(account.saldo_actual) || 0,
-            'Descripción': account.descripcion || ''
-        }));
-    }
-    
-    prepareBalanceForExport() {
-        const accounts = this.getAccounts();
-        const stats = this.calculateFinancialStats();
 
-        // Tipos en minúsculas — igual que como los guarda la app
-        const activos    = accounts.filter(acc => acc.tipo === 'activo');
-        const pasivos    = accounts.filter(acc => acc.tipo === 'pasivo');
-        const patrimonio = accounts.filter(acc => acc.tipo === 'patrimonio');
-        const ingresos   = accounts.filter(acc => acc.tipo === 'ingreso');
-        const gastos     = accounts.filter(acc => acc.tipo === 'gasto');
+        const ownMovements = this.getMovements().filter(m => selected.some(a => a.id === m.cuenta_id || a.id === m.cuenta_destino_id));
+        const from = startDate || this._firstDate(ownMovements) || today;
+        const to = endDate || today;
+        let periodLabel;
+        if (startDate && endDate) periodLabel = `Del ${this._dmy(startDate)} al ${this._dmy(endDate)}`;
+        else if (startDate) periodLabel = `Desde el ${this._dmy(startDate)}`;
+        else if (endDate) periodLabel = `Hasta el ${this._dmy(endDate)}`;
+        else periodLabel = 'Todos los movimientos';
 
-        const balanceData = [];
-
-        // ACTIVOS
-        balanceData.push({ 'Tipo': 'ACTIVOS', 'Cuenta': '', 'Saldo': '' });
-        let totalActivos = 0;
-        activos.forEach(acc => {
-            const saldo = acc.saldo_actual || 0;
-            totalActivos += saldo;
-            balanceData.push({ 'Tipo': 'Activo', 'Cuenta': acc.nombre, 'Saldo': saldo });
-        });
-        balanceData.push({ 'Tipo': '', 'Cuenta': 'TOTAL ACTIVOS', 'Saldo': totalActivos });
-        balanceData.push({ 'Tipo': '', 'Cuenta': '', 'Saldo': '' });
-
-        // PASIVOS
-        balanceData.push({ 'Tipo': 'PASIVOS', 'Cuenta': '', 'Saldo': '' });
-        let totalPasivos = 0;
-        pasivos.forEach(acc => {
-            const saldo = Math.abs(acc.saldo_actual || 0);
-            totalPasivos += saldo;
-            balanceData.push({ 'Tipo': 'Pasivo', 'Cuenta': acc.nombre, 'Saldo': saldo });
-        });
-        balanceData.push({ 'Tipo': '', 'Cuenta': 'TOTAL PASIVOS', 'Saldo': totalPasivos });
-        balanceData.push({ 'Tipo': '', 'Cuenta': '', 'Saldo': '' });
-
-        // PATRIMONIO
-        if (patrimonio.length > 0) {
-            balanceData.push({ 'Tipo': 'PATRIMONIO', 'Cuenta': '', 'Saldo': '' });
-            let totalPatrimonio = 0;
-            patrimonio.forEach(acc => {
-                const saldo = acc.saldo_actual || 0;
-                totalPatrimonio += saldo;
-                balanceData.push({ 'Tipo': 'Patrimonio', 'Cuenta': acc.nombre, 'Saldo': saldo });
-            });
-            balanceData.push({ 'Tipo': '', 'Cuenta': 'TOTAL PATRIMONIO', 'Saldo': totalPatrimonio });
-            balanceData.push({ 'Tipo': '', 'Cuenta': '', 'Saldo': '' });
-        }
-
-        // PATRIMONIO NETO (calculado)
-        const patrimonioNeto = totalActivos - totalPasivos + (stats.patrimonio_total || 0);
-        balanceData.push({ 'Tipo': '', 'Cuenta': 'PATRIMONIO NETO', 'Saldo': patrimonioNeto });
-        balanceData.push({ 'Tipo': '', 'Cuenta': '', 'Saldo': '' });
-
-        // INGRESOS
-        balanceData.push({ 'Tipo': 'INGRESOS', 'Cuenta': '', 'Saldo': '' });
-        let totalIngresos = 0;
-        ingresos.forEach(acc => {
-            const saldo = acc.saldo_actual || 0;
-            totalIngresos += saldo;
-            balanceData.push({ 'Tipo': 'Ingreso', 'Cuenta': acc.nombre, 'Saldo': saldo });
-        });
-        balanceData.push({ 'Tipo': '', 'Cuenta': 'TOTAL INGRESOS', 'Saldo': totalIngresos });
-        balanceData.push({ 'Tipo': '', 'Cuenta': '', 'Saldo': '' });
-
-        // GASTOS
-        balanceData.push({ 'Tipo': 'GASTOS', 'Cuenta': '', 'Saldo': '' });
-        let totalGastos = 0;
-        gastos.forEach(acc => {
-            const saldo = acc.saldo_actual || 0;
-            totalGastos += saldo;
-            balanceData.push({ 'Tipo': 'Gasto', 'Cuenta': acc.nombre, 'Saldo': saldo });
-        });
-        balanceData.push({ 'Tipo': '', 'Cuenta': 'TOTAL GASTOS', 'Saldo': totalGastos });
-        balanceData.push({ 'Tipo': '', 'Cuenta': '', 'Saldo': '' });
-
-        // RESULTADO NETO
-        balanceData.push({ 'Tipo': 'RESULTADO NETO', 'Cuenta': totalIngresos - totalGastos >= 0 ? 'Beneficio' : 'Pérdida', 'Saldo': totalIngresos - totalGastos });
-
-        return balanceData;
-    }
-    
-    exportToCSV(data, filename) {
-        if (data.length === 0) {
-            throw new Error('No hay datos para exportar');
-        }
-        
-        const headers = Object.keys(data[0]);
-        const csvContent = [
-            headers.join(','),
-            ...data.map(row => 
-                headers.map(header => {
-                    let value = row[header];
-                    // Escapar comillas y envolver en comillas si contiene coma o comilla
-                    if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-                        value = `"${value.replace(/"/g, '""')}"`;
-                    }
-                    return value;
-                }).join(',')
-            )
-        ].join('\n');
-        
-        // Crear y descargar archivo
-        const BOM = '\uFEFF';
-        const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-        this.downloadBlob(blob, `${filename}.csv`);
-        
         return {
-            success: true,
-            filename: `${filename}.csv`,
-            records: data.length,
-            format: 'CSV'
+            ...base,
+            kind: 'ledger',
+            title: 'LIBRO MAYOR',
+            filename: `FinanceFlow_LibroMayor_${from}_${to}`,
+            periodLabel,
+            records: ledgers.reduce((n, l) => n + l.rows.length, 0),
+            data: { ledgers }
         };
     }
-    
-    exportToExcel(data, filename, type = 'generic') {
-        if (data.length === 0) {
-            throw new Error('No hay datos para exportar');
-        }
-        
-        // Crear libro de trabajo Excel
-        const workbook = XLSX.utils.book_new();
-        
-        // Generar hoja según el tipo de exportación
-        let worksheet;
-        switch (type) {
-            case 'movements':
-                worksheet = this.createMovementsWorksheet(data);
-                XLSX.utils.book_append_sheet(workbook, worksheet, 'Movimientos');
-                break;
-            case 'accounts':
-                worksheet = this.createAccountsWorksheet(data);
-                XLSX.utils.book_append_sheet(workbook, worksheet, 'Cuentas');
-                break;
-            case 'balance':
-                worksheet = this.createBalanceWorksheet(data);
-                XLSX.utils.book_append_sheet(workbook, worksheet, 'Balance General');
-                break;
-            default:
-                // Exportación genérica como antes pero en XLSX
-                worksheet = XLSX.utils.json_to_sheet(data);
-                XLSX.utils.book_append_sheet(workbook, worksheet, 'Datos');
-        }
-        
-        // Generar archivo Excel
-        const excelBuffer = XLSX.write(workbook, { 
-            bookType: 'xlsx', 
-            type: 'array',
-            cellStyles: true 
-        });
-        
-        // Crear blob y descargar
-        const blob = new Blob([excelBuffer], { 
-            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-        });
-        this.downloadBlob(blob, `${filename}.xlsx`);
-        
+
+    // Movimientos: origen y destino de cada uno (un gasto: banco → cuenta de gasto)
+    _buildMovementsReport(base, startDate, endDate) {
+        let movements = this.getMovements();
+        if (startDate) movements = movements.filter(m => m.fecha >= startDate);
+        if (endDate) movements = movements.filter(m => m.fecha <= endDate);
+        movements = [...movements].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+
+        const nameById = {};
+        this.getAccounts().forEach(a => { nameById[a.id] = a.nombre; });
+        const today = this._formatDateLocal(base.generatedAt);
+        const from = startDate || this._firstDate(movements) || today;
+        const to = endDate || today;
+        let periodLabel;
+        if (startDate && endDate) periodLabel = `Del ${this._dmy(startDate)} al ${this._dmy(endDate)}`;
+        else if (startDate) periodLabel = `Desde el ${this._dmy(startDate)}`;
+        else if (endDate) periodLabel = `Hasta el ${this._dmy(endDate)}`;
+        else periodLabel = 'Todos los movimientos';
+
         return {
-            success: true,
-            filename: `${filename}.xlsx`,
-            records: data.length,
-            format: 'Excel (.xlsx)'
+            ...base,
+            kind: 'movements',
+            title: 'MOVIMIENTOS',
+            sheetName: 'Movimientos',
+            filename: `FinanceFlow_Movimientos_${from}_${to}`,
+            periodLabel,
+            records: movements.length,
+            data: {
+                rows: movements.map(m => ({
+                    fecha: m.fecha,
+                    tipo: m.tipo,
+                    origen: nameById[m.cuenta_id] || 'No especificada',
+                    destino: nameById[m.cuenta_destino_id] || 'No especificada',
+                    descripcion: m.descripcion || '',
+                    importe: this._round2(parseFloat(m.cantidad) || 0)
+                }))
+            }
         };
     }
-    
+
     downloadBlob(blob, filename) {
         const link = document.createElement('a');
         const url = URL.createObjectURL(blob);
-        
+
         link.href = url;
         link.download = filename;
         document.body.appendChild(link);
         link.click();
-        
+
         // Cleanup
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
     }
-    
-    // ===== FUNCIONES ESPECIALIZADAS PARA EXCEL =====
-    
-    createMovementsWorksheet(movements) {
-        // Crear hoja con los datos de movimientos
-        const worksheet = XLSX.utils.json_to_sheet(movements);
-        
-        // Agregar fila de totales al final
-        const totalImporte = movements.reduce((sum, mov) => sum + (parseFloat(mov.Importe) || 0), 0);
-        const totalRow = {
-            'Fecha': '',
-            'Cuenta': '',
-            'Tipo': '',
-            'Categoría': 'TOTAL',
-            'Descripción': '',
-            'Importe': totalImporte,
-            'Saldo': ''
-        };
-        
-        XLSX.utils.sheet_add_json(worksheet, [totalRow], { 
-            skipHeader: true, 
-            origin: -1 
-        });
-        
-        // Configurar anchos de columna
-        const columnWidths = [
-            { wch: 12 }, // Fecha
-            { wch: 25 }, // Cuenta
-            { wch: 10 }, // Tipo
-            { wch: 15 }, // Categoría
-            { wch: 35 }, // Descripción
-            { wch: 15 }, // Importe
-            { wch: 15 }  // Saldo
-        ];
-        worksheet['!cols'] = columnWidths;
-        
-        return worksheet;
-    }
-    
-    createAccountsWorksheet(accounts) {
-        const worksheet = XLSX.utils.json_to_sheet(accounts);
-        
-        // Calcular totales por tipo
-        const totalPorTipo = {};
-        accounts.forEach(acc => {
-            if (!totalPorTipo[acc.Tipo]) {
-                totalPorTipo[acc.Tipo] = 0;
-            }
-            totalPorTipo[acc.Tipo] += parseFloat(acc['Saldo Actual']) || 0;
-        });
-        
-        // Agregar filas de totales
-        const totalRows = [];
-        totalRows.push({ 'Nombre': '', 'Tipo': '', 'Saldo Inicial': '', 'Saldo Actual': '', 'Descripción': '' });
-        totalRows.push({ 'Nombre': 'TOTALES POR TIPO', 'Tipo': '', 'Saldo Inicial': '', 'Saldo Actual': '', 'Descripción': '' });
-        
-        Object.keys(totalPorTipo).forEach(tipo => {
-            totalRows.push({
-                'Nombre': '',
-                'Tipo': tipo,
-                'Saldo Inicial': '',
-                'Saldo Actual': totalPorTipo[tipo],
-                'Descripción': ''
-            });
-        });
-        
-        XLSX.utils.sheet_add_json(worksheet, totalRows, { 
-            skipHeader: true, 
-            origin: -1 
-        });
-        
-        // Configurar anchos de columna
-        const columnWidths = [
-            { wch: 25 }, // Nombre
-            { wch: 15 }, // Tipo
-            { wch: 15 }, // Saldo Inicial
-            { wch: 15 }, // Saldo Actual
-            { wch: 30 }  // Descripción
-        ];
-        worksheet['!cols'] = columnWidths;
-        
-        return worksheet;
-    }
-    
-    createBalanceWorksheet(balanceData) {
-        const worksheet = XLSX.utils.json_to_sheet(balanceData);
-        
-        // Configurar anchos de columna
-        const columnWidths = [
-            { wch: 15 }, // Tipo
-            { wch: 30 }, // Cuenta
-            { wch: 15 }  // Saldo
-        ];
-        worksheet['!cols'] = columnWidths;
-        
-        return worksheet;
-    }
-    
-    formatDateForExport(dateString) {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('es-ES', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric'
-        });
-    }
-    
-    formatDateForFilename(date) {
-        if (!date) {
-            return new Date().toISOString().slice(0, 10);
-        }
-        return date;
-    }
-    
+
     getAvailableExportTypes() {
         return [
             { value: 'movements', label: 'Movimientos', description: 'Historial completo de movimientos contables' },
-            { value: 'accounts', label: 'Cuentas', description: 'Lista de todas las cuentas con sus saldos' },
-            { value: 'balance', label: 'Balance General', description: 'Resumen financiero con totales' }
+            { value: 'accounts', label: 'Cuentas', description: 'Saldos de las cuentas o libro mayor de las elegidas' },
+            { value: 'balance', label: 'Balance General', description: 'Activo, pasivo y patrimonio neto a una fecha' },
+            { value: 'income_statement', label: 'Estado de Resultados', description: 'Ingresos y gastos del periodo y su resultado' }
         ];
     }
-    
+
     getAvailableExportFormats() {
         return [
-            { value: 'csv', label: 'CSV', description: 'Archivo separado por comas (compatible con Excel)' },
+            { value: 'csv', label: 'CSV', description: 'Separado por punto y coma (solo datos, sin formato)' },
             { value: 'excel', label: 'Excel', description: 'Archivo de hoja de cálculo' }
         ];
     }

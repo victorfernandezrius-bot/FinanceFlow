@@ -2024,7 +2024,7 @@
     </div>
 
     <!-- Modal para Exportación de Datos (PREMIUM) -->
-    <div id="export-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+    <div id="export-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50 overflow-y-auto">
         <div class="flex items-center justify-center min-h-screen p-4">
             <div class="bg-white rounded-lg max-w-lg w-full p-6">
                 <div class="flex justify-between items-center mb-4">
@@ -2049,6 +2049,7 @@
                                 <option value="movements">Movimientos</option>
                                 <option value="accounts">Cuentas</option>
                                 <option value="balance">Balance General</option>
+                                <option value="income_statement">Estado de Resultados</option>
                             </select>
                             <p class="text-xs text-gray-500 mt-1" id="export-data-description">
                                 Selecciona el tipo de datos para ver su descripción
@@ -2067,7 +2068,7 @@
                                         <div class="text-center">
                                             <i class="fas fa-file-csv text-2xl text-green-600 mb-2"></i>
                                             <div class="text-sm font-medium">CSV</div>
-                                            <div class="text-xs text-gray-500">Compatible con Excel</div>
+                                            <div class="text-xs text-gray-500">Solo datos, sin formato</div>
                                         </div>
                                     </label>
                                 </div>
@@ -2084,24 +2085,44 @@
                             </div>
                         </div>
                         
-                        <!-- Rango de fechas (solo para movimientos) -->
+                        <!-- Fechas (Desde/Hasta; en el Balance, solo "Fecha del balance") -->
                         <div id="date-range-section" class="hidden">
                             <label class="block text-sm font-medium text-gray-700 mb-2">
                                 <i class="fas fa-calendar-alt mr-1"></i>
-                                Rango de fechas (opcional)
+                                <span id="export-date-title">Rango de fechas (opcional)</span>
                             </label>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
+                            <div class="grid grid-cols-2 gap-3" id="export-date-grid">
+                                <div id="export-start-date-wrapper">
                                     <label for="export-start-date" class="block text-xs text-gray-600 mb-1">Desde</label>
                                     <input type="date" id="export-start-date" name="startDate" class="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
                                 </div>
                                 <div>
-                                    <label for="export-end-date" class="block text-xs text-gray-600 mb-1">Hasta</label>
+                                    <label for="export-end-date" id="export-end-date-label" class="block text-xs text-gray-600 mb-1">Hasta</label>
                                     <input type="date" id="export-end-date" name="endDate" class="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
                                 </div>
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 mt-1" id="export-date-hint">
                                 Si no especificas fechas, se exportarán todos los datos
+                            </p>
+                        </div>
+
+                        <!-- Cuentas a exportar (solo para "Cuentas") -->
+                        <div id="export-accounts-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-list mr-1"></i>
+                                Cuentas
+                            </label>
+                            <input type="text" id="export-accounts-search" placeholder="Buscar cuenta..." autocomplete="off"
+                                   class="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm mb-2">
+                            <div class="border border-gray-300 rounded-md">
+                                <label class="flex items-center gap-2 px-3 py-2 border-b border-gray-200 text-sm font-medium text-gray-900 cursor-pointer">
+                                    <input type="checkbox" id="export-accounts-all" checked class="h-4 w-4">
+                                    Todas las cuentas
+                                </label>
+                                <div id="export-accounts-list" class="max-h-48 overflow-y-auto px-3 py-2 space-y-2"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                Con todas las cuentas se exportan sus saldos. Si eliges algunas, se exporta su libro mayor.
                             </p>
                         </div>
                     </div>
@@ -2614,6 +2635,7 @@
                 document.querySelectorAll('input[name="format"]').forEach(radio => {
                     radio.addEventListener('change', () => {
                         this.updateExportPreview();
+                        this.updateFormatRadioStyles();
                     });
                 });
                 
@@ -2624,6 +2646,23 @@
                 
                 document.getElementById('export-end-date').addEventListener('change', () => {
                     this.updateExportPreview();
+                });
+
+                // Selección de cuentas (exportación de "Cuentas")
+                document.getElementById('export-accounts-all').addEventListener('change', (e) => {
+                    document.querySelectorAll('#export-accounts-list .export-acc-cb').forEach(cb => {
+                        cb.checked = e.target.checked;
+                    });
+                    this.updateExportPreview();
+                });
+                document.getElementById('export-accounts-list').addEventListener('change', (e) => {
+                    if (!e.target.classList.contains('export-acc-cb')) return;
+                    const cbs = [...document.querySelectorAll('#export-accounts-list .export-acc-cb')];
+                    document.getElementById('export-accounts-all').checked = cbs.length > 0 && cbs.every(cb => cb.checked);
+                    this.updateExportPreview();
+                });
+                document.getElementById('export-accounts-search').addEventListener('input', (e) => {
+                    this.filterExportAccounts(e.target.value);
                 });
                 
                 // Reglas de Categorización Premium
@@ -3355,8 +3394,8 @@
                 this.hideDataTypeDescription();
                 document.getElementById('export-btn').disabled = true;
                 
-                // Ocultar sección de fechas
-                document.getElementById('date-range-section').classList.add('hidden');
+                // Ocultar secciones de fechas y cuentas (y dejar sus textos por defecto)
+                this.handleExportDataTypeChange('');
             }
             
             closeExportModal() {
@@ -3367,11 +3406,13 @@
             handleExportDataTypeChange(dataType) {
                 const descriptionElement = document.getElementById('export-data-description');
                 const dateRangeSection = document.getElementById('date-range-section');
+                const accountsSection = document.getElementById('export-accounts-section');
                 
                 const descriptions = {
-                    'movements': 'Historial completo de movimientos contables con fechas, cuentas y categorías',
-                    'accounts': 'Lista de todas las cuentas con sus saldos actuales y información detallada',
-                    'balance': 'Resumen financiero con totales de activos, pasivos y patrimonio neto'
+                    'movements': 'Movimientos del periodo con fecha, tipo, cuenta de origen, cuenta de destino, descripción e importe',
+                    'accounts': 'Saldos de todas las cuentas o, si eliges algunas, su libro mayor (saldo inicial, movimientos y saldo final)',
+                    'balance': 'Balance de Situación: activo, patrimonio neto y pasivo a una fecha, con el Balance Total',
+                    'income_statement': 'Cuenta de Pérdidas y Ganancias: ingresos y gastos del periodo y su resultado'
                 };
                 
                 if (descriptions[dataType]) {
@@ -3384,15 +3425,104 @@
                     descriptionElement.classList.add('text-gray-500');
                 }
                 
-                // Mostrar/ocultar sección de fechas solo para movimientos
-                if (dataType === 'movements') {
+                // Fechas según el informe. El Balance solo usa "Fecha del balance" (un único campo).
+                const dateConfig = {
+                    'movements': { title: 'Rango de fechas (opcional)', hint: 'Si no especificas fechas, se exportarán todos los movimientos' },
+                    'income_statement': { title: 'Periodo', hint: 'Si no especificas fechas, se exporta el mes actual' },
+                    'accounts': { title: 'Periodo (opcional)', hint: 'Todas las cuentas: saldos a la fecha «Hasta» (vacía = saldos actuales). Libro mayor: movimientos entre «Desde» y «Hasta».' },
+                    'balance': { title: 'Fecha del balance', hint: 'Si no indicas fecha, se exportan los saldos actuales', single: true }
+                };
+                const cfg = dateConfig[dataType];
+                const startWrapper = document.getElementById('export-start-date-wrapper');
+                const dateGrid = document.getElementById('export-date-grid');
+                const endLabel = document.getElementById('export-end-date-label');
+                if (cfg) {
                     dateRangeSection.classList.remove('hidden');
+                    document.getElementById('export-date-title').textContent = cfg.title;
+                    document.getElementById('export-date-hint').textContent = cfg.hint;
+                    startWrapper.classList.toggle('hidden', !!cfg.single);
+                    endLabel.classList.toggle('hidden', !!cfg.single);
+                    dateGrid.classList.toggle('grid-cols-2', !cfg.single);
+                    dateGrid.classList.toggle('grid-cols-1', !!cfg.single);
+                    if (cfg.single) document.getElementById('export-start-date').value = '';
                 } else {
                     dateRangeSection.classList.add('hidden');
+                    document.getElementById('export-date-title').textContent = 'Rango de fechas (opcional)';
+                    startWrapper.classList.remove('hidden');
+                    endLabel.classList.remove('hidden');
+                    dateGrid.classList.add('grid-cols-2');
+                    dateGrid.classList.remove('grid-cols-1');
+                }
+                
+                // Selección de cuentas, solo para "Cuentas"
+                if (dataType === 'accounts') {
+                    this.renderExportAccountsList();
+                    accountsSection.classList.remove('hidden');
+                } else {
+                    accountsSection.classList.add('hidden');
                 }
                 
                 this.updateExportPreview();
                 this.updateFormatRadioStyles();
+            }
+            
+            // Lista de cuentas con casillas, agrupada por tipo. Por defecto, todas marcadas.
+            renderExportAccountsList() {
+                const list = document.getElementById('export-accounts-list');
+                const groups = [
+                    ['activo', 'Activo'], ['pasivo', 'Pasivo'], ['patrimonio', 'Patrimonio'],
+                    ['ingreso', 'Ingresos'], ['gasto', 'Gastos']
+                ];
+                const accounts = this.accountingManager.getAccounts();
+                document.getElementById('export-accounts-all').checked = true;
+                document.getElementById('export-accounts-search').value = '';
+                
+                list.innerHTML = groups.map(([tipo, titulo]) => {
+                    const items = accounts.filter(a => a.tipo === tipo);
+                    if (items.length === 0) return '';
+                    return `
+                        <div class="export-acc-group">
+                            <div class="text-xs font-semibold uppercase text-gray-500 mb-1">${titulo}</div>
+                            ${items.map(a => `
+                                <label class="export-acc-item flex items-center gap-2 text-sm text-gray-700 cursor-pointer py-0.5" data-name="${this._escapeHtml(String(a.nombre || '').toLowerCase())}">
+                                    <input type="checkbox" class="export-acc-cb h-4 w-4" value="${this._escapeHtml(a.id)}" checked>
+                                    <span class="truncate">${this._escapeHtml(a.nombre)}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                }).join('') || '<p class="text-sm text-gray-500">No tienes cuentas</p>';
+            }
+            
+            // Búsqueda simple por nombre (solo oculta; no cambia la selección)
+            filterExportAccounts(query) {
+                const q = String(query || '').trim().toLowerCase();
+                document.querySelectorAll('#export-accounts-list .export-acc-group').forEach(group => {
+                    let visibles = 0;
+                    group.querySelectorAll('.export-acc-item').forEach(item => {
+                        const match = !q || item.dataset.name.includes(q);
+                        item.classList.toggle('hidden', !match);
+                        if (match) visibles++;
+                    });
+                    group.classList.toggle('hidden', visibles === 0);
+                });
+            }
+            
+            // null = todas las cuentas; array = solo las marcadas (libro mayor)
+            getSelectedExportAccountIds() {
+                const cbs = [...document.querySelectorAll('#export-accounts-list .export-acc-cb')];
+                const ids = cbs.filter(cb => cb.checked).map(cb => cb.value);
+                if (cbs.length > 0 && ids.length === cbs.length) return null;
+                // Los ids de las casillas son texto; se devuelven con el tipo original de la cuenta
+                const byId = {};
+                this.accountingManager.getAccounts().forEach(a => { byId[String(a.id)] = a.id; });
+                return ids.map(id => (id in byId ? byId[id] : id));
+            }
+            
+            // 'YYYY-MM-DD' → 'dd/mm/aaaa' sin pasar por Date (sin desfases de zona horaria)
+            _exportDmy(iso) {
+                const [y, m, d] = String(iso || '').split('-');
+                return (y && m && d) ? `${d}/${m}/${y}` : '';
             }
             
             updateExportPreview() {
@@ -3411,47 +3541,73 @@
                     return;
                 }
                 
-                // Calcular estadísticas para la vista previa
-                let recordCount = 0;
-                let dateRangeText = '';
+                const am = this.accountingManager;
+                const dmy = (iso) => this._exportDmy(iso);
+                const today = this._formatDateLocal(new Date());
+                const rangeText = (from, to) => {
+                    if (from && to) return ` del ${dmy(from)} al ${dmy(to)}`;
+                    if (from) return ` desde el ${dmy(from)}`;
+                    if (to) return ` hasta el ${dmy(to)}`;
+                    return '';
+                };
+                const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+                const formatLabel = { 'csv': 'CSV', 'excel': 'Excel' }[format];
+                
+                let text = '';
+                let canExport = true;
                 
                 if (dataType === 'movements') {
-                    const movements = this.accountingManager.getMovements();
-                    let filteredMovements = movements;
-                    
-                    if (startDate && endDate) {
-                        filteredMovements = movements.filter(m => m.fecha >= startDate && m.fecha <= endDate);
-                        dateRangeText = ` del ${new Date(startDate).toLocaleDateString('es-ES')} al ${new Date(endDate).toLocaleDateString('es-ES')}`;
-                    } else if (startDate) {
-                        filteredMovements = movements.filter(m => m.fecha >= startDate);
-                        dateRangeText = ` desde el ${new Date(startDate).toLocaleDateString('es-ES')}`;
-                    } else if (endDate) {
-                        filteredMovements = movements.filter(m => m.fecha <= endDate);
-                        dateRangeText = ` hasta el ${new Date(endDate).toLocaleDateString('es-ES')}`;
-                    }
-                    
-                    recordCount = filteredMovements.length;
+                    let movements = am.getMovements();
+                    if (startDate) movements = movements.filter(m => m.fecha >= startDate);
+                    if (endDate) movements = movements.filter(m => m.fecha <= endDate);
+                    text = `Se exportarán ${plural(movements.length, 'movimiento', 'movimientos')}${rangeText(startDate, endDate)}`;
+                    canExport = movements.length > 0;
                 } else if (dataType === 'accounts') {
-                    recordCount = this.accountingManager.getAccounts().length;
+                    const ids = this.getSelectedExportAccountIds();
+                    if (ids === null) {
+                        const n = am.getAccounts().length;
+                        text = `Se exportarán los saldos de ${plural(n, 'cuenta', 'cuentas')}` +
+                            (endDate ? ` a ${dmy(endDate)}` : ' (saldos actuales)');
+                        canExport = n > 0;
+                    } else if (ids.length === 0) {
+                        text = 'Selecciona al menos una cuenta';
+                        canExport = false;
+                    } else {
+                        // Mismo periodo que el archivo: sin "desde", desde el primer movimiento; sin "hasta", hoy
+                        const first = am.getMovements()
+                            .filter(m => ids.includes(m.cuenta_id) || ids.includes(m.cuenta_destino_id))
+                            .reduce((min, m) => (!min || m.fecha < min ? m.fecha : min), '');
+                        const from = startDate || first || today;
+                        const to = endDate || today;
+                        text = `Se exportará el libro mayor de ${plural(ids.length, 'cuenta', 'cuentas')} del ${dmy(from)} al ${dmy(to)}`;
+                    }
                 } else if (dataType === 'balance') {
-                    recordCount = 7; // Elementos fijos del balance
+                    const n = am.getAccounts().filter(a => ['activo', 'pasivo', 'patrimonio'].includes(a.tipo)).length;
+                    text = `Se exportará el Balance de Situación ` +
+                        (endDate ? `a ${dmy(endDate)}` : 'con los saldos actuales') +
+                        ` (${plural(n, 'cuenta', 'cuentas')})`;
+                } else if (dataType === 'income_statement') {
+                    let from = startDate;
+                    let to = endDate;
+                    if (!from && !to) {
+                        const now = new Date();
+                        from = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+                        to = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+                    }
+                    const n = am.getAccounts().filter(a => a.tipo === 'ingreso' || a.tipo === 'gasto').length;
+                    text = `Se exportará la Cuenta de Pérdidas y Ganancias${rangeText(from, to)}` +
+                        ` (${plural(n, 'cuenta', 'cuentas')} de ingresos y gastos)`;
                 }
                 
-                const typeLabels = {
-                    'movements': 'movimientos',
-                    'accounts': 'cuentas',
-                    'balance': 'conceptos del balance'
-                };
+                if (startDate && endDate && startDate > endDate && dataType !== 'balance') {
+                    text = 'La fecha «Desde» no puede ser posterior a «Hasta»';
+                    canExport = false;
+                }
                 
-                const formatLabels = {
-                    'csv': 'CSV',
-                    'excel': 'Excel'
-                };
-                
-                previewText.textContent = `Se exportarán ${recordCount} ${typeLabels[dataType]}${dateRangeText} en formato ${formatLabels[format]}`;
+                previewText.textContent = canExport ? `${text} en formato ${formatLabel}` : text;
                 previewContainer.classList.remove('hidden');
                 
-                exportBtn.disabled = recordCount === 0;
+                exportBtn.disabled = !canExport;
             }
             
             hideExportPreview() {
@@ -3498,8 +3654,8 @@
                     return;
                 }
                 
-                // Validar rango de fechas si se proporcionan ambas
-                if (startDate && endDate && startDate > endDate) {
+                // Validar rango de fechas si se proporcionan ambas (el Balance usa solo una fecha)
+                if (dataType !== 'balance' && startDate && endDate && startDate > endDate) {
                     this.showToast('La fecha de inicio no puede ser posterior a la fecha de fin', 'error');
                     return;
                 }
@@ -3513,13 +3669,21 @@
                     
                     // Realizar exportación
                     const options = {};
-                    if (startDate) options.startDate = startDate;
+                    if (startDate && dataType !== 'balance') options.startDate = startDate;
                     if (endDate) options.endDate = endDate;
+                    if (dataType === 'accounts') {
+                        const accountIds = this.getSelectedExportAccountIds();
+                        if (accountIds !== null) options.accountIds = accountIds;
+                    }
                     
                     const result = await this.accountingManager.exportData(dataType, format, options);
                     
                     if (result.success) {
-                        this.showToast(`${result.format} exportado: ${result.filename} (${result.records} registros)`, 'success');
+                        if (result.fallback) {
+                            this.showToast('Exportado sin formato', 'success');
+                        } else {
+                            this.showToast(`${result.format} exportado: ${result.filename} (${result.records} registros)`, 'success');
+                        }
                         this.closeExportModal();
                     }
                     
@@ -7216,42 +7380,10 @@
             }
 
             renderBalance(filters = {}) {
-                const accounts = this.accountingManager.getAccounts();
-                const allMovements = this.accountingManager.getMovements();
-                
-                // Calcular saldo por fecha para cada cuenta
-                // Si hay filtro dateTo, calculamos el acumulado hasta esa fecha
-                // Si no hay filtro, usamos saldo_actual directamente
-                const calcSaldo = (account) => {
-                    if (!filters.dateTo) return account.saldo_actual;
-                    // Recalcular desde saldo inicial aplicando movimientos hasta dateTo
-                    let saldo = account.saldo_inicial || 0;
-                    const movs = allMovements.filter(m => 
-                        m.fecha <= filters.dateTo &&
-                        (m.cuenta_id === account.id || m.cuenta_destino_id === account.id)
-                    );
-                    movs.forEach(m => {
-                        if (m.tipo === 'ingreso') {
-                            if (m.cuenta_destino_id === account.id) saldo += m.cantidad; // activo sube
-                            if (m.cuenta_id === account.id) saldo += m.cantidad;         // ingreso acumulado
-                        } else if (m.tipo === 'gasto') {
-                            if (m.cuenta_id === account.id) saldo -= m.cantidad;         // activo baja
-                            if (m.cuenta_destino_id === account.id) saldo += m.cantidad; // gasto acumulado
-                        } else if (m.tipo === 'transferencia') {
-                            if (m.cuenta_id === account.id) saldo -= m.cantidad;
-                            if (m.cuenta_destino_id === account.id) saldo += m.cantidad;
-                        }
-                    });
-                    return saldo;
-                };
-
-                const activos = accounts.filter(acc => acc.tipo === 'activo').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
-                const pasivos = accounts.filter(acc => acc.tipo === 'pasivo').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
-                const patrimonio = accounts.filter(acc => acc.tipo === 'patrimonio').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
-
-                const activos_total = activos.reduce((s, a) => s + a.saldo_calc, 0);
-                const pasivos_total = Math.abs(pasivos.reduce((s, a) => s + a.saldo_calc, 0));
-                const patrimonio_total = patrimonio.reduce((s, a) => s + a.saldo_calc, 0);
+                // Cálculo compartido con la exportación (AccountingManager.getBalanceData):
+                // mismos saldos y totales en pantalla y en el archivo exportado.
+                const { activos, pasivos, patrimonio, activos_total, pasivos_total, patrimonio_total } =
+                    this.accountingManager.getBalanceData(filters);
 
                 let periodoLabel = 'Saldos actuales';
                 if (filters.dateTo) periodoLabel = `Acumulado hasta ${filters.dateTo}`;
@@ -7331,43 +7463,10 @@
             }
 
             renderEstadoResultados(filters = {}) {
-                // Determinar rango efectivo de fechas
-                let dateFrom, dateTo;
-                if (filters.dateFrom || filters.dateTo) {
-                    dateFrom = filters.dateFrom || '';
-                    dateTo = filters.dateTo || '';
-                } else {
-                    const now = new Date();
-                    dateFrom = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
-                    dateTo = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-                }
-
-                // Calcular totales del período
-                const stats = this.accountingManager.calculateIncomeStatementForPeriod({ dateFrom, dateTo });
-
-                // Filtrar movimientos del período
-                let movements = this.accountingManager.getMovements();
-                if (dateFrom) movements = movements.filter(m => m.fecha >= dateFrom);
-                if (dateTo) movements = movements.filter(m => m.fecha <= dateTo);
-
-                const accounts = this.accountingManager.getAccounts();
-
-                // Calcular importe del período por cada cuenta de ingreso y gasto
-                const ingresos = accounts.filter(acc => acc.tipo === 'ingreso').map(acc => ({
-                    ...acc,
-                    saldo_periodo: movements
-                        .filter(m => m.tipo === 'ingreso' && m.cuenta_id === acc.id)
-                        .reduce((sum, m) => sum + m.cantidad, 0)
-                }));
-
-                const gastos = accounts.filter(acc => acc.tipo === 'gasto').map(acc => ({
-                    ...acc,
-                    saldo_periodo: movements
-                        .filter(m => m.tipo === 'gasto' && m.cuenta_destino_id === acc.id)
-                        .reduce((sum, m) => sum + m.cantidad, 0)
-                }));
-
-                const resultado = stats.ingresos_total - stats.gastos_total;
+                // Cálculo compartido con la exportación (AccountingManager.getIncomeStatementData):
+                // mismo periodo por defecto (mes actual, hora local), mismos totales por cuenta.
+                const { dateFrom, dateTo, stats, ingresos, gastos, resultado } =
+                    this.accountingManager.getIncomeStatementData(filters);
 
                 let periodoLabel = 'Mes actual';
                 if (filters.dateFrom || filters.dateTo) {
