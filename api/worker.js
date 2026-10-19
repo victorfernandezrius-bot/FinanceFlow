@@ -8,6 +8,11 @@
 //   Accounts:  GET/POST /api/accounts, DELETE /api/accounts/:id
 //   Movements: GET/POST /api/movements, DELETE /api/movements/:id
 //   Rules:     GET/POST /api/rules, POST /api/rules/bulk, DELETE /api/rules/:id
+//   Ahorro:    GET/POST /api/savings-plans, GET/DELETE /api/savings-plans/:id?modo=,
+//              GET /api/savings-plans/:id/allocations,
+//              POST /api/savings-plans/:id/contribute|assign|withdraw|close,
+//              GET /api/savings-plans/integrity,
+//              GET/PUT /api/accounts/:id/cushion   (todos PREMIUM)
 //   Autocontrol, scenarios, notifications, bank-connections, import-info
 //   Stripe:    POST /api/stripe/create-checkout, POST /api/stripe/webhook,
 //              POST /api/stripe/verify-session, POST /api/stripe/customer-portal
@@ -165,6 +170,172 @@ async function rateLimited(env, key, max, ttlSeconds) {
         console.error('rateLimited:', e);
         return false;
     }
+}
+
+// ============================================================
+// Planes de Ahorro (PREMIUM) — helpers
+// ------------------------------------------------------------
+// Modelo de "sobres": un plan reserva parte del saldo REAL de una cuenta de
+// tipo 'activo'. Varios planes por cuenta; lo no asignado es "ahorro libre".
+//   asignado(cuenta)  = SUM(allocations.cantidad) de los planes vivos
+//   disponible(cuenta)= saldo_actual - colchon_minimo - asignado
+// INVARIANTE: asignado(cuenta) <= saldo_actual(cuenta) - colchon_minimo(cuenta)
+// El interes_anual del plan es SOLO simulación: jamás toca saldos ni movimientos.
+// ============================================================
+
+// Estados que RESERVAN dinero. 'cancelado' lo libera (su saldo vuelve al libre).
+const SP_ESTADOS_VIVOS   = ['activo', 'pausado', 'completado'];
+const SP_ESTADOS         = ['activo', 'pausado', 'completado', 'cancelado'];
+const SP_MODOS           = ['objetivo_fecha', 'cuota_fija'];
+const SP_PERIODICIDADES  = ['mensual', 'trimestral', 'anual'];
+const SP_CAPITALIZACIONES= ['mensual', 'anual'];
+const SP_PRODUCTOS       = ['cuenta_remunerada', 'deposito', 'fondo', 'letras', 'otro'];
+// Cuentas válidas como origen/destino de una transferencia (mismas reglas que
+// accounting-manager.js validateMovement para tipo 'transferencia').
+const SP_CUENTAS_TRANSFERIBLES = ['activo', 'pasivo', 'patrimonio'];
+// Tolerancia al comparar el invariante: los saldos son REAL y acumulan error.
+const SP_EPS = 0.005;
+
+const sp2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const isISODate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+    && !isNaN(new Date(s + 'T00:00:00Z').getTime());
+
+// Premium en servidor. Replica Auth.getUserPlan() del cliente (js/auth.js):
+// plan 'premium' o prueba premium vigente.
+// NOTA DELIBERADA: no se comprueba plan_expires_at. El webhook de Stripe solo
+// lo fija en checkout.session.completed y NO lo renueva en las facturas
+// siguientes, así que a los 30 días quedaría obsoleto y expulsaría a
+// suscriptores activos. El fin real de la suscripción ya pone plan='free'.
+function isPremiumUser(u) {
+    if (!u) return false;
+    if (u.premium_trial_expires_at && new Date(u.premium_trial_expires_at) > new Date()) return true;
+    return u.plan === 'premium';
+}
+
+// Gate premium para los endpoints de Planes de Ahorro. Devuelve una Response
+// si hay que cortar, o null si el usuario puede pasar.
+function requirePremium(authUser, cors) {
+    if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+    if (!isPremiumUser(authUser)) {
+        return json({ error: 'Los Planes de Ahorro son una función Premium', code: 'premium_required' }, 403, cors);
+    }
+    return null;
+}
+
+// Estado de "sobres" de una cuenta de ahorro. null si la cuenta no existe o no
+// es del usuario.
+async function spAccountState(env, uid, cuentaId) {
+    const cuenta = await env.DB.prepare(
+        `SELECT id, nombre, tipo, saldo_actual, COALESCE(colchon_minimo, 0) AS colchon_minimo
+           FROM accounts WHERE id = ? AND user_id = ?`).bind(cuentaId, uid).first();
+    if (!cuenta) return null;
+    const row = await env.DB.prepare(
+        `SELECT COALESCE(SUM(a.cantidad), 0) AS asignado
+           FROM savings_plan_allocations a
+           JOIN savings_plans p ON p.id = a.plan_id
+          WHERE a.user_id = ? AND a.cuenta_ahorro_id = ?
+            AND p.estado IN ('activo', 'pausado', 'completado')`).bind(uid, cuentaId).first();
+    const asignado = sp2(row?.asignado || 0);
+    return {
+        cuenta,
+        saldo_actual: sp2(cuenta.saldo_actual || 0),
+        colchon_minimo: sp2(cuenta.colchon_minimo || 0),
+        asignado,
+        // Ahorro libre asignable a planes (ya descontado el colchón)
+        disponible: sp2((cuenta.saldo_actual || 0) - (cuenta.colchon_minimo || 0) - asignado)
+    };
+}
+
+// Total asignado a un plan concreto (suma de su libro auxiliar).
+async function spPlanAssigned(env, uid, planId) {
+    const r = await env.DB.prepare(
+        `SELECT COALESCE(SUM(cantidad), 0) AS asignado FROM savings_plan_allocations
+          WHERE user_id = ? AND plan_id = ?`).bind(uid, planId).first();
+    return sp2(r?.asignado || 0);
+}
+
+// Valida el payload de un plan. Devuelve { error } o { plan } ya normalizado.
+// No toca la BD salvo para comprobar la cuenta vinculada.
+async function spValidatePlan(env, uid, p) {
+    const nombre = (p.nombre || '').trim();
+    if (!nombre) return { error: 'El nombre del plan es obligatorio' };
+    if (nombre.length > 120) return { error: 'El nombre no puede superar 120 caracteres' };
+    if (!p.cuenta_ahorro_id) return { error: 'Falta la cuenta de ahorro vinculada' };
+
+    const cuenta = await env.DB.prepare('SELECT id, tipo FROM accounts WHERE id = ? AND user_id = ?')
+        .bind(p.cuenta_ahorro_id, uid).first();
+    if (!cuenta) return { error: 'La cuenta de ahorro no existe' };
+    if (cuenta.tipo !== 'activo') return { error: 'La cuenta vinculada debe ser de tipo Activo' };
+
+    if (!SP_MODOS.includes(p.modo)) return { error: "modo debe ser 'objetivo_fecha' o 'cuota_fija'" };
+
+    const objetivo = Number(p.objetivo_total);
+    if (!isFinite(objetivo) || objetivo <= 0) return { error: 'objetivo_total debe ser mayor que 0' };
+
+    let aportacion = p.aportacion == null || p.aportacion === '' ? null : Number(p.aportacion);
+    if (aportacion !== null && (!isFinite(aportacion) || aportacion < 0)) {
+        return { error: 'aportacion no puede ser negativa' };
+    }
+    if (p.modo === 'cuota_fija' && !(aportacion > 0)) {
+        return { error: "En modo 'cuota_fija' la aportación debe ser mayor que 0" };
+    }
+
+    if (!isISODate(p.fecha_inicio)) return { error: 'fecha_inicio debe tener formato YYYY-MM-DD' };
+    if (p.fecha_limite != null && p.fecha_limite !== '' && !isISODate(p.fecha_limite)) {
+        return { error: 'fecha_limite debe tener formato YYYY-MM-DD' };
+    }
+    if (p.modo === 'objetivo_fecha') {
+        if (!isISODate(p.fecha_limite)) return { error: "En modo 'objetivo_fecha' la fecha límite es obligatoria" };
+        if (p.fecha_limite <= p.fecha_inicio) return { error: 'La fecha límite debe ser posterior a la de inicio' };
+    }
+
+    const periodicidad = p.periodicidad || 'mensual';
+    if (!SP_PERIODICIDADES.includes(periodicidad)) return { error: 'periodicidad no válida' };
+    // Fase 0: solo mensual está implementado en la proyección (Fase 2).
+    if (periodicidad !== 'mensual') return { error: 'Por ahora solo se admite periodicidad mensual' };
+
+    const capitalizacion = p.capitalizacion || 'mensual';
+    if (!SP_CAPITALIZACIONES.includes(capitalizacion)) return { error: 'capitalizacion no válida' };
+
+    if (p.producto_tipo != null && p.producto_tipo !== '' && !SP_PRODUCTOS.includes(p.producto_tipo)) {
+        return { error: 'producto_tipo no válido' };
+    }
+
+    const interes = p.interes_anual == null || p.interes_anual === '' ? 0 : Number(p.interes_anual);
+    if (!isFinite(interes) || interes < 0 || interes > 100) {
+        return { error: 'interes_anual debe estar entre 0 y 100' };
+    }
+
+    let dia = p.dia_aportacion == null || p.dia_aportacion === '' ? null : parseInt(p.dia_aportacion, 10);
+    if (dia !== null && (!Number.isInteger(dia) || dia < 1 || dia > 28)) {
+        return { error: 'dia_aportacion debe estar entre 1 y 28' };
+    }
+
+    const estado = p.estado || 'activo';
+    if (!SP_ESTADOS.includes(estado)) return { error: 'estado no válido' };
+
+    return {
+        plan: {
+            id: p.id || crypto.randomUUID(),
+            cuenta_ahorro_id: p.cuenta_ahorro_id,
+            nombre,
+            descripcion: (p.descripcion || '').slice(0, 500),
+            modo: p.modo,
+            objetivo_total: sp2(objetivo),
+            aportacion: aportacion === null ? null : sp2(aportacion),
+            periodicidad,
+            dia_aportacion: dia,
+            fecha_inicio: p.fecha_inicio,
+            fecha_limite: p.fecha_limite || null,
+            fecha_estimada: isISODate(p.fecha_estimada) ? p.fecha_estimada : null,
+            producto_tipo: p.producto_tipo || null,
+            interes_anual: interes,
+            capitalizacion,
+            estado,
+            color: p.color || null,
+            icono: p.icono || null
+        }
+    };
 }
 
 // ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
@@ -1582,6 +1753,566 @@ export default {
                 return json({ success: true }, 200, cors);
             }
 
+            // ---------- SAVINGS PLANS (Planes de Ahorro — PREMIUM) ----------
+            // Contrato con el frontend (Fase 3): los endpoints que mueven dinero
+            // (contribute / withdraw / close+transferir) son los ÚNICOS que
+            // escriben el movimiento Y los dos saldos, en un solo batch de D1.
+            // El cliente NO debe aplicar además su propia actualización de saldos
+            // ni hacer POST /api/accounts después: debe RECARGAR cuentas.
+            // Son idempotentes por movement_id / allocation_id (reintento seguro).
+            if (path === '/api/savings-plans' || path.startsWith('/api/savings-plans/')) {
+                const spGate = requirePremium(authUser, cors);
+                if (spGate) return spGate;
+                const spNow = new Date().toISOString();
+                const spHoy = spNow.slice(0, 10);
+
+                // ----- GET /api/savings-plans[?estado=activo] -----
+                if (path === '/api/savings-plans' && method === 'GET') {
+                    const estadoQ = url.searchParams.get('estado');
+                    if (estadoQ && !SP_ESTADOS.includes(estadoQ)) {
+                        return json({ error: 'estado no válido' }, 400, cors);
+                    }
+                    const sql =
+                        `SELECT p.*, COALESCE(SUM(al.cantidad), 0) AS asignado,
+                                c.nombre AS cuenta_nombre
+                           FROM savings_plans p
+                           LEFT JOIN savings_plan_allocations al ON al.plan_id = p.id
+                           LEFT JOIN accounts c ON c.id = p.cuenta_ahorro_id AND c.user_id = p.user_id
+                          WHERE p.user_id = ?${estadoQ ? ' AND p.estado = ?' : ''}
+                          GROUP BY p.id
+                          ORDER BY p.created_at`;
+                    const stmt = estadoQ
+                        ? env.DB.prepare(sql).bind(uid, estadoQ)
+                        : env.DB.prepare(sql).bind(uid);
+                    const { results } = await stmt.all();
+                    return json(results.map(r => ({ ...r, asignado: sp2(r.asignado) })), 200, cors);
+                }
+
+                // ----- POST /api/savings-plans  (crear o editar) -----
+                if (path === '/api/savings-plans' && method === 'POST') {
+                    const body = await request.json();
+                    const v = await spValidatePlan(env, uid, body);
+                    if (v.error) return json({ error: v.error }, 400, cors);
+                    const p = v.plan;
+
+                    // Si el plan ya existe y tiene dinero asignado, la cuenta vinculada
+                    // NO se puede cambiar: el dinero está físicamente en la otra cuenta.
+                    const prev = await env.DB.prepare(
+                        'SELECT cuenta_ahorro_id FROM savings_plans WHERE id = ? AND user_id = ?')
+                        .bind(p.id, uid).first();
+                    if (prev && prev.cuenta_ahorro_id !== p.cuenta_ahorro_id) {
+                        const asignado = await spPlanAssigned(env, uid, p.id);
+                        if (Math.abs(asignado) > SP_EPS) {
+                            return json({
+                                error: 'No se puede cambiar la cuenta de un plan con dinero asignado. Retira o desasigna primero.',
+                                code: 'plan_con_saldo', asignado
+                            }, 409, cors);
+                        }
+                    }
+
+                    await env.DB.prepare(
+                        `INSERT INTO savings_plans (id,user_id,cuenta_ahorro_id,nombre,descripcion,modo,
+                            objetivo_total,aportacion,periodicidad,dia_aportacion,fecha_inicio,fecha_limite,
+                            fecha_estimada,producto_tipo,interes_anual,capitalizacion,estado,color,icono,
+                            created_at,updated_at)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         ON CONFLICT(id) DO UPDATE SET cuenta_ahorro_id=excluded.cuenta_ahorro_id,
+                            nombre=excluded.nombre, descripcion=excluded.descripcion, modo=excluded.modo,
+                            objetivo_total=excluded.objetivo_total, aportacion=excluded.aportacion,
+                            periodicidad=excluded.periodicidad, dia_aportacion=excluded.dia_aportacion,
+                            fecha_inicio=excluded.fecha_inicio, fecha_limite=excluded.fecha_limite,
+                            fecha_estimada=excluded.fecha_estimada, producto_tipo=excluded.producto_tipo,
+                            interes_anual=excluded.interes_anual, capitalizacion=excluded.capitalizacion,
+                            estado=excluded.estado, color=excluded.color, icono=excluded.icono,
+                            updated_at=excluded.updated_at
+                         WHERE savings_plans.user_id = excluded.user_id`)
+                        .bind(p.id, uid, p.cuenta_ahorro_id, p.nombre, p.descripcion, p.modo,
+                              p.objetivo_total, p.aportacion, p.periodicidad, p.dia_aportacion,
+                              p.fecha_inicio, p.fecha_limite, p.fecha_estimada, p.producto_tipo,
+                              p.interes_anual, p.capitalizacion, p.estado, p.color, p.icono,
+                              body.created_at || spNow, spNow).run();
+
+                    const asignado = await spPlanAssigned(env, uid, p.id);
+                    return json({ ...p, asignado, created_at: body.created_at || spNow, updated_at: spNow }, 200, cors);
+                }
+
+                // ----- GET /api/savings-plans/integrity  (reconciliador) -----
+                // Capa detectiva del invariante. NO corrige nada: solo informa.
+                if (path === '/api/savings-plans/integrity' && method === 'GET') {
+                    const { results: cuentas } = await env.DB.prepare(
+                        `SELECT c.id, c.nombre, COALESCE(c.saldo_actual,0) AS saldo_actual,
+                                COALESCE(c.colchon_minimo,0) AS colchon_minimo,
+                                COUNT(DISTINCT p.id) AS planes,
+                                COALESCE(SUM(al.cantidad),0) AS asignado
+                           FROM accounts c
+                           JOIN savings_plans p ON p.cuenta_ahorro_id = c.id AND p.user_id = c.user_id
+                                                AND p.estado IN ('activo','pausado','completado')
+                           LEFT JOIN savings_plan_allocations al ON al.plan_id = p.id
+                          WHERE c.user_id = ?
+                          GROUP BY c.id`).bind(uid).all();
+
+                    const cuentasOut = cuentas.map(c => {
+                        const asignado = sp2(c.asignado);
+                        const disponible = sp2(c.saldo_actual - c.colchon_minimo - asignado);
+                        return {
+                            cuenta_id: c.id, nombre: c.nombre, planes: c.planes,
+                            saldo_actual: sp2(c.saldo_actual), colchon_minimo: sp2(c.colchon_minimo),
+                            asignado, ahorro_libre: disponible,
+                            // >0 = hay más asignado del que la cuenta puede respaldar
+                            descuadre: disponible < -SP_EPS ? sp2(-disponible) : 0
+                        };
+                    });
+
+                    // Asignaciones que apuntan a un movimiento borrado
+                    const { results: huerfanas } = await env.DB.prepare(
+                        `SELECT al.id, al.plan_id, al.movement_id, al.cantidad, al.fecha
+                           FROM savings_plan_allocations al
+                          WHERE al.user_id = ? AND al.movement_id IS NOT NULL
+                            AND NOT EXISTS (SELECT 1 FROM movements m
+                                             WHERE m.id = al.movement_id AND m.user_id = al.user_id)`)
+                        .bind(uid).all();
+
+                    // Planes con saldo negativo (no debería pasar nunca)
+                    const { results: negativos } = await env.DB.prepare(
+                        `SELECT p.id, p.nombre, COALESCE(SUM(al.cantidad),0) AS asignado
+                           FROM savings_plans p
+                           LEFT JOIN savings_plan_allocations al ON al.plan_id = p.id
+                          WHERE p.user_id = ?
+                          GROUP BY p.id
+                         HAVING asignado < -0.005`).bind(uid).all();
+
+                    return json({
+                        ok: cuentasOut.every(c => c.descuadre === 0) && huerfanas.length === 0 && negativos.length === 0,
+                        cuentas: cuentasOut,
+                        asignaciones_huerfanas: huerfanas,
+                        planes_negativos: negativos.map(p => ({ ...p, asignado: sp2(p.asignado) })),
+                        generado_en: spNow
+                    }, 200, cors);
+                }
+
+                // ----- Rutas con :id -----
+                const spMatch = path.match(/^\/api\/savings-plans\/([^/]+)(?:\/([a-z]+))?$/);
+                if (spMatch) {
+                    const planId = spMatch[1];
+                    const action = spMatch[2] || null;
+                    const plan = await env.DB.prepare(
+                        'SELECT * FROM savings_plans WHERE id = ? AND user_id = ?').bind(planId, uid).first();
+                    if (!plan) return json({ error: 'Plan no encontrado' }, 404, cors);
+
+                    // ----- GET /api/savings-plans/:id -----
+                    if (!action && method === 'GET') {
+                        const asignado = await spPlanAssigned(env, uid, planId);
+                        const st = await spAccountState(env, uid, plan.cuenta_ahorro_id);
+                        return json({ ...plan, asignado, cuenta: st }, 200, cors);
+                    }
+
+                    // ----- DELETE /api/savings-plans/:id?modo=cancelar|borrar -----
+                    // NUNCA se borran movimientos: el dinero se transfirió de verdad.
+                    if (!action && method === 'DELETE') {
+                        const modo = url.searchParams.get('modo') || 'cancelar';
+                        const asignado = await spPlanAssigned(env, uid, planId);
+
+                        if (modo === 'borrar') {
+                            if (Math.abs(asignado) > SP_EPS) {
+                                return json({
+                                    error: 'El plan tiene dinero asignado. Ciérralo (modo=cancelar) o retira el saldo antes de borrarlo.',
+                                    code: 'plan_con_saldo', asignado
+                                }, 409, cors);
+                            }
+                            await env.DB.batch([
+                                env.DB.prepare('DELETE FROM savings_plan_allocations WHERE plan_id=? AND user_id=?')
+                                    .bind(planId, uid),
+                                env.DB.prepare('DELETE FROM savings_plans WHERE id=? AND user_id=?')
+                                    .bind(planId, uid)
+                            ]);
+                            return json({ success: true, borrado: true, movimientos_conservados: true }, 200, cors);
+                        }
+
+                        if (modo !== 'cancelar') return json({ error: "modo debe ser 'cancelar' o 'borrar'" }, 400, cors);
+
+                        // Cancelar: el saldo del sobre vuelve al ahorro libre (sin mover dinero)
+                        const ops = [];
+                        if (Math.abs(asignado) > SP_EPS) {
+                            ops.push(env.DB.prepare(
+                                `INSERT INTO savings_plan_allocations
+                                    (id,user_id,plan_id,movement_id,cuenta_ahorro_id,tipo,cantidad,fecha,nota,created_at)
+                                 VALUES (?,?,?,NULL,?,'desasignacion',?,?,?,?)`)
+                                .bind(crypto.randomUUID(), uid, planId, plan.cuenta_ahorro_id,
+                                      sp2(-asignado), spHoy, 'Cancelación del plan', spNow));
+                        }
+                        ops.push(env.DB.prepare(
+                            `UPDATE savings_plans SET estado='cancelado', closed_at=?, updated_at=?
+                              WHERE id=? AND user_id=?`).bind(spNow, spNow, planId, uid));
+                        await env.DB.batch(ops);
+                        return json({ success: true, estado: 'cancelado', liberado: asignado }, 200, cors);
+                    }
+
+                    // ----- GET /api/savings-plans/:id/allocations -----
+                    if (action === 'allocations' && method === 'GET') {
+                        const { results } = await env.DB.prepare(
+                            `SELECT * FROM savings_plan_allocations
+                              WHERE user_id=? AND plan_id=? ORDER BY fecha, created_at`)
+                            .bind(uid, planId).all();
+                        return json({
+                            plan_id: planId,
+                            asignado: sp2(results.reduce((s, r) => s + r.cantidad, 0)),
+                            allocations: results
+                        }, 200, cors);
+                    }
+
+                    // ----- POST /api/savings-plans/:id/contribute -----
+                    // Aportación real: transferencia cuenta_origen -> cuenta de ahorro,
+                    // asignada al plan. Movimiento + asignación + 2 saldos en un batch.
+                    if (action === 'contribute' && method === 'POST') {
+                        const b = await request.json();
+                        if (plan.estado === 'cancelado') {
+                            return json({ error: 'El plan está cancelado' }, 409, cors);
+                        }
+                        const cantidad = sp2(Number(b.cantidad));
+                        if (!isFinite(cantidad) || cantidad <= 0) {
+                            return json({ error: 'cantidad debe ser mayor que 0' }, 400, cors);
+                        }
+                        const fecha = isISODate(b.fecha) ? b.fecha : spHoy;
+                        if (!b.cuenta_origen_id) return json({ error: 'Falta cuenta_origen_id' }, 400, cors);
+                        if (b.cuenta_origen_id === plan.cuenta_ahorro_id) {
+                            return json({ error: 'La cuenta de origen no puede ser la propia cuenta de ahorro' }, 400, cors);
+                        }
+                        const origen = await env.DB.prepare(
+                            'SELECT id, tipo FROM accounts WHERE id=? AND user_id=?')
+                            .bind(b.cuenta_origen_id, uid).first();
+                        if (!origen) return json({ error: 'La cuenta de origen no existe' }, 404, cors);
+                        if (!SP_CUENTAS_TRANSFERIBLES.includes(origen.tipo)) {
+                            return json({ error: 'La cuenta de origen debe ser Activo, Pasivo o Patrimonio' }, 400, cors);
+                        }
+
+                        // El dinero que entra respalda por sí solo la asignación: esto solo
+                        // falla si la cuenta YA venía descuadrada (ver /integrity).
+                        const st = await spAccountState(env, uid, plan.cuenta_ahorro_id);
+                        if (!st) return json({ error: 'La cuenta de ahorro no existe' }, 404, cors);
+                        if (st.disponible < -SP_EPS) {
+                            return json({
+                                error: 'La cuenta de ahorro está descuadrada (hay más asignado que saldo disponible). Revísala antes de aportar.',
+                                code: 'descuadre', descuadre: sp2(-st.disponible)
+                            }, 409, cors);
+                        }
+
+                        const movId = b.movement_id || crypto.randomUUID();
+                        const allocId = b.allocation_id || crypto.randomUUID();
+                        const descripcion = (b.descripcion || `Aportación a ${plan.nombre}`).slice(0, 200);
+
+                        // Idempotencia: los UPDATE de saldo van ANTES del INSERT del
+                        // movimiento y solo se aplican si ese movimiento aún no existe.
+                        // Un reintento no vuelve a mover los saldos.
+                        await env.DB.batch([
+                            env.DB.prepare(
+                                `UPDATE accounts SET saldo_actual = COALESCE(saldo_actual,0) - ?, updated_at = ?
+                                  WHERE id = ? AND user_id = ?
+                                    AND NOT EXISTS (SELECT 1 FROM movements WHERE id = ?)`)
+                                .bind(cantidad, spNow, b.cuenta_origen_id, uid, movId),
+                            env.DB.prepare(
+                                `UPDATE accounts SET saldo_actual = COALESCE(saldo_actual,0) + ?, updated_at = ?
+                                  WHERE id = ? AND user_id = ?
+                                    AND NOT EXISTS (SELECT 1 FROM movements WHERE id = ?)`)
+                                .bind(cantidad, spNow, plan.cuenta_ahorro_id, uid, movId),
+                            env.DB.prepare(
+                                `INSERT INTO movements (id,user_id,tipo,cantidad,descripcion,fecha,cuenta_id,
+                                    cuenta_destino_id,categoria,origen,auto_categorized,applied_rule,rule_name,
+                                    manually_categorized,bank_reference,created_at,updated_at)
+                                 VALUES (?,?,'transferencia',?,?,?,?,?,NULL,'plan_ahorro',0,NULL,NULL,0,NULL,?,?)
+                                 ON CONFLICT(id) DO NOTHING`)
+                                .bind(movId, uid, cantidad, descripcion, fecha,
+                                      b.cuenta_origen_id, plan.cuenta_ahorro_id, spNow, spNow),
+                            env.DB.prepare(
+                                `INSERT INTO savings_plan_allocations
+                                    (id,user_id,plan_id,movement_id,cuenta_ahorro_id,tipo,cantidad,fecha,nota,created_at)
+                                 VALUES (?,?,?,?,?,'aportacion',?,?,?,?)
+                                 ON CONFLICT(id) DO NOTHING`)
+                                .bind(allocId, uid, planId, movId, plan.cuenta_ahorro_id,
+                                      cantidad, fecha, b.nota || null, spNow),
+                            env.DB.prepare('UPDATE savings_plans SET updated_at=? WHERE id=? AND user_id=?')
+                                .bind(spNow, planId, uid)
+                        ]);
+
+                        const asignado = await spPlanAssigned(env, uid, planId);
+                        const st2 = await spAccountState(env, uid, plan.cuenta_ahorro_id);
+                        return json({ success: true, movement_id: movId, allocation_id: allocId,
+                                      cantidad, asignado, cuenta: st2 }, 200, cors);
+                    }
+
+                    // ----- POST /api/savings-plans/:id/assign -----
+                    // Asignar ahorro libre YA existente en la cuenta. No mueve dinero.
+                    if (action === 'assign' && method === 'POST') {
+                        const b = await request.json();
+                        if (plan.estado === 'cancelado') {
+                            return json({ error: 'El plan está cancelado' }, 409, cors);
+                        }
+                        const cantidad = sp2(Number(b.cantidad));
+                        if (!isFinite(cantidad) || cantidad <= 0) {
+                            return json({ error: 'cantidad debe ser mayor que 0' }, 400, cors);
+                        }
+                        const fecha = isISODate(b.fecha) ? b.fecha : spHoy;
+                        const allocId = b.allocation_id || crypto.randomUUID();
+
+                        // Idempotencia explícita: si ya existe, no reintentamos el INSERT
+                        // condicional (no sabríamos distinguir "ya estaba" de "no cabe").
+                        const yaExiste = await env.DB.prepare(
+                            'SELECT id FROM savings_plan_allocations WHERE id=? AND user_id=?')
+                            .bind(allocId, uid).first();
+                        if (yaExiste) {
+                            return json({ success: true, duplicado: true, allocation_id: allocId,
+                                          asignado: await spPlanAssigned(env, uid, planId) }, 200, cors);
+                        }
+
+                        // El invariante se comprueba DENTRO del INSERT (atómico): si no
+                        // cabe, no se inserta ninguna fila y changes === 0.
+                        const res = await env.DB.prepare(
+                            `INSERT INTO savings_plan_allocations
+                                (id,user_id,plan_id,movement_id,cuenta_ahorro_id,tipo,cantidad,fecha,nota,created_at)
+                             SELECT ?,?,?,NULL,?,'asignacion_libre',?,?,?,?
+                              WHERE (
+                                      SELECT COALESCE(a.saldo_actual,0) - COALESCE(a.colchon_minimo,0)
+                                        FROM accounts a WHERE a.id = ? AND a.user_id = ?
+                                    ) - (
+                                      SELECT COALESCE(SUM(al.cantidad),0)
+                                        FROM savings_plan_allocations al
+                                        JOIN savings_plans p ON p.id = al.plan_id
+                                       WHERE al.user_id = ? AND al.cuenta_ahorro_id = ?
+                                         AND p.estado IN ('activo','pausado','completado')
+                                    ) >= ? - 0.005`)
+                            .bind(allocId, uid, planId, plan.cuenta_ahorro_id, cantidad, fecha,
+                                  b.nota || null, spNow,
+                                  plan.cuenta_ahorro_id, uid, uid, plan.cuenta_ahorro_id, cantidad).run();
+
+                        if (!res.meta || res.meta.changes === 0) {
+                            const st = await spAccountState(env, uid, plan.cuenta_ahorro_id);
+                            return json({
+                                error: 'No hay suficiente ahorro libre en la cuenta (ya descontado el colchón mínimo)',
+                                code: 'sin_ahorro_libre', disponible: st ? st.disponible : 0, solicitado: cantidad
+                            }, 409, cors);
+                        }
+                        return json({ success: true, allocation_id: allocId, cantidad,
+                                      asignado: await spPlanAssigned(env, uid, planId) }, 200, cors);
+                    }
+
+                    // ----- POST /api/savings-plans/:id/withdraw -----
+                    // destino='cuenta' -> solo desasignar (el dinero se queda en la cuenta)
+                    // destino='banco'  -> transferencia real cuenta de ahorro -> cuenta destino
+                    if (action === 'withdraw' && method === 'POST') {
+                        const b = await request.json();
+                        const destino = b.destino;
+                        if (!['cuenta', 'banco'].includes(destino)) {
+                            return json({ error: "destino debe ser 'cuenta' o 'banco'" }, 400, cors);
+                        }
+                        const asignado = await spPlanAssigned(env, uid, planId);
+                        const cantidad = sp2(Number(b.cantidad));
+                        if (!isFinite(cantidad) || cantidad <= 0) {
+                            return json({ error: 'cantidad debe ser mayor que 0' }, 400, cors);
+                        }
+                        if (cantidad > asignado + SP_EPS) {
+                            return json({ error: 'No puedes retirar más de lo asignado al plan',
+                                          code: 'exceso_retiro', asignado, solicitado: cantidad }, 409, cors);
+                        }
+                        const fecha = isISODate(b.fecha) ? b.fecha : spHoy;
+                        const allocId = b.allocation_id || crypto.randomUUID();
+
+                        if (destino === 'cuenta') {
+                            await env.DB.batch([
+                                env.DB.prepare(
+                                    `INSERT INTO savings_plan_allocations
+                                        (id,user_id,plan_id,movement_id,cuenta_ahorro_id,tipo,cantidad,fecha,nota,created_at)
+                                     VALUES (?,?,?,NULL,?,'desasignacion',?,?,?,?)
+                                     ON CONFLICT(id) DO NOTHING`)
+                                    .bind(allocId, uid, planId, plan.cuenta_ahorro_id,
+                                          sp2(-cantidad), fecha, b.nota || null, spNow),
+                                env.DB.prepare('UPDATE savings_plans SET updated_at=? WHERE id=? AND user_id=?')
+                                    .bind(spNow, planId, uid)
+                            ]);
+                            return json({ success: true, destino, allocation_id: allocId, cantidad,
+                                          asignado: await spPlanAssigned(env, uid, planId) }, 200, cors);
+                        }
+
+                        // destino === 'banco': hay transferencia real
+                        if (!b.cuenta_destino_id) return json({ error: 'Falta cuenta_destino_id' }, 400, cors);
+                        if (b.cuenta_destino_id === plan.cuenta_ahorro_id) {
+                            return json({ error: 'La cuenta de destino no puede ser la propia cuenta de ahorro' }, 400, cors);
+                        }
+                        const dest = await env.DB.prepare(
+                            'SELECT id, tipo FROM accounts WHERE id=? AND user_id=?')
+                            .bind(b.cuenta_destino_id, uid).first();
+                        if (!dest) return json({ error: 'La cuenta de destino no existe' }, 404, cors);
+                        if (!SP_CUENTAS_TRANSFERIBLES.includes(dest.tipo)) {
+                            return json({ error: 'La cuenta de destino debe ser Activo, Pasivo o Patrimonio' }, 400, cors);
+                        }
+                        // Retirar no debe comerse el colchón de emergencia de la cuenta
+                        const st = await spAccountState(env, uid, plan.cuenta_ahorro_id);
+                        if (!st) return json({ error: 'La cuenta de ahorro no existe' }, 404, cors);
+                        if (cantidad > sp2(st.saldo_actual - st.colchon_minimo) + SP_EPS) {
+                            return json({
+                                error: 'La cuenta de ahorro no tiene saldo suficiente por encima del colchón mínimo',
+                                code: 'colchon_minimo', saldo_actual: st.saldo_actual,
+                                colchon_minimo: st.colchon_minimo, solicitado: cantidad
+                            }, 409, cors);
+                        }
+
+                        const movId = b.movement_id || crypto.randomUUID();
+                        const descripcion = (b.descripcion || `Retirada de ${plan.nombre}`).slice(0, 200);
+                        await env.DB.batch([
+                            env.DB.prepare(
+                                `UPDATE accounts SET saldo_actual = COALESCE(saldo_actual,0) - ?, updated_at = ?
+                                  WHERE id = ? AND user_id = ?
+                                    AND NOT EXISTS (SELECT 1 FROM movements WHERE id = ?)`)
+                                .bind(cantidad, spNow, plan.cuenta_ahorro_id, uid, movId),
+                            env.DB.prepare(
+                                `UPDATE accounts SET saldo_actual = COALESCE(saldo_actual,0) + ?, updated_at = ?
+                                  WHERE id = ? AND user_id = ?
+                                    AND NOT EXISTS (SELECT 1 FROM movements WHERE id = ?)`)
+                                .bind(cantidad, spNow, b.cuenta_destino_id, uid, movId),
+                            env.DB.prepare(
+                                `INSERT INTO movements (id,user_id,tipo,cantidad,descripcion,fecha,cuenta_id,
+                                    cuenta_destino_id,categoria,origen,auto_categorized,applied_rule,rule_name,
+                                    manually_categorized,bank_reference,created_at,updated_at)
+                                 VALUES (?,?,'transferencia',?,?,?,?,?,NULL,'plan_ahorro',0,NULL,NULL,0,NULL,?,?)
+                                 ON CONFLICT(id) DO NOTHING`)
+                                .bind(movId, uid, cantidad, descripcion, fecha,
+                                      plan.cuenta_ahorro_id, b.cuenta_destino_id, spNow, spNow),
+                            env.DB.prepare(
+                                `INSERT INTO savings_plan_allocations
+                                    (id,user_id,plan_id,movement_id,cuenta_ahorro_id,tipo,cantidad,fecha,nota,created_at)
+                                 VALUES (?,?,?,?,?,'retiro',?,?,?,?)
+                                 ON CONFLICT(id) DO NOTHING`)
+                                .bind(allocId, uid, planId, movId, plan.cuenta_ahorro_id,
+                                      sp2(-cantidad), fecha, b.nota || null, spNow),
+                            env.DB.prepare('UPDATE savings_plans SET updated_at=? WHERE id=? AND user_id=?')
+                                .bind(spNow, planId, uid)
+                        ]);
+                        return json({ success: true, destino, movement_id: movId, allocation_id: allocId,
+                                      cantidad, asignado: await spPlanAssigned(env, uid, planId),
+                                      cuenta: await spAccountState(env, uid, plan.cuenta_ahorro_id) }, 200, cors);
+                    }
+
+                    // ----- POST /api/savings-plans/:id/close -----
+                    // Cierra el plan liquidando TODO lo asignado.
+                    // liquidacion='mantener'   -> el dinero se queda en la cuenta (solo desasignar)
+                    // liquidacion='transferir' -> transferencia real a cuenta_destino_id
+                    if (action === 'close' && method === 'POST') {
+                        const b = await request.json();
+                        const resultado = b.resultado || 'completado';
+                        if (!['completado', 'cancelado'].includes(resultado)) {
+                            return json({ error: "resultado debe ser 'completado' o 'cancelado'" }, 400, cors);
+                        }
+                        const liquidacion = b.liquidacion || 'mantener';
+                        if (!['mantener', 'transferir'].includes(liquidacion)) {
+                            return json({ error: "liquidacion debe ser 'mantener' o 'transferir'" }, 400, cors);
+                        }
+                        const asignado = await spPlanAssigned(env, uid, planId);
+                        const fecha = isISODate(b.fecha) ? b.fecha : spHoy;
+                        const allocId = b.allocation_id || crypto.randomUUID();
+                        const ops = [];
+                        let movId = null;
+
+                        if (liquidacion === 'transferir' && asignado > SP_EPS) {
+                            if (!b.cuenta_destino_id) return json({ error: 'Falta cuenta_destino_id' }, 400, cors);
+                            if (b.cuenta_destino_id === plan.cuenta_ahorro_id) {
+                                return json({ error: 'La cuenta de destino no puede ser la propia cuenta de ahorro' }, 400, cors);
+                            }
+                            const dest = await env.DB.prepare(
+                                'SELECT id, tipo FROM accounts WHERE id=? AND user_id=?')
+                                .bind(b.cuenta_destino_id, uid).first();
+                            if (!dest) return json({ error: 'La cuenta de destino no existe' }, 404, cors);
+                            if (!SP_CUENTAS_TRANSFERIBLES.includes(dest.tipo)) {
+                                return json({ error: 'La cuenta de destino debe ser Activo, Pasivo o Patrimonio' }, 400, cors);
+                            }
+                            const st = await spAccountState(env, uid, plan.cuenta_ahorro_id);
+                            if (!st) return json({ error: 'La cuenta de ahorro no existe' }, 404, cors);
+                            if (asignado > sp2(st.saldo_actual - st.colchon_minimo) + SP_EPS) {
+                                return json({
+                                    error: 'La cuenta de ahorro no tiene saldo suficiente por encima del colchón mínimo',
+                                    code: 'colchon_minimo', saldo_actual: st.saldo_actual,
+                                    colchon_minimo: st.colchon_minimo, solicitado: asignado
+                                }, 409, cors);
+                            }
+                            movId = b.movement_id || crypto.randomUUID();
+                            const descripcion = (b.descripcion || `Cierre del plan ${plan.nombre}`).slice(0, 200);
+                            ops.push(
+                                env.DB.prepare(
+                                    `UPDATE accounts SET saldo_actual = COALESCE(saldo_actual,0) - ?, updated_at = ?
+                                      WHERE id = ? AND user_id = ?
+                                        AND NOT EXISTS (SELECT 1 FROM movements WHERE id = ?)`)
+                                    .bind(asignado, spNow, plan.cuenta_ahorro_id, uid, movId),
+                                env.DB.prepare(
+                                    `UPDATE accounts SET saldo_actual = COALESCE(saldo_actual,0) + ?, updated_at = ?
+                                      WHERE id = ? AND user_id = ?
+                                        AND NOT EXISTS (SELECT 1 FROM movements WHERE id = ?)`)
+                                    .bind(asignado, spNow, b.cuenta_destino_id, uid, movId),
+                                env.DB.prepare(
+                                    `INSERT INTO movements (id,user_id,tipo,cantidad,descripcion,fecha,cuenta_id,
+                                        cuenta_destino_id,categoria,origen,auto_categorized,applied_rule,rule_name,
+                                        manually_categorized,bank_reference,created_at,updated_at)
+                                     VALUES (?,?,'transferencia',?,?,?,?,?,NULL,'plan_ahorro',0,NULL,NULL,0,NULL,?,?)
+                                     ON CONFLICT(id) DO NOTHING`)
+                                    .bind(movId, uid, asignado, descripcion, fecha,
+                                          plan.cuenta_ahorro_id, b.cuenta_destino_id, spNow, spNow)
+                            );
+                        }
+
+                        if (Math.abs(asignado) > SP_EPS) {
+                            ops.push(env.DB.prepare(
+                                `INSERT INTO savings_plan_allocations
+                                    (id,user_id,plan_id,movement_id,cuenta_ahorro_id,tipo,cantidad,fecha,nota,created_at)
+                                 VALUES (?,?,?,?,?,?,?,?,?,?)
+                                 ON CONFLICT(id) DO NOTHING`)
+                                .bind(allocId, uid, planId, movId, plan.cuenta_ahorro_id,
+                                      movId ? 'retiro' : 'desasignacion', sp2(-asignado), fecha,
+                                      b.nota || `Cierre del plan (${resultado})`, spNow));
+                        }
+                        ops.push(env.DB.prepare(
+                            `UPDATE savings_plans SET estado=?, closed_at=?, completed_at=?, updated_at=?
+                              WHERE id=? AND user_id=?`)
+                            .bind(resultado, spNow, resultado === 'completado' ? spNow : plan.completed_at,
+                                  spNow, planId, uid));
+
+                        await env.DB.batch(ops);
+                        return json({ success: true, estado: resultado, liquidacion, liquidado: asignado,
+                                      movement_id: movId, allocation_id: Math.abs(asignado) > SP_EPS ? allocId : null,
+                                      cuenta: await spAccountState(env, uid, plan.cuenta_ahorro_id) }, 200, cors);
+                    }
+                }
+
+                return json({ error: 'Ruta no encontrada' }, 404, cors);
+            }
+
+            // ----- PUT /api/accounts/:id/cushion  (colchón mínimo — PREMIUM) -----
+            // El colchón es de la CUENTA (fondo de emergencia intocable) y entra en
+            // el invariante: asignado(cuenta) <= saldo_actual - colchon_minimo.
+            // Va en endpoint propio a propósito: añadirlo al upsert de /api/accounts
+            // haría que un cliente que no lo enviase lo pusiera a 0 en silencio.
+            const cushionMatch = path.match(/^\/api\/accounts\/([^/]+)\/cushion$/);
+            if (cushionMatch && (method === 'PUT' || method === 'GET')) {
+                const cGate = requirePremium(authUser, cors);
+                if (cGate) return cGate;
+                const cuentaId = cushionMatch[1];
+                const st = await spAccountState(env, uid, cuentaId);
+                if (!st) return json({ error: 'Cuenta no encontrada' }, 404, cors);
+                if (method === 'GET') return json(st, 200, cors);
+
+                const b = await request.json();
+                const colchon = sp2(Number(b.colchon_minimo));
+                if (!isFinite(colchon) || colchon < 0) {
+                    return json({ error: 'colchon_minimo no puede ser negativo' }, 400, cors);
+                }
+                // Subir el colchón no puede dejar los planes sin respaldo
+                const disponibleTrasCambio = sp2(st.saldo_actual - colchon - st.asignado);
+                if (disponibleTrasCambio < -SP_EPS) {
+                    return json({
+                        error: 'Ese colchón dejaría los planes de ahorro sin respaldo. Reduce lo asignado primero.',
+                        code: 'colchon_incompatible', asignado: st.asignado,
+                        saldo_actual: st.saldo_actual, maximo_colchon: sp2(st.saldo_actual - st.asignado)
+                    }, 409, cors);
+                }
+                await env.DB.prepare('UPDATE accounts SET colchon_minimo=?, updated_at=? WHERE id=? AND user_id=?')
+                    .bind(colchon, new Date().toISOString(), cuentaId, uid).run();
+                return json(await spAccountState(env, uid, cuentaId), 200, cors);
+            }
             // ---------- RULES ----------
             if (path === '/api/rules') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);

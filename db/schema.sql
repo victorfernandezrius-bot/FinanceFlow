@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     fixed_due_day INTEGER,
     is_bank_account INTEGER DEFAULT 0,
     auto_created_by_rule TEXT,
+    colchon_minimo REAL DEFAULT 0,      -- Planes de Ahorro: fondo de emergencia intocable
     created_at TEXT NOT NULL,
     updated_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -259,3 +260,59 @@ CREATE TABLE IF NOT EXISTS cartera_riesgo_cache (
   PRIMARY KEY (usuario_id, benchmark),
   FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Planes de Ahorro (PREMIUM). Ver db/migrations/0005_savings_plans.sql.
+-- Cada plan es un "sobre" dentro del saldo real de una cuenta de tipo 'activo'.
+-- INVARIANTE: asignado(cuenta) <= saldo_actual(cuenta) - colchon_minimo(cuenta).
+-- interes_anual es SOLO simulación: nunca toca saldos ni movimientos.
+CREATE TABLE IF NOT EXISTS savings_plans (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  cuenta_ahorro_id TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  descripcion TEXT DEFAULT '',
+  modo TEXT NOT NULL,                        -- 'objetivo_fecha' | 'cuota_fija'
+  objetivo_total REAL NOT NULL,
+  aportacion REAL,
+  periodicidad TEXT NOT NULL DEFAULT 'mensual',
+  dia_aportacion INTEGER,
+  fecha_inicio TEXT NOT NULL,
+  fecha_limite TEXT,
+  fecha_estimada TEXT,
+  producto_tipo TEXT,
+  interes_anual REAL DEFAULT 0,
+  capitalizacion TEXT DEFAULT 'mensual',
+  estado TEXT NOT NULL DEFAULT 'activo',     -- 'activo'|'pausado'|'completado'|'cancelado'
+  color TEXT,
+  icono TEXT,
+  completed_at TEXT,
+  closed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (cuenta_ahorro_id) REFERENCES accounts(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_splans_user   ON savings_plans(user_id);
+CREATE INDEX IF NOT EXISTS idx_splans_cuenta ON savings_plans(user_id, cuenta_ahorro_id);
+CREATE INDEX IF NOT EXISTS idx_splans_estado ON savings_plans(user_id, estado);
+
+-- Libro auxiliar de asignaciones (append-only, cantidades con signo).
+-- Sin FK a movements a propósito: una asignación huérfana debe ser visible.
+CREATE TABLE IF NOT EXISTS savings_plan_allocations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  movement_id TEXT,
+  cuenta_ahorro_id TEXT NOT NULL,
+  tipo TEXT NOT NULL,                        -- 'aportacion'|'asignacion_libre'|'retiro'|'desasignacion'|'ajuste'
+  cantidad REAL NOT NULL,
+  fecha TEXT NOT NULL,
+  nota TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (plan_id) REFERENCES savings_plans(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_salloc_plan   ON savings_plan_allocations(user_id, plan_id);
+CREATE INDEX IF NOT EXISTS idx_salloc_mov    ON savings_plan_allocations(user_id, movement_id);
+CREATE INDEX IF NOT EXISTS idx_salloc_cuenta ON savings_plan_allocations(user_id, cuenta_ahorro_id);
+CREATE INDEX IF NOT EXISTS idx_salloc_fecha  ON savings_plan_allocations(plan_id, fecha);
