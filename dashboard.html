@@ -742,6 +742,12 @@
                         <span class="nav-label">Escenarios</span>
                     </a>
                     
+                    <a href="#" id="nav-savings" title="Planes de Ahorro" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
+                        <i class="fas fa-piggy-bank mr-3"></i>
+                        <span class="nav-label">Planes de Ahorro</span>
+                        <span class="premium-badge ml-2 px-2 py-1 text-xs text-white rounded">PREMIUM</span>
+                    </a>
+
                     <a href="#" id="nav-autocontrol" title="Plan de Autocontrol" class="nav-item group flex items-center px-3 py-2 text-sm font-medium rounded-md">
                         <i class="fas fa-bullseye mr-3"></i>
                         <span class="nav-label">Plan de Autocontrol</span>
@@ -1622,6 +1628,81 @@
                 </div>
             </div>
 
+            <!-- Sección Planes de Ahorro (PREMIUM) -->
+            <!-- Fase 1: CRUD + ahorro libre. La proyección con interés compuesto
+                 (Fase 2) y las aportaciones/retiradas contables (Fase 3) aún no están. -->
+            <div id="section-savings" class="section-content hidden">
+                <div class="section-container">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-900">
+                                <i class="fas fa-piggy-bank mr-2" style="color: var(--brand-primary);"></i>
+                                Planes de Ahorro
+                            </h2>
+                            <p class="text-gray-600">Reserva parte del saldo de una cuenta para objetivos concretos</p>
+                            <span class="premium-badge px-2 py-1 text-xs text-white rounded-full mt-2">PREMIUM</span>
+                        </div>
+                        <button id="savings-new-plan-btn" onclick="savingsPlans.openPlanModal()"
+                                class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors w-full sm:w-auto">
+                            <i class="fas fa-plus mr-2"></i>
+                            Nuevo plan
+                        </button>
+                    </div>
+
+                    <!-- Teaser para usuarios free: la sección queda bloqueada -->
+                    <div id="savings-premium-gate" class="hidden">
+                        <div class="text-white rounded-xl p-6 mb-6"
+                             style="background: var(--premium-navy, #0B2A55); border: 1px solid var(--premium-accent, #F5B301);">
+                            <div class="flex items-start">
+                                <i class="fas fa-crown text-2xl mr-4 mt-1" style="color: var(--premium-accent, #F5B301);"></i>
+                                <div>
+                                    <h3 class="text-lg font-semibold">Los Planes de Ahorro son una función Premium</h3>
+                                    <p class="text-sm mt-2 opacity-90">
+                                        Divide el saldo de tu cuenta de ahorro en "sobres": un objetivo por plan, con su
+                                        cuota, su fecha y su producto financiero. Y lo que no asignas a ningún plan sigue
+                                        contando como ahorro libre.
+                                    </p>
+                                    <ul class="text-sm mt-3 space-y-1 opacity-90 list-disc list-inside">
+                                        <li>Varios planes sobre la misma cuenta, sin separar el dinero</li>
+                                        <li>Colchón mínimo de emergencia que ningún plan puede tocar</li>
+                                        <li>Las aportaciones son transferencias reales en tu contabilidad</li>
+                                    </ul>
+                                    <button onclick="dashboard.startPremiumCheckout()"
+                                            class="mt-4 px-4 py-2 rounded-md text-sm font-semibold"
+                                            style="background: var(--premium-accent, #F5B301); color: #0B2A55;">
+                                        Mejorar a Premium
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Contenido real (solo premium) -->
+                    <div id="savings-content" class="hidden">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                            <div class="flex items-start">
+                                <i class="fas fa-info-circle text-blue-600 mr-3 mt-1"></i>
+                                <div class="text-sm text-blue-800">
+                                    <p class="font-medium mb-2">Cómo funcionan los planes:</p>
+                                    <ul class="list-disc list-inside space-y-1">
+                                        <li>Cada plan es un <strong>sobre</strong> dentro del saldo real de una cuenta de activo</li>
+                                        <li>Una cuenta puede tener varios planes; lo no asignado es <strong>ahorro libre</strong></li>
+                                        <li>El <strong>colchón mínimo</strong> es de la cuenta y ningún plan puede reservarlo</li>
+                                        <li>Asignar a un plan <strong>no mueve dinero</strong>: solo lo reserva</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Resumen por cuenta de ahorro: saldo, colchón, asignado y libre -->
+                        <div id="savings-accounts-summary" class="space-y-4 mb-6"></div>
+
+                        <!-- Lista de planes -->
+                        <div id="savings-plans-list" class="space-y-4"></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Sección Reglas de Categorización Premium -->
             <div id="section-categorization" class="section-content hidden">
                 <div class="section-container">
@@ -1843,6 +1924,174 @@
                     </button>
                     <button onclick="dashboard.createScenario()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
                         <i class="fas fa-plus mr-2"></i>Crear escenario
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: crear / editar plan de ahorro -->
+    <div id="savings-plan-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-5">
+                    <h3 id="savings-plan-modal-title" class="text-lg font-semibold text-gray-900">
+                        <i class="fas fa-piggy-bank mr-2" style="color: var(--brand-primary);"></i>
+                        Nuevo plan de ahorro
+                    </h3>
+                    <button onclick="savingsPlans.closePlanModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del plan</label>
+                        <input type="text" id="savings-plan-nombre" maxlength="120"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2"
+                               placeholder="Ej: Entrada del coche">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta de ahorro vinculada</label>
+                        <select id="savings-plan-cuenta" class="w-full border border-gray-300 rounded-lg px-3 py-2"></select>
+                        <p id="savings-plan-cuenta-aviso" class="text-xs text-amber-700 mt-1 hidden">
+                            No se puede cambiar la cuenta: el plan ya tiene dinero asignado en ella.
+                        </p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Modo</label>
+                        <select id="savings-plan-modo" onchange="savingsPlans.onModoChange()"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                            <option value="cuota_fija">Cuota fija mensual</option>
+                            <option value="objetivo_fecha">Alcanzar objetivo en una fecha</option>
+                        </select>
+                        <p id="savings-plan-modo-ayuda" class="text-xs text-gray-500 mt-1"></p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Objetivo total</label>
+                        <input type="number" id="savings-plan-objetivo" step="0.01" min="0.01"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="10000">
+                    </div>
+                    <div id="savings-plan-aportacion-wrap">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Cuota mensual</label>
+                        <input type="number" id="savings-plan-aportacion" step="0.01" min="0"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="200">
+                    </div>
+                    <div id="savings-plan-limite-wrap" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Fecha límite</label>
+                        <input type="date" id="savings-plan-limite" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Fecha de inicio</label>
+                            <input type="date" id="savings-plan-inicio" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                            <select id="savings-plan-estado" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                                <option value="activo">Activo</option>
+                                <option value="pausado">Pausado</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Producto financiero</label>
+                            <select id="savings-plan-producto" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                                <option value="">— Sin especificar —</option>
+                                <option value="cuenta_remunerada">Cuenta remunerada</option>
+                                <option value="deposito">Depósito</option>
+                                <option value="fondo">Fondo</option>
+                                <option value="letras">Letras del Tesoro</option>
+                                <option value="otro">Otro</option>
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">Informativo: no cambia ningún cálculo.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Interés anual (%)</label>
+                            <input type="number" id="savings-plan-interes" step="0.01" min="0" max="100" value="0"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                            <p class="text-xs text-gray-500 mt-1">
+                                Se guarda para la simulación. Nunca se suma a tu saldo ni a tu contabilidad.
+                            </p>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción (opcional)</label>
+                        <textarea id="savings-plan-descripcion" rows="2" maxlength="500"
+                                  class="w-full border border-gray-300 rounded-lg px-3 py-2 resize-none"></textarea>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button onclick="savingsPlans.closePlanModal()"
+                            class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        Cancelar
+                    </button>
+                    <button onclick="savingsPlans.savePlan()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+                        <i class="fas fa-check mr-2"></i>Guardar plan
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: cerrar / borrar plan. Dos salidas distintas, por eso no es un confirm() -->
+    <div id="savings-delete-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900">
+                        <i class="fas fa-xmark mr-2 text-red-600"></i>
+                        Cerrar plan: <span id="savings-delete-nombre"></span>
+                    </h3>
+                </div>
+                <p id="savings-delete-detalle" class="text-sm text-gray-600"></p>
+                <div class="flex flex-col gap-2 mt-6">
+                    <button onclick="savingsPlans.confirmDelete('cancelar')"
+                            class="w-full px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium">
+                        Cancelar el plan y liberar el dinero
+                    </button>
+                    <button id="savings-delete-borrar-btn" onclick="savingsPlans.confirmDelete('borrar')"
+                            class="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium hidden">
+                        Borrar el plan definitivamente
+                    </button>
+                    <button onclick="savingsPlans.closeDeleteModal()"
+                            class="w-full px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        Volver
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: colchón mínimo de la cuenta (fondo de emergencia) -->
+    <div id="savings-cushion-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900">
+                        <i class="fas fa-shield-halved mr-2" style="color: var(--brand-primary);"></i>
+                        Colchón mínimo
+                    </h3>
+                    <button onclick="savingsPlans.closeCushionModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    Dinero intocable de <strong id="savings-cushion-cuenta"></strong>: tu fondo de emergencia.
+                    Ningún plan de ahorro puede reservarlo.
+                </p>
+                <input type="number" id="savings-cushion-valor" step="0.01" min="0"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <p id="savings-cushion-info" class="text-xs text-gray-500 mt-2"></p>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button onclick="savingsPlans.closeCushionModal()"
+                            class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        Cancelar
+                    </button>
+                    <button onclick="savingsPlans.saveCushion()"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+                        Guardar
                     </button>
                 </div>
             </div>
@@ -2194,6 +2443,7 @@
         import Auth from './js/auth.js';
         import AccountingManager from './js/accounting-manager.js';
         import DataClient from './src/services/data-client.js';
+        import SavingsPlans from './js/savings-plans.js';
 
         // Texto explicativo del Índice Flow — peso, fórmula en lenguaje llano y cómo leer
         // cada sub-índice. Usado por renderFinancialHealth() y renderFlowDetailContent().
@@ -6264,6 +6514,10 @@
                     case 'scenarios':
                         this.initScenariosSection();
                         break;
+                    case 'savings':
+                        // El módulo decide si pinta el teaser (free) o el contenido (premium)
+                        window.savingsPlans?.initSection();
+                        break;
                 }
             }
 
@@ -10165,6 +10419,15 @@
         
         // Hacer disponible globalmente para eventos onclick
         window.dashboard = dashboard;
+
+        // Planes de Ahorro (PREMIUM). Módulo aparte para no engordar más este
+        // fichero; lee las cuentas del AccountingManager para no refetchearlas
+        // y reutiliza el toast y el formato de divisa del dashboard.
+        window.savingsPlans = new SavingsPlans({
+            getAccounts: () => dashboard.accountingManager.getAccounts(),
+            toast: (mensaje, tipo) => dashboard.showToast(mensaje, tipo),
+            formatCurrency: (importe) => dashboard.formatCurrency(importe)
+        });
     </script>
     
     <style>

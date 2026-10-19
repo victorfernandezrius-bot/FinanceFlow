@@ -407,6 +407,83 @@ const DataClient = {
             body: JSON.stringify({ userId, notifications })
         });
         return r.ok;
+    },
+
+    // ===== SAVINGS PLANS (Planes de Ahorro — PREMIUM) =====
+    // Solo modo 'remote': los planes viven en D1 y el invariante
+    // (asignado <= saldo - colchón) lo valida el Worker. No hay espejo en
+    // localStorage a propósito: una copia local podría contradecir al servidor
+    // sobre cuánto dinero hay asignado. window.DATA_MODE es 'remote' en
+    // public/config.js y en config.production.js.
+    //
+    // A diferencia del resto de este fichero, estos métodos LANZAN un Error
+    // con .status y .payload en vez de devolver null: el cuerpo de un 409 trae
+    // el motivo (code: sin_ahorro_libre, plan_con_saldo, ...) y la UI lo necesita
+    // para explicarle al usuario qué ha pasado.
+    async _savingsFetch(path, options = {}) {
+        if (MODE !== 'remote') {
+            throw new Error('Los Planes de Ahorro requieren modo remoto (D1)');
+        }
+        const r = await authFetch(`${window.API_URL}${path}`, options);
+        let payload = null;
+        try { payload = await r.json(); } catch { /* respuesta sin cuerpo */ }
+        if (!r.ok) {
+            const err = new Error((payload && payload.error) || `Error ${r.status}`);
+            err.status = r.status;
+            err.payload = payload;
+            err.code = payload && payload.code;
+            throw err;
+        }
+        return payload;
+    },
+
+    async listSavingsPlans(estado) {
+        const q = estado ? `?estado=${encodeURIComponent(estado)}` : '';
+        return this._savingsFetch(`/savings-plans${q}`);
+    },
+
+    async getSavingsPlan(planId) {
+        return this._savingsFetch(`/savings-plans/${encodeURIComponent(planId)}`);
+    },
+
+    // Crea o edita (upsert por id, igual que accounts/movements).
+    async saveSavingsPlan(plan) {
+        return this._savingsFetch('/savings-plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(plan)
+        });
+    },
+
+    // modo 'cancelar': libera lo asignado y deja el plan como cancelado.
+    // modo 'borrar':   solo si no tiene saldo. NUNCA borra movimientos.
+    async deleteSavingsPlan(planId, modo = 'cancelar') {
+        return this._savingsFetch(
+            `/savings-plans/${encodeURIComponent(planId)}?modo=${encodeURIComponent(modo)}`,
+            { method: 'DELETE' });
+    },
+
+    async listPlanAllocations(planId) {
+        return this._savingsFetch(`/savings-plans/${encodeURIComponent(planId)}/allocations`);
+    },
+
+    // Reconciliador: por cuenta devuelve saldo, colchón, asignado, ahorro libre
+    // y descuadre, más asignaciones huérfanas y planes en negativo.
+    async getSavingsIntegrity() {
+        return this._savingsFetch('/savings-plans/integrity');
+    },
+
+    // Colchón mínimo (fondo de emergencia). Es de la CUENTA, no del plan.
+    async getAccountCushion(accountId) {
+        return this._savingsFetch(`/accounts/${encodeURIComponent(accountId)}/cushion`);
+    },
+
+    async saveAccountCushion(accountId, colchonMinimo) {
+        return this._savingsFetch(`/accounts/${encodeURIComponent(accountId)}/cushion`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ colchon_minimo: colchonMinimo })
+        });
     }
 };
 
