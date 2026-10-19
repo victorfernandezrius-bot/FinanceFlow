@@ -1930,6 +1930,65 @@
         </div>
     </div>
 
+    <!-- Modal: proyección de un plan (SIMULACIÓN, no toca saldos ni contabilidad) -->
+    <div id="savings-projection-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-xl max-w-3xl w-full p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">
+                            <i class="fas fa-chart-line mr-2" style="color: var(--brand-primary);"></i>
+                            Proyección: <span id="savings-projection-nombre"></span>
+                        </h3>
+                        <p class="text-xs text-gray-500 mt-1">
+                            Simulación con interés compuesto y aportaciones mensuales.
+                            No se suma a tu saldo real ni genera movimientos.
+                        </p>
+                    </div>
+                    <button onclick="savingsPlans.closeProjectionModal()" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+
+                <div id="savings-projection-aviso"
+                     class="hidden bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800"></div>
+
+                <div id="savings-projection-cuerpo">
+                    <div id="savings-projection-resumen" class="mb-4"></div>
+
+                    <div style="position:relative;height:320px">
+                        <canvas id="savings-projection-chart"></canvas>
+                    </div>
+                    <p id="savings-projection-sin-grafica" class="hidden text-sm text-gray-500 text-center py-8">
+                        No se ha podido cargar la librería de gráficas. Las cifras están en la tabla de abajo.
+                    </p>
+
+                    <details class="mt-4">
+                        <summary class="text-sm text-gray-600 cursor-pointer">Ver los datos en tabla</summary>
+                        <table class="w-full text-sm mt-3">
+                            <thead>
+                                <tr class="text-xs text-gray-500 border-b border-gray-200">
+                                    <th class="text-left font-medium py-1 pr-4">Momento</th>
+                                    <th class="text-right font-medium py-1 pr-4">Aportado</th>
+                                    <th class="text-right font-medium py-1 pr-4">Intereses</th>
+                                    <th class="text-right font-medium py-1">Saldo simulado</th>
+                                </tr>
+                            </thead>
+                            <tbody id="savings-projection-tabla" class="text-gray-700"></tbody>
+                        </table>
+                    </details>
+                </div>
+
+                <div class="flex justify-end mt-6">
+                    <button onclick="savingsPlans.closeProjectionModal()"
+                            class="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                        Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: crear / editar plan de ahorro -->
     <div id="savings-plan-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
         <div class="flex items-center justify-center min-h-screen p-4">
