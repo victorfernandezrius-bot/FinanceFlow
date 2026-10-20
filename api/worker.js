@@ -163,6 +163,46 @@ async function rateLimited(env, key, max, ttlSeconds) {
     }
 }
 
+// ---------- Validación de entrada ----------
+// Comprobaciones de tipo, longitud, enum y rango para todo lo que escribe el cliente.
+// Los importes aceptan número o string numérico (como hasta ahora los guardaba D1).
+const MAX_BODY_BYTES = 1000000;
+const MAX_AMOUNT = 1e12;
+const ACCOUNT_TYPES = ['activo', 'pasivo', 'patrimonio', 'ingreso', 'gasto'];
+const MOVEMENT_TYPES = ['ingreso', 'gasto', 'transferencia'];
+const isNil = (x) => x === undefined || x === null;
+const V = {
+    str: (x, max, min = 0) => typeof x === 'string' && x.length >= min && x.length <= max,
+    optStr: (x, max) => isNil(x) || (typeof x === 'string' && x.length <= max),
+    amount: (x) => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) &&
+        Number.isFinite(Number(x)) && Math.abs(Number(x)) <= MAX_AMOUNT,
+    optAmount: (x) => isNil(x) || V.amount(x),
+    id: (x) => typeof x === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(x),
+    optId: (x) => isNil(x) || V.id(x),
+    date: (x) => typeof x === 'string' && x.length <= 40 && /^\d{4}-\d{2}-\d{2}/.test(x),
+    optDate: (x) => isNil(x) || V.date(x),
+    email: (x) => typeof x === 'string' && x.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x),
+    obj: (x) => x !== null && typeof x === 'object' && !Array.isArray(x),
+    // JSON libre (plan de autocontrol, escenarios…): objeto y tamaño acotado
+    blob: (x, max) => V.obj(x) && JSON.stringify(x).length <= max,
+    dueDay: (x) => isNil(x) || (Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 31),
+};
+const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 400, cors);
+// Endpoint de Web Push: https y nombre de host (los servicios reales son FCM, Mozilla,
+// Apple y WNS); se rechazan IPs literales y localhost para no usar el Worker como proxy.
+function isPushEndpoint(u) {
+    if (!V.str(u, 2048)) return false;
+    try {
+        const { protocol, hostname } = new URL(u);
+        return protocol === 'https:' && hostname.includes('.') && !/^[\d.]+$/.test(hostname) &&
+            !hostname.startsWith('[') && hostname !== 'localhost' && !hostname.endsWith('.localhost');
+    } catch { return false; }
+}
+const validRule = (r) => V.obj(r) && V.id(r.id) && V.str(r.name, 120) &&
+    (isNil(r.keywords) || (Array.isArray(r.keywords) && r.keywords.length <= 100 && r.keywords.every(k => V.str(k, 100)))) &&
+    (isNil(r.accountType) || ACCOUNT_TYPES.includes(r.accountType)) &&
+    V.optId(r.accountId) && V.optStr(r.accountName, 120) && V.optDate(r.createdAt);
+
 // ---------- Cloudflare Turnstile (anti-bots) ----------
 // Solo se exige si existe el secreto TURNSTILE_SECRET_KEY (wrangler secret put):
 // sin él no cambia nada, para poder desplegar antes de crear el widget.
@@ -459,6 +499,10 @@ export default {
 
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
+        // Ningún endpoint legítimo necesita más de 1 MB de body
+        if (Number(request.headers.get('Content-Length') || 0) > MAX_BODY_BYTES)
+            return json({ error: 'Petición demasiado grande' }, 413, cors);
+
         try {
             // ---------- HEALTH ----------
             if (path === '/api/health') return json({ ok: true, ts: Date.now() }, 200, cors);
@@ -473,6 +517,8 @@ export default {
                 if (!(await turnstileOk(env, turnstileToken, regIp))) return json(TURNSTILE_ERROR, 400, cors);
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
+                if (!V.email(email) || !V.str(password, 256) || !V.str(name, 100))
+                    return invalid('email válido, contraseña de hasta 256 caracteres y nombre de hasta 100', cors);
 
                 const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
                     .bind(email.toLowerCase()).first();
@@ -508,6 +554,7 @@ export default {
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { email, password, turnstileToken } = await request.json();
+                if (!V.str(email, 254) || !V.str(password, 1024)) return invalid('email o contraseña', cors);
                 if (!(await turnstileOk(env, turnstileToken, loginIp))) return json(TURNSTILE_ERROR, 400, cors);
                 const loginEmail = (email || '').toLowerCase();
                 const lock = await loginLockState(env, loginEmail, loginIp);
@@ -553,6 +600,8 @@ export default {
 
                 const { loginId, response } = await request.json();
                 if (!loginId || !response || !response.id)
+                    return json({ error: 'Solicitud inválida' }, 400, cors);
+                if (!V.str(loginId, 64) || !V.obj(response) || !V.str(response.id, 1024))
                     return json({ error: 'Solicitud inválida' }, 400, cors);
 
                 const expectedChallenge = await env.CACHE.get(`webauthn_login:${loginId}`);
@@ -608,6 +657,7 @@ export default {
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { credential } = await request.json();
                 if (!credential) return json({ error: 'Falta credential' }, 400, cors);
+                if (!V.str(credential, 4096)) return json({ error: 'Token de Google inválido' }, 400, cors);
 
                 // Verificación del id_token en servidor (obligatoria): nunca confiar
                 // en un JWT de Google decodificado solo en el navegador.
@@ -689,6 +739,8 @@ export default {
             }
             if (path === "/api/auth/forgot-password" && method === "POST") {
         const fp = await request.json();
+        // Email con tipo/longitud no válidos: misma respuesta que siempre (no revela nada)
+        if (!V.str(fp.email, 254)) return json({ success: true }, 200, cors);
         const fpEmail = (fp.email || "").toLowerCase();
         // B4: máx. 3 solicitudes por email/hora y 10 por IP/hora (anti bombardeo de emails).
         // Se responde igual que el flujo normal para no revelar el límite ni si el email existe.
@@ -720,6 +772,8 @@ export default {
         const rp = await request.json();
         if (!rp.token || !rp.password || rp.password.length < 8)
           return json({ error: "Datos inválidos (contraseña mínima 8 caracteres)" }, 400, cors);
+        if (!V.str(rp.token, 100) || !V.str(rp.password, 256))
+          return json({ error: "Datos inválidos (contraseña de 8 a 256 caracteres)" }, 400, cors);
         const rpUserId = await env.CACHE.get("reset:" + rp.token);
         if (!rpUserId) return json({ error: "El enlace no es válido o ha caducado" }, 400, cors);
         const rpHash = await hashPassword(rp.password);
@@ -834,6 +888,7 @@ export default {
                 if (method === 'GET') {  delete authUser.password_hash; return json(authUser, 200, cors); }
                 if (method === 'PUT') {
                     const u = await request.json();
+                    if (!V.obj(u) || !V.optStr(u.name, 100)) return invalid('name (máx. 100 caracteres)', cors);
                     const now = new Date().toISOString();
                     // plan y plan_expires_at NUNCA se aceptan del cliente: solo el webhook
                     // de Stripe y verify-session pueden cambiarlos.
@@ -883,6 +938,10 @@ export default {
                 }
                 if (method === 'POST') {
                     const a = await request.json();
+                    if (!V.obj(a) || !V.id(a.id) || !V.str(a.nombre, 120, 1) || !ACCOUNT_TYPES.includes(a.tipo) ||
+                        !V.optStr(a.descripcion, 500) || !V.optAmount(a.saldo_inicial) || !V.optAmount(a.saldo_actual) ||
+                        !V.optAmount(a.fixed_monthly_amount) || !V.dueDay(a.fixed_due_day) || !V.optDate(a.created_at))
+                        return invalid('cuenta', cors);
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO accounts (id,user_id,nombre,tipo,descripcion,saldo_inicial,saldo_actual,
@@ -917,6 +976,11 @@ export default {
                 }
                 if (method === 'POST') {
                     const m = await request.json();
+                    if (!V.obj(m) || !V.id(m.id) || !MOVEMENT_TYPES.includes(m.tipo) || !V.amount(m.cantidad) ||
+                        !V.str(m.descripcion, 1000) || !V.date(m.fecha) || !V.optId(m.cuenta_id) || !V.optId(m.cuenta_destino_id) ||
+                        !V.optStr(m.categoria, 100) || !V.optStr(m.origen, 30) || !V.optStr(m.applied_rule, 128) ||
+                        !V.optStr(m.rule_name, 200) || !V.optStr(m.bank_reference, 200) || !V.optDate(m.created_at))
+                        return invalid('movimiento', cors);
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO movements (id,user_id,tipo,cantidad,descripcion,fecha,cuenta_id,
@@ -964,6 +1028,7 @@ export default {
                 }
                 if (method === 'POST') {
                     const r = await request.json();
+                    if (!validRule(r)) return invalid('regla', cors);
                     await env.DB.prepare(
                         `INSERT INTO categorization_rules (id,user_id,name,keywords,account_type,account_id,account_name,enabled,is_default,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -980,6 +1045,7 @@ export default {
             if (path === '/api/rules/bulk' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const { rules } = await request.json();
+                if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
                 await env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid).run();
                 for (const r of rules) {
                     await env.DB.prepare(
@@ -1008,6 +1074,7 @@ export default {
                 }
                 if (method === 'POST') {
                     const plan = await request.json();
+                    if (!V.blob(plan, 100000)) return invalid('plan de autocontrol', cors);
                     await env.DB.prepare(
                         `INSERT INTO autocontrol_plan (user_id,plan_data,updated_at) VALUES (?,?,?)
                          ON CONFLICT(user_id) DO UPDATE SET plan_data=excluded.plan_data, updated_at=excluded.updated_at`)
@@ -1025,6 +1092,7 @@ export default {
                 }
                 if (method === 'POST') {
                     const assoc = await request.json();
+                    if (!V.blob(assoc, 100000)) return invalid('asociaciones', cors);
                     await env.DB.prepare(
                         `INSERT INTO autocontrol_associations (user_id,associations_data,updated_at) VALUES (?,?,?)
                          ON CONFLICT(user_id) DO UPDATE SET associations_data=excluded.associations_data, updated_at=excluded.updated_at`)
@@ -1042,6 +1110,9 @@ export default {
                 }
                 if (method === 'POST') {
                     const { scenarios } = await request.json();
+                    if (!isNil(scenarios) && (!Array.isArray(scenarios) || scenarios.length > 100 ||
+                        !scenarios.every(s => V.blob(s, 200000) && V.optId(s.id))))
+                        return invalid('escenarios', cors);
                     await env.DB.prepare('DELETE FROM scenarios WHERE user_id=?').bind(uid).run();
                     for (const s of (scenarios || [])) {
                         await env.DB.prepare('INSERT INTO scenarios (id,user_id,scenario_data,created_at) VALUES (?,?,?,?)')
@@ -1072,6 +1143,10 @@ export default {
                 }
                 if (method === 'POST') {
                     const { notifications } = await request.json();
+                    if (!isNil(notifications) && (!Array.isArray(notifications) || notifications.length > 200 ||
+                        !notifications.every(n => V.obj(n) && V.id(n.id) && V.optStr(n.type, 50) && V.optStr(n.title, 300) &&
+                            V.optStr(n.message, 2000) && (isNil(n.data) || V.blob(n.data, 10000)) && V.optDate(n.createdAt))))
+                        return invalid('notificaciones', cors);
                     await env.DB.prepare('DELETE FROM notifications WHERE user_id=?').bind(uid).run();
                     for (const n of (notifications || [])) {
                         await env.DB.prepare(
@@ -1092,6 +1167,10 @@ export default {
                     const sub = await request.json();
                     if (!sub || !sub.endpoint || !sub.keys?.p256dh || !sub.keys?.auth)
                         return json({ error: 'Suscripción inválida' }, 400, cors);
+                    // El Worker hará fetch a este endpoint (cron y /push/test): solo URLs
+                    // https a un host con nombre (no IPs ni localhost) y claves de tamaño acotado.
+                    if (!isPushEndpoint(sub.endpoint) || !V.str(sub.keys.p256dh, 200) || !V.str(sub.keys.auth, 100))
+                        return json({ error: 'Suscripción inválida' }, 400, cors);
                     // device_id: identificador estable del dispositivo (localStorage del
                     // cliente). Permite reconciliar suscripciones muertas del MISMO
                     // dispositivo sin tocar las de otros dispositivos del usuario.
@@ -1107,6 +1186,7 @@ export default {
                 }
                 if (method === 'DELETE') {
                     const { endpoint } = await request.json();
+                    if (!V.optStr(endpoint, 2048)) return invalid('endpoint', cors);
                     await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?')
                         .bind(uid, endpoint || '').run();
                     return json({ success: true }, 200, cors);
@@ -1178,6 +1258,11 @@ export default {
                 }
                 if (method === 'POST') {
                     const c = await request.json();
+                    if (!V.obj(c) || !V.id(c.id) || !V.optStr(c.bankCode, 128) || !V.optStr(c.bankName, 128) ||
+                        !V.optStr(c.institutionId, 128) || !V.optStr(c.requisitionId, 128) ||
+                        !V.optStr(c.gocardlessAccountId, 128) || !V.optStr(c.linkedAccountId, 128) ||
+                        !V.optStr(c.status, 30) || !V.optDate(c.lastSyncAt) || !V.optDate(c.createdAt))
+                        return invalid('conexión bancaria', cors);
                     await env.DB.prepare(
                         `INSERT INTO bank_connections (id,user_id,bank_code,bank_name,institution_id,requisition_id,
                             gocardless_account_id,linked_account_id,status,is_active,last_sync_at,created_at)
@@ -1205,11 +1290,15 @@ export default {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
                     const bankCode = url.searchParams.get('bankCode');
+                    if (!V.str(bankCode, 50)) return invalid('bankCode', cors);
                     const row = await env.DB.prepare('SELECT * FROM import_info WHERE user_id=? AND bank_code=?').bind(uid, bankCode).first();
                     return json(row || null, 200, cors);
                 }
                 if (method === 'POST') {
                     const { bankCode, importInfo } = await request.json();
+                    if (!V.str(bankCode, 50) || !V.obj(importInfo) || !V.optDate(importInfo.lastImportDate) ||
+                        !V.optAmount(importInfo.lastImportCount) || !V.optAmount(importInfo.totalImported))
+                        return invalid('importInfo', cors);
                     await env.DB.prepare(
                         `INSERT INTO import_info (user_id,bank_code,last_import_at,last_import_count,total_imported)
                          VALUES (?,?,?,?,?)
