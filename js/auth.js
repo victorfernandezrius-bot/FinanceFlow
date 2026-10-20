@@ -83,7 +83,7 @@ class AuthSystem {
 
     async register(userData) {
         try {
-            const { email, password, name, plan = 'free' } = userData;
+            const { email, password, name, plan = 'free', turnstileToken = null } = userData;
 
             // Validaciones
             if (!this.validateEmail(email)) {
@@ -92,7 +92,7 @@ class AuthSystem {
 
             // --- MODO REMOTO: registrar contra el Worker ---
             if (this.isRemote) {
-                const data = await this._apiPost('/auth/register', { email, password, name, plan });
+                const data = await this._apiPost('/auth/register', { email, password, name, plan, turnstileToken });
                 this.currentUser = data.currentUser;
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
@@ -268,7 +268,7 @@ class AuthSystem {
         }
     }
 
-    async login(email, password) {
+    async login(email, password, turnstileToken = null) {
         try {
             if (!email || !password) {
                 throw new Error('Email y contraseña son requeridos');
@@ -276,7 +276,7 @@ class AuthSystem {
 
             // --- MODO REMOTO: login contra el Worker ---
             if (this.isRemote) {
-                const data = await this._apiPost('/auth/login', { email, password });
+                const data = await this._apiPost('/auth/login', { email, password, turnstileToken });
                 this.currentUser = data.currentUser;
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);

@@ -16,6 +16,10 @@ window.STRIPE_PUBLISHABLE_KEY = 'pk_live_51PhqUIRr7a5Py1C0O4KbbPtgPyrWs1kcoxLh9C
 })();
 window.DATA_MODE = 'remote';
 window.BANK_SIMULATOR_ENABLED = false;
+// Cloudflare Turnstile (anti-bots en login/registro/recuperación). Clave PÚBLICA del
+// widget (site key). Vacía = desactivado. El servidor solo lo exige si existe el
+// secreto TURNSTILE_SECRET_KEY: configura primero esta clave y después el secreto.
+window.TURNSTILE_SITE_KEY = '';
 // Clave pública VAPID para Web Push (misma que en wrangler.toml [vars])
 window.VAPID_PUBLIC_KEY = 'BP6sAnJPgQWmT4963pl7rWZBLt55TP3NX1m0VKc_jf9rDI8tfOhmYuOT8CmAZsxxJHTO2jHuYh31sS3hVzihFUc';
 

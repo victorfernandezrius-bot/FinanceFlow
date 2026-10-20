@@ -123,6 +123,9 @@
                         </div>
                     </div>
                     
+                    <!-- Cloudflare Turnstile (solo si TURNSTILE_SITE_KEY está configurada) -->
+                    <div id="turnstile-login"></div>
+
                     <div>
                         <button type="submit" id="login-btn"
                                 class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white transition-colors" 
@@ -211,6 +214,7 @@
 
                 this.setupEventListeners();
                 this.setupBiometric();
+                this.turnstile = window.FFTurnstile ? window.FFTurnstile.mount('turnstile-login') : null;
             }
 
             // Muestra el botón biométrico solo si el dispositivo tiene un autenticador
@@ -311,11 +315,17 @@
                     return;
                 }
 
+                const turnstileToken = this.turnstile ? this.turnstile.token() : null;
+                if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
+                    this.showError('Completa la verificación anti-bots');
+                    return;
+                }
+
                 this.showLoading(true);
                 this.hideMessages();
-                
+
                 try {
-                    const result = await Auth.login(email, password);
+                    const result = await Auth.login(email, password, turnstileToken);
                     
                     if (result.success) {
                         this.showSuccess('¡Login exitoso! Redirigiendo...');
@@ -334,6 +344,7 @@
                     this.showError('Error inesperado. Por favor, intenta de nuevo.');
                 } finally {
                     this.showLoading(false);
+                    if (this.turnstile) this.turnstile.reset();
                 }
             }
 
@@ -388,8 +399,11 @@
         new LoginPage();
         
         // Forgot Password functionality
+        let forgotTurnstile = null;
         document.getElementById('forgot-password-btn').addEventListener('click', () => {
             document.getElementById('forgot-password-modal').classList.remove('hidden');
+            // El widget se pinta al abrir el modal (no dentro de un contenedor oculto)
+            if (!forgotTurnstile && window.FFTurnstile) forgotTurnstile = window.FFTurnstile.mount('turnstile-forgot');
         });
 
         document.getElementById('close-forgot-modal').addEventListener('click', () => {
@@ -404,7 +418,12 @@
             e.preventDefault();
             
             const email = document.getElementById('reset-email').value;
-            
+            const turnstileToken = forgotTurnstile ? forgotTurnstile.token() : null;
+            if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
+                alert('Completa la verificación anti-bots');
+                return;
+            }
+
             // Mostrar loading
             const submitBtn = e.target.querySelector('button[type="submit"]');
             submitBtn.disabled = true;
@@ -415,7 +434,7 @@
                 await fetch(`${API}/auth/forgot-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: (email || '').trim().toLowerCase() })
+                    body: JSON.stringify({ email: (email || '').trim().toLowerCase(), turnstileToken })
                 });
                 alert('Si ese email está registrado, recibirás un enlace para restablecer tu contraseña. Revisa tu bandeja de entrada y la carpeta de spam.');
                 document.getElementById('forgot-password-modal').classList.add('hidden');
@@ -425,6 +444,7 @@
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Enviar Enlace';
+                if (forgotTurnstile) forgotTurnstile.reset();
          }
         });
 
@@ -503,6 +523,8 @@
                            placeholder="tu@email.com">
                 </div>
                 
+                <div id="turnstile-forgot"></div>
+
                 <div class="bg-blue-50 border border-blue-200 rounded-md p-4">
                     <p class="text-sm text-blue-800">
                         <i class="fas fa-info-circle mr-2"></i>
@@ -522,6 +544,8 @@
         </div>
     </div>
 
+    <!-- Cloudflare Turnstile (anti-bots; inactivo sin TURNSTILE_SITE_KEY) -->
+    <script src="/public/turnstile.js"></script>
     <!-- Aviso para navegadores in-app de redes (Instagram/Facebook/TikTok) -->
     <script src="/public/inapp-browser-banner.js"></script>
     <!-- Service worker (PWA): registro + migración de scope /public/ -> / -->
