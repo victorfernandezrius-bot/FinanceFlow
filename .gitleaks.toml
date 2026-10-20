@@ -1,0 +1,9 @@
+# Configuración de gitleaks (CI y local): reglas por defecto + excepciones de valores
+# que son PÚBLICOS por diseño y no deben marcarse como secretos.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Clave publicable de Stripe (pk_live_/pk_test_): pública por diseño"
+regexTarget = "match"
+regexes = ['''pk_(live|test)_[0-9A-Za-z]+''']
