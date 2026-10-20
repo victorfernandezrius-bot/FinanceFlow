@@ -153,6 +153,42 @@ async function rateLimited(env, key, max, ttlSeconds) {
     }
 }
 
+// Fallos de login por email, además del límite por IP. Dos contadores en KV:
+//  - email+IP: desde el 5.º fallo, bloqueo con backoff exponencial (1, 2, 4… min,
+//    máx. 60). Solo afecta a esa IP: no sirve para dejar fuera al dueño de la cuenta.
+//  - email (cualquier IP): tope de 50 fallos por hora contra ataques distribuidos.
+// Un login correcto borra el contador email+IP. Fail-open si KV falla.
+const LOGIN_FAILS_BEFORE_BACKOFF = 5;
+const LOGIN_EMAIL_MAX_FAILS_PER_HOUR = 50;
+async function loginLockState(env, email, ip) {
+    try {
+        const [pairRaw, totalRaw] = await Promise.all([
+            env.CACHE.get(`lf:${email}:${ip}`), env.CACHE.get(`lf:${email}`)]);
+        const pair = pairRaw ? JSON.parse(pairRaw) : { n: 0 };
+        const total = parseInt(totalRaw, 10) || 0;
+        let wait = 0;
+        if (pair.until && pair.until > Date.now()) wait = Math.ceil((pair.until - Date.now()) / 1000);
+        else if (total >= LOGIN_EMAIL_MAX_FAILS_PER_HOUR) wait = 3600;
+        return { wait, pair, total };
+    } catch (e) {
+        console.error('loginLockState:', e);
+        return { wait: 0, pair: { n: 0 }, total: 0 };
+    }
+}
+async function loginFailed(env, email, ip, state) {
+    try {
+        const pair = { n: (state.pair.n || 0) + 1 };
+        if (pair.n >= LOGIN_FAILS_BEFORE_BACKOFF)
+            pair.until = Date.now() + Math.min(60, 2 ** (pair.n - LOGIN_FAILS_BEFORE_BACKOFF)) * 60000;
+        await env.CACHE.put(`lf:${email}:${ip}`, JSON.stringify(pair), { expirationTtl: 86400 });
+        await env.CACHE.put(`lf:${email}`, String(state.total + 1), { expirationTtl: 3600 });
+    } catch (e) { console.error('loginFailed:', e); }
+}
+async function loginSucceeded(env, email, ip, state) {
+    if (!state.pair.n) return;
+    try { await env.CACHE.delete(`lf:${email}:${ip}`); } catch (e) { console.error('loginSucceeded:', e); }
+}
+
 // ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
 // subscription: fila de push_subscriptions ({endpoint, p256dh, auth}).
 // payload: { title, body, url, tag }. Si la suscripción está muerta (404/410), se borra.
@@ -440,10 +476,18 @@ export default {
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { email, password } = await request.json();
+                const loginEmail = (email || '').toLowerCase();
+                const lock = await loginLockState(env, loginEmail, loginIp);
+                if (lock.wait > 0)
+                    return json({ error: 'Demasiados intentos fallidos. Inténtalo de nuevo en unos minutos.' }, 429,
+                        { ...cors, 'Retry-After': String(lock.wait) });
                 const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
-                    .bind((email || '').toLowerCase()).first();
-                if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash)))
+                    .bind(loginEmail).first();
+                if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+                    await loginFailed(env, loginEmail, loginIp, lock);
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
+                }
+                await loginSucceeded(env, loginEmail, loginIp, lock);
 
                 const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
                 delete user.password_hash;
