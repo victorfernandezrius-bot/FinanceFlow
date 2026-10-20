@@ -1068,7 +1068,8 @@ export default {
                             gocardless_account_id,linked_account_id,status,is_active,last_sync_at,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                          ON CONFLICT(id) DO UPDATE SET status=excluded.status, is_active=excluded.is_active,
-                            gocardless_account_id=excluded.gocardless_account_id, last_sync_at=excluded.last_sync_at`)
+                            gocardless_account_id=excluded.gocardless_account_id, last_sync_at=excluded.last_sync_at
+                         WHERE bank_connections.user_id = excluded.user_id`)
                         .bind(c.id, uid, c.bankCode ?? null, c.bankName ?? null, c.institutionId ?? null,
                               c.requisitionId ?? null, c.gocardlessAccountId ?? null, c.linkedAccountId ?? null,
                               c.status || 'pending', c.isActive ? 1 : 0, c.lastSyncAt ?? null,
