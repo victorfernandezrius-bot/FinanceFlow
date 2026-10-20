@@ -361,37 +361,8 @@ class AuthSystem {
     }
 
     // ===== PLAN UPGRADE =====
-
-    async upgradeToPremium() {
-        if (!this.currentUser) {
-            throw new Error('No hay usuario autenticado');
-        }
-
-        try {
-            // Actualizar plan local (en producción sería a través de Stripe)
-            this.currentUser.plan = 'premium';
-            this.currentUser.plan_expires_at = new Date(Date.now() + 30*24*60*60*1000).toISOString();
-            
-            // Actualizar en localStorage
-            await DataClient.saveSession({ userId: this.currentUser.id, token: this.token, user: this.currentUser });
-            
-            // Actualizar en registro de usuarios (DataClient ya hace upsert)
-            await DataClient.saveUser(this.currentUser);
-
-            return {
-                success: true,
-                user: this.currentUser,
-                message: 'Upgrade a Premium exitoso'
-            };
-
-        } catch (error) {
-            console.error('Error en upgrade:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
+    // El Premium solo lo concede el servidor (webhook de Stripe verificado): no hay
+    // ningún método de cliente que active el plan.
 
     // ===== UTILIDADES =====
 
