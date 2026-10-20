@@ -153,6 +153,27 @@ async function rateLimited(env, key, max, ttlSeconds) {
     }
 }
 
+// ---------- Cloudflare Turnstile (anti-bots) ----------
+// Solo se exige si existe el secreto TURNSTILE_SECRET_KEY (wrangler secret put):
+// sin él no cambia nada, para poder desplegar antes de crear el widget.
+async function turnstileOk(env, token, ip) {
+    if (!env.TURNSTILE_SECRET_KEY) return true;
+    if (typeof token !== 'string' || !token || token.length > 2048) return false;
+    try {
+        const body = new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token });
+        if (ip) body.append('remoteip', ip);
+        const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body });
+        const data = await r.json();
+        if (data.success !== true) console.error('Turnstile rechazado:', JSON.stringify(data['error-codes'] || []));
+        return data.success === true;
+    } catch (e) {
+        // Caída del servicio de verificación: no bloquear el acceso (fail-open, como el rate limit)
+        console.error('Turnstile siteverify:', e);
+        return true;
+    }
+}
+const TURNSTILE_ERROR = { error: 'Completa la verificación anti-bots e inténtalo de nuevo.' };
+
 // Fallos de login por email, además del límite por IP. Dos contadores en KV:
 //  - email+IP: desde el 5.º fallo, bloqueo con backoff exponencial (1, 2, 4… min,
 //    máx. 60). Solo afecta a esa IP: no sirve para dejar fuera al dueño de la cuenta.
@@ -438,7 +459,8 @@ export default {
                 const regIp = request.headers.get('CF-Connecting-IP') || 'unknown';
                 if (await rateLimited(env, `rl:register:${regIp}`, 10, 3600))
                     return json({ error: 'Demasiados registros desde esta conexión. Inténtalo más tarde.' }, 429, cors);
-                const { email, password, name } = await request.json();
+                const { email, password, name, turnstileToken } = await request.json();
+                if (!(await turnstileOk(env, turnstileToken, regIp))) return json(TURNSTILE_ERROR, 400, cors);
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
 
@@ -475,7 +497,8 @@ export default {
                 const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
-                const { email, password } = await request.json();
+                const { email, password, turnstileToken } = await request.json();
+                if (!(await turnstileOk(env, turnstileToken, loginIp))) return json(TURNSTILE_ERROR, 400, cors);
                 const loginEmail = (email || '').toLowerCase();
                 const lock = await loginLockState(env, loginEmail, loginIp);
                 if (lock.wait > 0)
@@ -664,6 +687,7 @@ export default {
             await rateLimited(env, `rl:reset-ip:${fpIp}`, 10, 3600)) {
           return json({ success: true }, 200, cors);
         }
+        if (!(await turnstileOk(env, fp.turnstileToken, fpIp))) return json(TURNSTILE_ERROR, 400, cors);
         const fpUser = await env.DB.prepare("SELECT id, name, email FROM users WHERE email=?")
           .bind(fpEmail).first();
         if (fpUser) {
