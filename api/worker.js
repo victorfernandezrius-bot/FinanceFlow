@@ -498,6 +498,9 @@ export default {
         const path = url.pathname;
         const method = request.method;
         const cors = corsHeaders(request, env);
+        // Id de petición: se devuelve en los 500 y se registra, para cruzar un error
+        // de un usuario con los logs (wrangler tail) sin exponerle detalles internos.
+        const requestId = crypto.randomUUID();
 
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
@@ -853,7 +856,8 @@ export default {
                         requireUserVerification: true
                     });
                 } catch (e) {
-                    return json({ error: 'Verificación fallida: ' + e.message }, 400, cors);
+                    console.error('webauthn register-verify:', e && e.message);
+                    return json({ error: 'No se pudo verificar la credencial.' }, 400, cors);
                 }
                 if (!verification.verified || !verification.registrationInfo)
                     return json({ error: 'No se pudo verificar la credencial.' }, 400, cors);
@@ -1346,7 +1350,10 @@ export default {
                     body: params
                 });
                 const session = await resp.json();
-                if (!resp.ok) return json({ error: session.error?.message || 'Error Stripe' }, 500, cors);
+                if (!resp.ok) {
+                    console.error('Stripe create-checkout:', resp.status, session.error?.message);
+                    return json({ error: 'No se pudo iniciar el pago. Inténtalo de nuevo.' }, 502, cors);
+                }
                 return json({ checkout_url: session.url, session_id: session.id }, 200, cors);
             }
 
@@ -1368,7 +1375,10 @@ export default {
                     body: params
                 });
                 const session = await resp.json();
-                if (!resp.ok) return json({ error: session.error?.message || 'No se pudo abrir el portal de gestión' }, 500, cors);
+                if (!resp.ok) {
+                    console.error('Stripe customer-portal:', resp.status, session.error?.message);
+                    return json({ error: 'No se pudo abrir el portal de gestión' }, 502, cors);
+                }
                 return json({ portal_url: session.url }, 200, cors);
             }
 
@@ -1456,6 +1466,7 @@ export default {
                     const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/institutions/?country=${country}`, {
                         headers: { 'Authorization': `Bearer ${gcToken}`, 'Accept': 'application/json' }
                     });
+                    if (!r.ok) return gcError('institutions', r, cors);
                     return json(await r.json(), 200, cors);
                 }
 
@@ -1473,6 +1484,7 @@ export default {
                             user_language: 'ES'
                         })
                     });
+                    if (!r.ok) return gcError('requisition', r, cors);
                     const req = await r.json();
                     return json(req, 200, cors); // contiene { id, link } -> redirige al usuario a req.link
                 }
@@ -1493,6 +1505,7 @@ export default {
                     const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/accounts/${account_id}/transactions/`, {
                         headers: { 'Authorization': `Bearer ${gcToken}` }
                     });
+                    if (!r.ok) return gcError('sync', r, cors);
                     const data = await r.json();
                     return json(data, 200, cors); // el frontend mapea a movimientos contables
                 }
@@ -1502,8 +1515,8 @@ export default {
 
         } catch (err) {
             // No filtrar detalles internos al cliente; registrar el detalle en el servidor.
-            console.error('Error 500:', err && err.stack ? err.stack : err);
-            return json({ error: 'Server error' }, 500, cors);
+            console.error('Error 500', requestId, err && err.stack ? err.stack : err);
+            return json({ error: 'Server error', requestId }, 500, { ...cors, 'X-Request-Id': requestId });
         }
     },
 
@@ -1618,6 +1631,12 @@ async function getGoCardlessToken(env) {
     // access expira en ~24h; lo cacheamos 23h por seguridad
     if (data.access) await env.CACHE.put('gc_access_token', data.access, { expirationTtl: 82800 });
     return data.access;
+}
+
+// Error del proveedor bancario: el detalle va al log, al cliente solo un mensaje genérico.
+async function gcError(op, r, cors) {
+    console.error('GoCardless', op, r.status, (await r.text().catch(() => '')).slice(0, 500));
+    return json({ error: 'Error del proveedor bancario. Inténtalo más tarde.' }, 502, cors);
 }
 
 // Los IDs de requisiciones y cuentas de GoCardless son UUID. Validarlos impide
