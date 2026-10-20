@@ -195,7 +195,36 @@ Sin cambios en esta fase, porque ya estaban bien o no aplica:
 - Punto 8 (allowlist): el servidor ya enlaza campo a campo e ignora lo desconocido. Rechazar con 400 rompería los clientes actuales (ver dudosos).
 - Hipótesis a, b y c: ya estaban corregidas.
 
-_(fases 3 y 4: más abajo)_
+### Fase 3 — P1
+
+| Commit | Punto | Cambio | Comprobado |
+|---|---|---|---|
+| `7e77415` | 11 | Rate limit (KV) en register (10/h por IP), Google (20/15 min por IP), `webauthn/login-options` (30/15 min), reset-password (10/15 min), verify-session (20/15 min por usuario), create-checkout (10/15 min) y `/api/banking/*` (60/h) | el N+1 → 429 en cada uno |
+| `28b892f` | 11 | Login: además del límite por IP, bloqueo por email+IP desde el 5.º fallo con backoff 1, 2, 4… min (máx. 60, con `Retry-After`) y tope global de 50 fallos/h por email; un login correcto reinicia el contador | el dueño entra desde otra IP; tope distribuido → 429 |
+| `8c33a70` | 12 | Turnstile verificado en servidor en register, login y forgot. **Solo si existe `TURNSTILE_SECRET_KEY`** (sin el secreto, no cambia nada). Fail-open si siteverify no responde | sin token → 400; token válido → OK; servicio caído → no bloquea |
+| `cb9b039` | 12 | Widget Turnstile en login, registro y "¿Olvidaste tu contraseña?" (`public/turnstile.js`); inactivo mientras `TURNSTILE_SITE_KEY` esté vacía en `config.js` | desactivado: igual que antes; activado: el token llega en las 3 peticiones |
+| `81ba0f0` | 18, 19 | `_headers` (Pages): HSTS, nosniff, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy y **CSP en Report-Only** (Tailwind, jsDelivr/cdnjs, Stripe, Google, Turnstile, Fonts; `frame-ancestors 'none'`) | recorrido de todas las páginas sin violaciones (en local) |
+| `5345af2` | 18 | API: nosniff, `Cache-Control: no-store`, HSTS, `X-Frame-Options`, `Referrer-Policy` en todas las respuestas | cabeceras presentes |
+| `f924dce` | 14, A11 | Body > 1 MB → 413. Validación de tipo/longitud/enum/rango/formato en todos los endpoints de escritura. Endpoint push solo https a un host con nombre | 40 casos (rechazos y payloads reales del cliente) |
+| `ac3d87a` | 14 | Fechas con formato ISO estricto (antes solo se miraba el prefijo) | `2026-10-01<img…>` → 400 |
+| `71db9cd` | 15, A4 | Nombre escapado en el HTML de los 4 emails | email de bienvenida sin el enlace inyectado |
+| `6886ed8` | 15 | `_escapeHtml` en las 59 interpolaciones de datos de usuario en `innerHTML`, y en los toasts | con el código anterior 21 payloads se ejecutaban; ahora 0 |
+| `09daedf` | 17 | 500 con `requestId` (body y `X-Request-Id`) y sin detalles. WebAuthn, Stripe y GoCardless ya no devuelven mensajes internos | — |
+| `802e57f` | 17 | Sin `SELECT *` hacia el cliente: `publicUser()` sin `google_sub`/`stripe_*`/… y listas explícitas de columnas | campos que usa el cliente intactos |
+| `d59566d` | 9 | JWT con `jti` + `iat`, **7 días con renovación deslizante** (`X-Refresh-Token`, que `authFetch` guarda). La renovación nunca acorta un token y los tokens antiguos de 30 días se migran solos: **nadie se desloguea** | un usuario con token antiguo sigue dentro y su token se migra |
+| `08c22fd` | 9 | Logout que invalida: revocación en KV hasta la caducidad (también de tokens antiguos) y el cliente envía el token antes de borrarlo (`Auth.logout` lo borraba antes) | tras el logout, el token da 401 |
+| `4009192` | 9 | Cambiar o restablecer la contraseña cierra todas las sesiones (`users.token_version`, **migración 0001**). Funciona igual con o sin la migración aplicada | con migración se invalidan; sin ella, fail-open sin errores |
+
+Sin cambios en esta fase, porque ya estaba bien: **punto 10 (hashing)**. Comparación en tiempo constante (`timingSafeEqual`); PBKDF2-SHA256 a 100.000 iteraciones, que es el **máximo que admite WebCrypto en Workers**, así que no hay rehash posible a más iteraciones. No se cambia el algoritmo. **Punto 13**: ya era correcto.
+
+#### Evaluación: token en cookie HttpOnly + SameSite + CSRF (no implementado, necesita tu aprobación)
+
+- **Qué gana:** un XSS ya no podría leer el token (hoy está en `localStorage`). Aun así podría actuar como el usuario mientras la página está abierta.
+- **Qué impide hoy hacerlo bien:** el frontend (`*.pages.dev`) y la API (`*.workers.dev`) son *sites* distintos, porque ambos dominios están en la Public Suffix List. Una cookie de la API sería de terceros: Safari y Firefox la bloquean por defecto y Chrome la restringe. Antes hay que **unificar dominio** (trampa 7), por ejemplo `app.contabilidadpersonal.com` + la API en la misma zona o en una ruta `/api/*` del mismo host.
+- **Coste:** cambiar las respuestas de login/Google/passkey para emitir la cookie, `credentials: 'include'` en todas las llamadas (ya está en `authFetch`), un logout que borre la cookie, protección CSRF (SameSite=Lax/Strict + comprobación de `Origin` o token CSRF en las escrituras) y un periodo de convivencia en el que la API acepte cabecera y cookie.
+- **Recomendación:** hacerlo después de unificar el dominio. Mientras tanto, la mitigación es la que ya está aplicada: XSS escapado, CSP en camino de pasar a enforcing, tokens de 7 días, logout y cambio de contraseña que revocan.
+
+_(fase 4: más abajo)_
 
 ## 6. Pasos manuales para Víctor
 
