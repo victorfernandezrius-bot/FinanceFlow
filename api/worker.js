@@ -179,7 +179,9 @@ const V = {
     optAmount: (x) => isNil(x) || V.amount(x),
     id: (x) => typeof x === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(x),
     optId: (x) => isNil(x) || V.id(x),
-    date: (x) => typeof x === 'string' && x.length <= 40 && /^\d{4}-\d{2}-\d{2}/.test(x),
+    // YYYY-MM-DD, opcionalmente con hora ISO (2026-10-20T21:07:34.694Z): nada más detrás
+    date: (x) => typeof x === 'string' && x.length <= 40 &&
+        /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(x),
     optDate: (x) => isNil(x) || V.date(x),
     email: (x) => typeof x === 'string' && x.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x),
     obj: (x) => x !== null && typeof x === 'object' && !Array.isArray(x),
