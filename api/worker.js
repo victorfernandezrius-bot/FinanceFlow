@@ -1705,7 +1705,15 @@ async function sendEmail(env, { to, subject, html }) {
     return false;
   }
 }
+// El nombre lo escribe el usuario (o quien se registra con un email ajeno):
+// se escapa antes de meterlo en el HTML de los emails.
+function escapeHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function welcomeEmailHTML(name) {
+  name = escapeHtml(name);
   return `
   <!DOCTYPE html>
   <html lang="es">
@@ -1749,6 +1757,7 @@ function welcomeEmailHTML(name) {
   </html>`;
 }
 function premiumActivatedEmailHTML(name, planType) {
+    name = escapeHtml(name);
     const planLabel = planType === 'annual' ? 'anual' : 'mensual';
     return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
@@ -1763,6 +1772,7 @@ function premiumActivatedEmailHTML(name, planType) {
     </table></td></tr></table></body></html>`;
 }
                 function resetPasswordEmailHTML(name, link) {
+    name = escapeHtml(name);
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
@@ -1782,6 +1792,7 @@ function premiumActivatedEmailHTML(name, planType) {
     </table></td></tr></table></body></html>`;
 }
 function feedbackRequestEmailHTML(name, link) {
+    name = escapeHtml(name);
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
