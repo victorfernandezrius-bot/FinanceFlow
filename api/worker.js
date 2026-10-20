@@ -1209,10 +1209,19 @@ export default {
             if (path === '/api/stripe/verify-session' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const { session_id } = await request.json();
+                // Solo IDs de Checkout Session: el valor va en la URL de la API de Stripe
+                // con la clave secreta, así que no puede apuntar a otro recurso.
+                if (typeof session_id !== 'string' || !/^cs_(test|live)_[A-Za-z0-9]+$/.test(session_id))
+                    return json({ error: 'Sesión de pago inválida' }, 400, cors);
                 const resp = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session_id}`, {
                     headers: { 'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}` }
                 });
                 const session = await resp.json();
+                // La sesión tiene que ser del usuario autenticado (create-checkout fija
+                // client_reference_id y metadata.user_id con su id).
+                const owner = session.client_reference_id || session.metadata?.user_id;
+                if (!resp.ok || owner !== uid)
+                    return json({ error: 'La sesión de pago no pertenece a este usuario' }, 403, cors);
                 const paid = session.payment_status === 'paid';
                 return json({ paid, plan: paid ? 'premium' : 'free' }, 200, cors);
             }
