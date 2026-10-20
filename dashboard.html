@@ -3770,7 +3770,7 @@
                         <div class="flex items-start justify-between">
                             <div class="flex-1">
                                 <div class="flex items-center mb-2">
-                                    <h4 class="font-medium text-gray-900">${rule.name}</h4>
+                                    <h4 class="font-medium text-gray-900">${this._escapeHtml(rule.name)}</h4>
                                     ${rule.isDefault ? 
                                         '<span class="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">Por defecto</span>' : 
                                         '<span class="ml-2 px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">Personalizada</span>'
@@ -3781,10 +3781,10 @@
                                     }
                                 </div>
                                 <div class="text-sm text-gray-600 mb-1">
-                                    <strong>Palabras clave:</strong> ${rule.keywords.join(', ')}
+                                    <strong>Palabras clave:</strong> ${this._escapeHtml(rule.keywords.join(', '))}
                                 </div>
                                 <div class="text-sm text-gray-600">
-                                    <strong>Asigna a:</strong> ${rule.accountName} (${rule.accountType})
+                                    <strong>Asigna a:</strong> ${this._escapeHtml(rule.accountName)} (${rule.accountType})
                                     ${this.accountingManager.getRuleAccount(rule) ? '<span class="text-green-600">✓ Conectada</span>' : '<span class="text-red-600">⚠ Sin cuenta</span>'}
                                 </div>
                             </div>
@@ -3846,10 +3846,10 @@
                         
                         <div class="mb-4">
                             <p class="text-sm text-gray-600 mb-2">
-                                <strong>Regla:</strong> ${rule.name}
+                                <strong>Regla:</strong> ${this._escapeHtml(rule.name)}
                             </p>
                             <p class="text-sm text-gray-600 mb-4">
-                                <strong>Palabras clave:</strong> ${rule.keywords.join(', ')}
+                                <strong>Palabras clave:</strong> ${this._escapeHtml(rule.keywords.join(', '))}
                             </p>
                         </div>
                         
@@ -3863,7 +3863,7 @@
                                     <option value="">Seleccionar cuenta...</option>
                                     ${filteredAccounts.map(acc => `
                                         <option value="${acc.id}" ${acc.id === rule.accountId ? 'selected' : ''}>
-                                            ${acc.nombre}
+                                            ${this._escapeHtml(acc.nombre)}
                                         </option>
                                     `).join('')}
                                 </select>
@@ -3940,7 +3940,7 @@
                 accountSelector.innerHTML += '<option value="_new_">✨ Crear nueva cuenta</option>';
                 
                 accounts.forEach(acc => {
-                    accountSelector.innerHTML += `<option value="${acc.id}">${acc.nombre}</option>`;
+                    accountSelector.innerHTML += `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`;
                 });
                 
                 // Ocultar input de nueva cuenta al cambiar tipo
@@ -4340,14 +4340,14 @@
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta de ingreso</label>
                             <select id="sc-source-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${ingresos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${ingresos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta destino (activo)</label>
                             <select id="sc-dest-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${activos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>`;
                 } else if (type === 'gasto') {
@@ -4358,14 +4358,14 @@
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta origen (activo)</label>
                             <select id="sc-source-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${activos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta de gasto</label>
                             <select id="sc-dest-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${gastos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${gastos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>`;
                 } else if (type === 'transferencia') {
@@ -4375,14 +4375,14 @@
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta origen</label>
                             <select id="sc-source-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activosPasivos.map(a => `<option value="${a.id}">${a.nombre} (${a.tipo})</option>`).join('')}
+                                ${activosPasivos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)} (${a.tipo})</option>`).join('')}
                             </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta destino</label>
                             <select id="sc-dest-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activosPasivos.map(a => `<option value="${a.id}">${a.nombre} (${a.tipo})</option>`).join('')}
+                                ${activosPasivos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)} (${a.tipo})</option>`).join('')}
                             </select>
                         </div>`;
                 } else {
@@ -4480,8 +4480,8 @@
                                     <i class="fas ${icon} text-xs ${colorClass}"></i>
                                 </div>
                                 <div class="min-w-0">
-                                    <p class="text-sm font-medium text-gray-900 truncate">${m.descripcion}</p>
-                                    <p class="text-xs text-gray-400 truncate">${m.cuenta_nombre} → ${m.cuenta_destino_nombre}</p>
+                                    <p class="text-sm font-medium text-gray-900 truncate">${this._escapeHtml(m.descripcion)}</p>
+                                    <p class="text-xs text-gray-400 truncate">${this._escapeHtml(m.cuenta_nombre)} → ${this._escapeHtml(m.cuenta_destino_nombre)}</p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-3 flex-shrink-0">
@@ -5062,13 +5062,13 @@
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center space-x-2">
-                                        <h4 class="font-medium text-gray-900 truncate">${notification.title}</h4>
+                                        <h4 class="font-medium text-gray-900 truncate">${this._escapeHtml(notification.title)}</h4>
                                         ${!notification.read ? 
                                             '<span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">Nueva</span>' : 
                                             ''
                                         }
                                     </div>
-                                    <p class="text-sm text-gray-600 mt-1">${notification.message}</p>
+                                    <p class="text-sm text-gray-600 mt-1">${this._escapeHtml(notification.message)}</p>
                                     <p class="text-xs text-gray-500 mt-2">
                                         ${this.formatNotificationDate(notification.createdAt)}
                                     </p>
@@ -5153,8 +5153,8 @@
                                 ${this.getNotificationIcon(notification.type)}
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium text-gray-900 truncate">${notification.title}</p>
-                                <p class="text-xs text-gray-600 truncate">${notification.message}</p>
+                                <p class="text-sm font-medium text-gray-900 truncate">${this._escapeHtml(notification.title)}</p>
+                                <p class="text-xs text-gray-600 truncate">${this._escapeHtml(notification.message)}</p>
                                 <p class="text-xs text-gray-500 mt-1">${this.formatNotificationDate(notification.createdAt)}</p>
                             </div>
                             ${!notification.read ? '<div class="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2"></div>' : ''}
@@ -5640,7 +5640,7 @@
                                  style="background:${c.border};">
                                 <i class="fas ${ins.icon} text-xs" style="color:${c.icon};"></i>
                             </div>
-                            <p class="text-sm leading-snug" style="color:var(--text-primary);">${ins.text}</p>
+                            <p class="text-sm leading-snug" style="color:var(--text-primary);">${this._escapeHtml(ins.text)}</p>
                         </div>`;
                 }).join('');
 
@@ -6157,7 +6157,7 @@
                     return `
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-color);">
                             <div style="min-width:0;">
-                                <p style="font-size:13.5px;font-weight:600;color:var(--text-primary);margin:0;overflow:hidden;text-overflow:ellipsis;">${acc.nombre}</p>
+                                <p style="font-size:13.5px;font-weight:600;color:var(--text-primary);margin:0;overflow:hidden;text-overflow:ellipsis;">${this._escapeHtml(acc.nombre)}</p>
                                 <p style="font-size:11.5px;color:var(--text-secondary);margin:2px 0 0;">${fmtC(importe)}/mes${acc.fixed_due_day ? ` · vence el día ${acc.fixed_due_day}` : ''}</p>
                             </div>
                             <div style="text-align:right;flex-shrink:0;">${badge}</div>
@@ -6371,7 +6371,7 @@
                                 <i class="fas ${this.getMovementIcon(movement.tipo)} text-sm"></i>
                             </div>
                             <div class="ml-3">
-                                <p class="text-sm font-medium text-gray-900">${movement.descripcion}</p>
+                                <p class="text-sm font-medium text-gray-900">${this._escapeHtml(movement.descripcion)}</p>
                                 <p class="text-xs text-gray-500">${this.formatDate(movement.fecha)}</p>
                             </div>
                         </div>
@@ -6532,11 +6532,11 @@
                                                     <a href="javascript:void(0)"
                                                        onclick="dashboard.showAccountDetail('${account.id}', {})"
                                                        class="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer">
-                                                        ${account.nombre}
+                                                        ${this._escapeHtml(account.nombre)}
                                                     </a>
                                                     ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h4>
-                                                <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
+                                                <p class="text-sm text-gray-500">${this._escapeHtml(account.descripcion || 'Sin descripción')}</p>
                                                 ${account.is_fixed_cost ? `<p class="text-xs text-red-600">${this.formatCurrency(account.fixed_monthly_amount)}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                         </div>
@@ -6653,7 +6653,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${this._escapeHtml(movement.descripcion)}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6770,7 +6770,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${this._escapeHtml(movement.descripcion)}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -7241,7 +7241,7 @@
                                                     ${this.formatDate(movement.fecha)}
                                                 </td>
                                                 <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    ${movement.descripcion}
+                                                    ${this._escapeHtml(movement.descripcion)}
                                                 </td>
                                                 <td class="px-4 py-4 whitespace-nowrap">
                                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${this.getMovementTypeBadgeClass(movement.tipo)}">
@@ -7252,7 +7252,7 @@
                                                     ${this.formatCurrency(movement.cantidad)}
                                                 </td>
                                                 <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    ${sourceAcc?.nombre || 'N/A'} → ${destAcc?.nombre || 'N/A'}
+                                                    ${this._escapeHtml(sourceAcc?.nombre || 'N/A')} → ${this._escapeHtml(destAcc?.nombre || 'N/A')}
                                                 </td>
                                             </tr>
                                         `;
@@ -7376,10 +7376,10 @@
                                              onclick="dashboard.showAccountDetail('${account.id}', dashboard.getReportFilters())">
                                             <div>
                                                 <h5 class="font-medium text-gray-900 flex items-center">
-                                                    ${account.nombre}
+                                                    ${this._escapeHtml(account.nombre)}
                                                     ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h5>
-                                                <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
+                                                <p class="text-sm text-gray-500">${this._escapeHtml(account.descripcion || 'Sin descripción')}</p>
                                                 ${account.is_fixed_cost ? `<p class="text-xs text-red-600">${this.formatCurrency(account.fixed_monthly_amount)}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                             <div class="text-right">
@@ -7418,8 +7418,8 @@
                                     ${activos.map(asset => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${asset.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${asset.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${asset.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(asset.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(asset.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-green-600">${this.formatCurrency(asset.saldo_calc)}</span>
                                         </div>
                                     `).join('')}
@@ -7436,8 +7436,8 @@
                                     ${pasivos.map(liability => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${liability.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${liability.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${liability.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(liability.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(liability.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-red-600">${this.formatCurrency(Math.abs(liability.saldo_calc))}</span>
                                         </div>
                                     `).join('')}
@@ -7456,8 +7456,8 @@
                                 ${patrimonio.map(equity => `
                                     <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                          onclick="dashboard.showAccountDetail('${equity.id}', dashboard.getReportFilters())"
-                                         title="Ver Libro Mayor de ${equity.nombre}">
-                                        <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${equity.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                         title="Ver Libro Mayor de ${this._escapeHtml(equity.nombre)}">
+                                        <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(equity.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                         <span class="font-medium text-blue-600">${this.formatCurrency(equity.saldo_calc)}</span>
                                     </div>
                                 `).join('')}
@@ -7505,8 +7505,8 @@
                                     ${ingresos.map(income => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${income.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${income.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${income.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(income.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(income.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-green-600">${this.formatCurrency(income.saldo_periodo)}</span>
                                         </div>
                                     `).join('')}
@@ -7523,8 +7523,8 @@
                                     ${gastos.map(expense => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${expense.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${expense.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${expense.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(expense.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(expense.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-red-600">${this.formatCurrency(expense.saldo_periodo)}</span>
                                         </div>
                                     `).join('')}
@@ -7818,7 +7818,7 @@
                     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                         <div class="flex items-center justify-between mb-6">
                             <div>
-                                <h3 class="text-xl font-semibold text-gray-900">Libro Mayor - ${account.nombre}</h3>
+                                <h3 class="text-xl font-semibold text-gray-900">Libro Mayor - ${this._escapeHtml(account.nombre)}</h3>
                                 <p class="text-gray-600">${periodoLabel}</p>
                             </div>
                             <button onclick="dashboard.renderReportContent('libro-mayor')" class="text-blue-600 hover:text-blue-700 text-sm">
@@ -7892,7 +7892,7 @@
                                                     ${new Date(mov.fecha).toLocaleDateString('es-ES')}
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    ${mov.concepto}
+                                                    ${this._escapeHtml(mov.concepto)}
                                                     ${mov.esInicial ? '<span class="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Inicial</span>' : ''}
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${debeColor}">
@@ -8133,7 +8133,7 @@
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta de ingreso...</option>
                                     ${accounts.filter(acc => acc.tipo === 'ingreso').map(acc => 
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                        `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8142,7 +8142,7 @@
                                 <select id="destination-account" name="destination_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta destino...</option>
                                     ${accounts.filter(acc => acc.tipo === 'activo').map(acc => 
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                        `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8156,7 +8156,7 @@
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta origen...</option>
                                     ${accounts.filter(acc => ['activo', 'pasivo', 'patrimonio'].includes(acc.tipo)).map(acc =>
-                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${this._escapeHtml(acc.nombre)} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8165,7 +8165,7 @@
                                 <select id="destination-account" name="destination_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta de gasto...</option>
                                     ${accounts.filter(acc => acc.tipo === 'gasto').map(acc => 
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                        `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8183,7 +8183,7 @@
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required onchange="dashboard._checkTransferDebtDesglose()">
                                     <option value="">Seleccionar cuenta origen...</option>
                                     ${activoPasivoAccounts.map(acc => 
-                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${this._escapeHtml(acc.nombre)} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8192,7 +8192,7 @@
                                 <select id="destination-account" name="destination_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required onchange="dashboard._checkTransferDebtDesglose()">
                                     <option value="">Seleccionar cuenta destino...</option>
                                     ${activoPasivoAccounts.map(acc => 
-                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${this._escapeHtml(acc.nombre)} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8223,7 +8223,7 @@
                                         <select id="cuenta-gasto-intereses" name="cuenta_gasto_intereses" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
                                             <option value="">Seleccionar cuenta de gasto...</option>
                                             ${gastoAccounts.map(acc => 
-                                                `<option value="${acc.id}">${acc.nombre}</option>`
+                                                `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                             ).join('')}
                                         </select>
                                     </div>
@@ -8671,7 +8671,7 @@
                 const sourceAcc = accounts.find(acc => acc.id === movement.cuenta_id);
                 const destAcc = accounts.find(acc => acc.id === movement.cuenta_destino_id);
                 
-                return `${sourceAcc?.nombre || 'Desconocida'} → ${destAcc?.nombre || 'Desconocida'}`;
+                return `${this._escapeHtml(sourceAcc?.nombre || 'Desconocida')} → ${this._escapeHtml(destAcc?.nombre || 'Desconocida')}`;
             }
 
             // ===== PRUEBA PREMIUM =====
@@ -8715,7 +8715,7 @@
                 toast.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-check-circle mr-3"></i>
-                        <span>${message}</span>
+                        <span>${this._escapeHtml(message)}</span>
                     </div>
                 `;
                 
@@ -8739,7 +8739,7 @@
                 toast.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-exclamation-circle mr-3"></i>
-                        <span>${message}</span>
+                        <span>${this._escapeHtml(message)}</span>
                     </div>
                 `;
                 
@@ -8798,7 +8798,7 @@
                 
                 select.innerHTML = '<option value="">Seleccionar cuenta de ingresos...</option>';
                 accounts.forEach(account => {
-                    select.innerHTML += `<option value="${account.id}">${account.nombre}</option>`;
+                    select.innerHTML += `<option value="${account.id}">${this._escapeHtml(account.nombre)}</option>`;
                 });
             }
             
@@ -8935,7 +8935,7 @@
                                     <label class="flex items-center justify-between p-2 hover:bg-blue-50 rounded cursor-pointer border-l-4 border-transparent hover:border-blue-400">
                                         <div class="flex items-center">
                                             <input type="checkbox" value="${account.id}" class="account-checkbox mr-3 text-blue-600" data-category="${category}">
-                                            <span class="text-sm text-gray-900 font-medium">${account.nombre}</span>
+                                            <span class="text-sm text-gray-900 font-medium">${this._escapeHtml(account.nombre)}</span>
                                         </div>
                                         <span class="text-xs text-gray-600 font-semibold">${this.formatCurrency(saldo)}</span>
                                     </label>
@@ -9131,7 +9131,7 @@
                     tbody.innerHTML += `
                         <tr>
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                ${category.name}
+                                ${this._escapeHtml(category.name)}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 ${this.formatCurrency(targetAmount)}
@@ -9348,7 +9348,7 @@
                             <label class="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
                                 <div class="flex items-center">
                                     <input type="checkbox" value="${account.id}" class="mr-3 text-blue-600">
-                                    <span class="text-sm text-gray-900">${account.nombre}</span>
+                                    <span class="text-sm text-gray-900">${this._escapeHtml(account.nombre)}</span>
                                 </div>
                                 <span class="text-xs text-gray-500">${this.formatCurrency(saldo)}</span>
                             </label>
@@ -9428,7 +9428,7 @@
                                     <input 
                                         type="text" 
                                         id="profile-name" 
-                                        value="${userProfile.name}" 
+                                        value="${this._escapeHtml(userProfile.name)}" 
                                         class="w-full rounded-md form-input" 
                                         style="padding: var(--space-3); background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);"
                                         required
@@ -9464,7 +9464,7 @@
                                     <div class="grid grid-cols-2 gap-4">
                                         <div>
                                             <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Email</label>
-                                            <input type="email" value="${this.currentUser.email || ''}" class="w-full rounded-md" style="padding: var(--space-3); background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color);" readonly>
+                                            <input type="email" value="${this._escapeHtml(this.currentUser.email || '')}" class="w-full rounded-md" style="padding: var(--space-3); background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color);" readonly>
                                         </div>
                                         <div>
                                             <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Plan</label>
@@ -9685,7 +9685,7 @@
                 notification.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation-triangle' : 'info'} mr-2"></i>
-                        <span>${message}</span>
+                        <span>${this._escapeHtml(message)}</span>
                     </div>
                 `;
                 
