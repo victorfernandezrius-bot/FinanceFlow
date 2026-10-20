@@ -1391,17 +1391,21 @@ async function getGoCardlessToken(env) {
 async function verifyStripeSignature(payload, sigHeader, secret) {
     if (!sigHeader || !secret) return false;
     try {
-        const parts = Object.fromEntries(sigHeader.split(',').map(kv => kv.split('=')));
-        const signedPayload = `${parts.t}.${payload}`;
+        const items = sigHeader.split(',').map(kv => kv.trim().split('='));
+        const t = (items.find(([k]) => k === 't') || [])[1];
+        // Stripe envía una firma v1 por cada secreto activo (p. ej. al rotar el
+        // secreto del webhook): basta con que coincida una.
+        const v1s = items.filter(([k]) => k === 'v1').map(([, v]) => v || '');
+        const signedPayload = `${t}.${payload}`;
         const enc = new TextEncoder();
         const key = await crypto.subtle.importKey('raw', enc.encode(secret),
             { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
         const sig = await crypto.subtle.sign('HMAC', key, enc.encode(signedPayload));
         const expected = [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
         // B6: comparación en tiempo constante
-        if (!timingSafeEqual(expected, parts.v1 || '')) return false;
+        if (!v1s.some(v1 => timingSafeEqual(expected, v1))) return false;
         // B3: anti-replay — rechazar eventos fuera de una tolerancia de 5 minutos
-        const ts = Number(parts.t);
+        const ts = Number(t);
         if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
         return true;
     } catch { return false; }
