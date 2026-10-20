@@ -1230,6 +1230,10 @@ export default {
             // Token de acceso cacheado en KV (caduca a las 24h)
             if (path.startsWith('/api/banking/')) {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                // Conexión bancaria = función Premium (getPlanLimits: 'bank_connection') y
+                // cada requisición tiene coste en GoCardless: se exige en servidor, con el plan de D1.
+                if (authUser.plan !== 'premium')
+                    return json({ error: 'La conexión bancaria requiere Premium' }, 403, cors);
                 const gcToken = await getGoCardlessToken(env);
 
                 if (path === '/api/banking/institutions' && method === 'POST') {
