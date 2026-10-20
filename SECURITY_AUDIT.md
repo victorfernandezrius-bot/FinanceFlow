@@ -224,16 +224,190 @@ Sin cambios en esta fase, porque ya estaba bien: **punto 10 (hashing)**. Compara
 - **Coste:** cambiar las respuestas de login/Google/passkey para emitir la cookie, `credentials: 'include'` en todas las llamadas (ya está en `authFetch`), un logout que borre la cookie, protección CSRF (SameSite=Lax/Strict + comprobación de `Origin` o token CSRF en las escrituras) y un periodo de convivencia en el que la API acepte cabecera y cookie.
 - **Recomendación:** hacerlo después de unificar el dominio. Mientras tanto, la mitigación es la que ya está aplicada: XSS escapado, CSP en camino de pasar a enforcing, tokens de 7 días, logout y cambio de contraseña que revocan.
 
-_(fase 4: más abajo)_
+### Fase 4 — P2
 
-## 6. Pasos manuales para Víctor
+| Commit | Punto | Cambio | Comprobado |
+|---|---|---|---|
+| `bae102a` | 16 | Importación: solo csv/xls/xlsx/pdf, máx. 10 MB, 2000 movimientos y 50 páginas de PDF; `sheetRows` en SheetJS; `isEvalSupported:false` en pdf.js (CVE-2024-4367) | CSV y PDF normales OK; .exe, >10 MB, >2000 filas y PDF >50 págs. rechazados |
+| `11a316e` | 20 | `package-lock.json` (versiones reproducibles: simplewebauthn/server 13.3.3, web-push 0.3.2, wrangler 3.114.17) | `npm audit --omit=dev`: 0 |
+| `9b38555` | 2, 20 | CI `security.yml`: gitleaks v8.30.1 sobre el historial completo (falla si hay secretos), `npm audit --omit=dev --audit-level=high` y `node --check`. `.gitleaks.toml` exceptúa la `pk_live` publicable | en local: 0 hallazgos y un `sk_live` falso sí se detecta |
+| `737ba5d` | 20 | Dependabot (npm semanal, Actions mensual) | — |
+| `10eb998` | 20 | Chart.js, SheetJS, SimpleWebAuthn, pdf.js y ExcelJS **autoalojados** en `/vendor/` (ficheros exactos de npm, integridad verificada, mismas versiones) + SRI en los 2 CSS de jsDelivr; CSP sin jsDelivr ni cdnjs en `script-src` | sin interceptar nada: todo carga; un CSS manipulado se bloquea |
+| `e1186e5` | — | `audit_log` (**migración 0002**): login, login_failed, password_changed, password_reset, plan_changed y account_deleted; retención de 365 días en el cron; sin la migración no rompe nada | 11 casos, con y sin migración |
 
-_(al final)_
+---
 
-## 7. Checklist de pruebas post-deploy
+## 5 bis. Estado final por punto
 
-_(al final)_
+| # | Punto | Estado inicial | Estado final | Qué se hizo |
+|---|---|---|---|---|
+| 1 | API keys ocultas | OK | OK | Sin cambios, ya estaba bien |
+| 2 | Secretos fuera de Git | OK | OK | Sin cambios en el código. Añadido gitleaks en CI. No hay que rotar nada |
+| 3 | Sin claves privadas en frontend | OK | OK | Sin cambios, ya estaba bien |
+| 4 | Aislamiento / IDOR | PARCIAL | OK | `187ce94`, `136b1d1`, `8a87c60` (pendiente A6, dudoso) |
+| 5 | Cifrado de datos sensibles | OK | OK | Sin cambios (cifrado de aplicación: dudoso) |
+| 6 | Autenticación obligatoria | OK | OK | Sin cambios, ya estaba bien |
+| 7 | Acceso solo del dueño | PARCIAL | OK | Igual que el punto 4 |
+| 8 | Mass assignment | OK | OK | Sin cambios (rechazar campos desconocidos: dudoso) |
+| 9 | Sesiones / tokens | PARCIAL | OK | `d59566d`, `08c22fd`, `4009192` (cookie HttpOnly: evaluada, pendiente de tu aprobación) |
+| 10 | Hashing | OK | OK | Sin cambios; límite de 100.000 iteraciones de PBKDF2 en Workers documentado |
+| 11 | Rate limiting | PARCIAL | OK | `7e77415`, `28b892f` |
+| 12 | Anti-bots | FALTA | OK (falta activarlo) | `8c33a70`, `cb9b039`; se activa con el paso manual 5 |
+| 13 | Queries parametrizadas | OK | OK | Sin cambios, ya estaba bien |
+| 14 | Validación de inputs | FALTA | OK | `f924dce`, `ac3d87a` |
+| 15 | XSS | PARCIAL | OK | `6886ed8`, `71db9cd` |
+| 16 | Subida / importación | PARCIAL | OK | `bae102a` (actualizar SheetJS: dudoso) |
+| 17 | Respuestas y errores | PARCIAL | OK | `09daedf`, `802e57f` |
+| 18 | Security headers | FALTA | OK (CSP en Report-Only) | `81ba0f0`, `5345af2`; pasar la CSP a obligatoria es el paso manual 8 |
+| 19 | HTTPS / HSTS | PARCIAL | OK en código | `81ba0f0`, `5345af2`; dominio propio: paso manual 6 |
+| 20 | Dependencias y CDN | PARCIAL | OK | `11a316e`, `9b38555`, `737ba5d`, `10eb998` (Tailwind CDN, SheetJS, pdf.js y wrangler 4: dudosos) |
+
+Además se corrigieron hallazgos fuera de los 20 puntos: A1 (los suscriptores perdían Premium en la UI), A2 (datos push al borrar la cuenta), A4 (HTML en emails), A5 (contraseña en `sessionStorage`), A10 (banca Premium en servidor) y A11 (SSRF por el endpoint push).
+
+**Hallazgo nuevo durante las pruebas — A16 (fallo preexistente del cliente, no corregido):** `saldo_actual += cantidad` concatena strings cuando `cantidad` llega como texto (`createMovement` hace `...movementData` después de `parseFloat`). Ejemplo, en una cuenta de gasto con saldo inicial 0: un gasto manual de 12,34 € y otro importado de 45,30 € deberían dar **57,64 €**. Hoy en memoria queda `"012.3445.3"`, se guarda como texto en D1 y al recargar se ve **0,00 €**. Con la validación nueva ese texto ya no se guarda (D1 se queda en 12,34 €): sigue siendo incorrecto, pero no entra basura en D1. Ver dudoso n.º 1.
+
+---
+
+## 6. Pasos manuales para Víctor (en este orden)
+
+**Estado ahora mismo.** Los cambios de **frontend** ya están en producción, porque un push a `main` despliega Pages (integración Git), y funcionan con el Worker actual. Los cambios del **Worker no se aplican hasta el paso 3**, incluido el IDOR de banca (Crítico si GoCardless está configurado). Los commits son públicos, así que conviene desplegar pronto.
+
+1. **Actualizar tu copia local**
+   ```
+   cd /d C:\Users\Admin\FinanceFlow
+   git pull origin main
+   npm ci
+   ```
+
+2. **Punto de restauración y migraciones en la D1 de producción (`cp-db`).** Son solo aditivas. El código funciona con o sin ellas, pero sin la 0001 el cambio de contraseña no cierra las demás sesiones, y sin la 0002 no hay registro de auditoría.
+   ```
+   npx wrangler d1 time-travel info cp-db
+   npx wrangler d1 execute cp-db --remote --file=db/migrations/0001_users_token_version.sql
+   npx wrangler d1 execute cp-db --remote --file=db/migrations/0002_audit_log.sql
+   npx wrangler d1 execute cp-db --remote --command "PRAGMA table_info(users)"
+   npx wrangler d1 execute cp-db --remote --command "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
+   ```
+   - En `PRAGMA table_info(users)` debe aparecer `token_version`.
+   - Apunta el *bookmark* que muestra `time-travel info`. Si hiciera falta volver atrás: `npx wrangler d1 time-travel restore cp-db --bookmark=<bookmark>`.
+   - La 0001 no es idempotente: si responde `duplicate column name: token_version`, ya estaba aplicada.
+
+3. **Desplegar el Worker: primero staging, luego producción**
+   ```
+   npx wrangler d1 execute cp-db-staging --remote --env staging --file=db/migrations/0001_users_token_version.sql
+   npx wrangler d1 execute cp-db-staging --remote --env staging --file=db/migrations/0002_audit_log.sql
+   npx wrangler deploy --env staging
+   ```
+   Prueba en `https://financeflow-staging.victor-a97.workers.dev` los puntos 2-8 del checklist. Después:
+   ```
+   npx wrangler deploy
+   npx wrangler tail
+   ```
+   - Deja `wrangler tail` abierto mientras haces el checklist. Si algo falla: `npx wrangler rollback` vuelve a la versión anterior del Worker.
+   - **No ejecutes `npm run deploy:pages`**: apunta al proyecto `cp-app` y sube la carpeta entera (trampas 3 y 4). Pages ya se despliega solo desde `main`.
+
+4. **Webhook de Stripe** (ahora es la ÚNICA vía para activar Premium; el cliente ya no lo activa en local). En el Dashboard de Stripe → Developers → Webhooks, comprueba:
+   - el endpoint es `https://financeflow.victor-a97.workers.dev/api/stripe/webhook`;
+   - tiene los eventos `checkout.session.completed` y `customer.subscription.deleted`;
+   - las entregas recientes devuelven 200.
+
+   Para ver cuántos Premium tenían la UI degradada por A1 (con el frontend nuevo ya ven Premium):
+   ```
+   npx wrangler d1 execute cp-db --remote --command "SELECT COUNT(*) AS premium, SUM(plan_expires_at < datetime('now')) AS fecha_pasada FROM users WHERE plan='premium'"
+   ```
+
+5. **Turnstile (anti-bots). Opcional, y en este orden, o los logins fallarán:**
+   1. Cloudflare Dashboard → Turnstile → *Add widget*. Hostnames: `financeflow-7nd.pages.dev`, `financeflow-staging.victor-a97.workers.dev` y tu dominio propio si lo usas. Modo *Managed*.
+   2. Pon la **Site Key** en `public/config.js` (`window.TURNSTILE_SITE_KEY = '0x…';`), haz commit y push, y comprueba que el widget aparece en login, registro y "¿Olvidaste tu contraseña?".
+   3. Solo entonces, el secreto:
+      ```
+      npx wrangler secret put TURNSTILE_SECRET_KEY
+      npx wrangler secret put TURNSTILE_SECRET_KEY --env staging
+      ```
+   4. Repite login, registro y recuperación. Para desactivarlo: `npx wrangler secret delete TURNSTILE_SECRET_KEY`.
+
+6. **Panel de Cloudflare, solo si sirves la app desde tu dominio** (`contabilidadpersonal.com` en Cloudflare). `*.pages.dev` y `*.workers.dev` ya son solo HTTPS y tienen HSTS precargado.
+   - SSL/TLS → Edge Certificates → **Always Use HTTPS: On**.
+   - **Minimum TLS Version: TLS 1.2**.
+   - **HSTS**: *Enable*, `max-age` 6 meses (luego 12), `includeSubDomains` solo si **todos** los subdominios sirven HTTPS (incluido el WordPress de `www`), y *Preload* desactivado.
+
+7. **GitHub**: Settings → Code security → activa *Dependabot alerts*, *Dependabot security updates* y *Secret scanning + Push protection* (gratis en repos públicos). Comprueba que el workflow **security** sale en verde.
+
+8. **CSP: pasar de Report-Only a obligatoria.** Tras unos días, recorre login, registro, dashboard, pago de Stripe, Google y passkeys con la consola abierta. Si no hay avisos `[Report Only]`, cambia en `_headers` `Content-Security-Policy-Report-Only:` por `Content-Security-Policy:` y haz push.
+
+9. **Rotación de claves: no hace falta** (el historial no tiene secretos). Si algún día sospechas que se ha filtrado `JWT_SECRET`: `npx wrangler secret put JWT_SECRET`. **Cierra la sesión de todos los usuarios**, así que es decisión tuya.
+
+10. **Revertir un cambio concreto:** `git revert <hash>` y `git push` (el frontend se despliega solo). Si el cambio era del Worker, además `npx wrangler deploy`.
+
+---
+
+## 7. Checklist de pruebas post-deploy (producción)
+
+Usa **dos cuentas de prueba** (A y B) que no sean de clientes. Para leer el token en la consola del navegador sin pegarlo en webs externas:
+
+```js
+JSON.parse(atob(localStorage.financeflow_token.split('.')[1]))
+```
+
+1. **API viva y cabeceras**: `https://financeflow.victor-a97.workers.dev/api/health` devuelve `{"ok":true}`. En DevTools → Network ves `X-Content-Type-Options`, `Cache-Control: no-store` y HSTS en la API, y `X-Frame-Options` y CSP-Report-Only en las páginas.
+2. **Registro** de A con email y contraseña: entra al dashboard como **FREE**.
+3. **Login**: cierra sesión y vuelve a entrar. Con 5 contraseñas malas seguidas, el 6.º intento dice "Demasiados intentos fallidos" (se desbloquea en 1 min; desde otra red se puede entrar).
+4. **Google** y **passkey**: entran como siempre.
+5. **Token nuevo**: tras el login, el token tiene `jti` y `exp` a 7 días.
+6. **Logout que revoca**: guarda el token en una variable (`t = localStorage.financeflow_token`), cierra sesión y ejecuta `fetch('https://financeflow.victor-a97.workers.dev/api/accounts',{headers:{Authorization:'Bearer '+t}}).then(r=>r.status)`. Debe dar **401**.
+7. **Cambio de contraseña** (Ajustes → Cambiar contraseña): con la actual mal, error; bien, cierra sesión; la nueva vale. Con la migración 0001, la sesión abierta en otro dispositivo también se cierra.
+8. **Recuperación**: pide el enlace y comprueba que llega el email. **Comprueba que el enlace abre la página de reset**: apunta a `APP_URL` = `app.contabilidadpersonal.com` (trampa 7). Cambia la contraseña y entra.
+9. **Pago sin cobro real.** Crea en Stripe un código promocional del 100 % de un solo uso (el checkout admite códigos) y haz el checkout con A: total 0 €.
+   - El webhook pone a A en **PREMIUM**. Como el pago es 0 €, `verify-session` dice `paid:false`: si no ves Premium al volver, recarga.
+   - En Stripe → Webhooks, la entrega debe salir 200.
+   - Después cancela desde "Gestionar suscripción" (portal): al ejecutarse la cancelación, A vuelve a **FREE**.
+   - Alternativa: pago real del plan mensual con tu tarjeta y reembolso inmediato desde Stripe.
+10. **Webhook sin firma**: `curl -s -o NUL -w "%{http_code}" -X POST https://financeflow.victor-a97.workers.dev/api/stripe/webhook -d "{}"` devuelve **400**.
+11. **Intento de auto-upgrade (debe fallar).** En la consola del dashboard de A (FREE):
+    ```js
+    const t=localStorage.financeflow_token, u=JSON.parse(localStorage.currentUser);
+    fetch(API_URL+'/users/'+u.id,{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+t},body:JSON.stringify({plan:'premium',plan_expires_at:'2099-01-01'})}).then(r=>r.json()).then(console.log)
+    ```
+    La respuesta sigue con `plan:'free'`. Después, en `localStorage`, cambia `currentUser.plan` a `'premium'` y recarga: el dashboard vuelve a **FREE** (el plan viene del servidor).
+12. **IDOR entre A y B**, con el token de A:
+    - `GET /api/users/<id de B>` → 403.
+    - `POST /api/accounts` con el `id` de una cuenta de B y `nombre:'HACK'` → la cuenta de B no cambia.
+    - `DELETE /api/movements/<id de un movimiento de B>` → el movimiento de B sigue ahí.
+    - `GET /api/banking/accounts?requisition_id=00000000-0000-4000-8000-000000000000` → 403 si A es free, 404 si es premium.
+13. **Importación**: importa un extracto real (CSV/XLSX y PDF). Previsualiza, importa, y comprueba que las descripciones se ven como texto. Un archivo de más de 10 MB se rechaza con aviso.
+14. **PWA / push** (cuenta premium con avisos activados): la PWA abre. En la consola: `fetch(API_URL+'/push/test',{method:'POST',headers:{Authorization:'Bearer '+localStorage.financeflow_token}}).then(r=>r.json()).then(console.log)`; debe llegar la notificación.
+15. **Exportación** de informes a Excel/CSV: se descarga (ExcelJS ahora sale de `/vendor/`).
+16. **Borrado de cuenta** de B (Ajustes → Eliminar cuenta): desaparecen sus datos. Si B tenía una suscripción de prueba, cancélala antes (A2).
+17. **Logs**: en `wrangler tail` no hay errores inesperados; un 500 muestra su `requestId`.
+
+---
 
 ## 8. Puntos dudosos (necesitan tu decisión)
 
-_(al final)_
+1. **A16 · Saldos que concatenan texto (cliente).** Arreglo propuesto de 2 líneas, sin tocar nada más:
+   - en `createMovement`, poner `cantidad: parseFloat(cantidad)` **después** de `...movementData`;
+   - en `updateAccountBalances` y `recalcAllBalances`, usar `Number(cantidad)`.
+
+   Impacto: con el ejemplo anterior la cuenta mostraría 57,64 € en lugar de 0,00 €. Los saldos ya corrompidos se corrigen con `recalcAllBalances()`. ¿Lo aplico?
+2. **A2 · Borrar la cuenta no cancela la suscripción de Stripe** (se sigue cobrando). ¿Cancelar por API al borrar? ¿Inmediatamente o a fin de periodo? ¿Con reembolso?
+3. **A1 · `plan_expires_at` no se renueva.** Ya no afecta, porque el cliente usa el plan de D1. ¿Mantenerlo al día con `invoice.paid`? Requiere activar ese evento en el webhook.
+4. **A8 · Idempotencia del webhook:** el evento se marca como procesado antes de procesarlo. Si el `UPDATE` falla, el reintento de Stripe se descarta y ese pago se queda sin Premium. Propuesta: marcarlo solo al terminar.
+5. **A9 · `checkout.session.completed` no mira `payment_status`** (afecta a SEPA y otros pagos asíncronos). ¿Esperar a `checkout.session.async_payment_succeeded`?
+6. **A3 · Pre-account takeover:** al entrar con Google se vincula una cuenta con contraseña creada por otro con ese email (el alta no verifica el email). Opciones: verificar el email en el alta, o invalidar la contraseña previa al vincular Google (cambia el UX).
+7. **A6 · IDs fijos de las reglas por defecto** (`rule_salary`…): chocan entre usuarios en la PK, y `/rules/bulk` borra antes de insertar, sin transacción. Propuesta: IDs únicos por usuario y `batch` transaccional.
+8. **A10 · Límites del plan free solo en cliente** (número de cuentas, reglas, autocontrol, importación). ¿Aplicarlos en servidor? Riesgo: usuarios que hoy ya superan los límites.
+9. **Punto 8 · Rechazar campos desconocidos con 400:** obliga a cambiar el cliente para que envíe solo los campos necesarios. Hoy se ignoran.
+10. **A7 · Pages publica la raíz del repo:** configurar un directorio de salida que contenga solo lo público.
+11. **A12 · Unificar dominio** (CORS, `APP_URL` y enlaces de los emails y de Stripe). Es requisito previo de la cookie HttpOnly.
+12. **Cookie HttpOnly + CSRF** (sección 5): después de unificar el dominio.
+13. **Punto 5 · Cifrado a nivel de aplicación** de los movimientos: no lo recomiendo (la clave estaría en la misma cuenta de Cloudflare).
+14. **SheetJS 0.18.5** (CVE-2023-30533, CVE-2024-22363): actualizar a 0.20.3 de `cdn.sheetjs.com`, probando antes importación y exportación.
+15. **pdf.js 3.11.174 → 4.x** (ESM, cambia la API) y **wrangler 3 → 4** (avisos solo de desarrollo; cambio mayor).
+16. **Tailwind Play CDN en producción:** ni SRI ni versión fija. Pasar a CSS compilado requiere un *build step* (CLAUDE.md pide consultarlo).
+17. **Login: tope global de 50 fallos/h por email.** Un atacante con muchas IPs podría bloquear durante 1 h el login con contraseña de una cuenta concreta. ¿Subirlo, bajarlo o quitarlo?
+18. **KV del plan Free de Workers** (1.000 escrituras/día): el rate limit y la revocación usan KV. Si estás en el plan Free y crece el tráfico, conviene pasar a Workers Paid.
+19. **A13 · `users.currency` no está en `schema.sql`**: añadirla, y que `schema.sql` refleje producción.
+20. **Fallos funcionales vistos, que no son de seguridad:**
+    - `setupSettingsEvents` lanza `ReferenceError` (A14);
+    - en `register.html`, el callback de Google usa `registerPage`, que no está definido en ese ámbito, así que tras registrarse con Google no redirige;
+    - `validatePassword` falla cuando FlowIcons cambia los `<i>` por SVG;
+    - el alta Premium directa desde `register.html` no funciona, porque create-checkout exige sesión.
