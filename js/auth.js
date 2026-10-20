@@ -327,8 +327,11 @@ class AuthSystem {
             if (storedSession.currentUser && this.token) {
                 this.currentUser = storedSession.currentUser;
                 
-                // Verificar expiración de plan premium
-                if (this.currentUser.plan === 'premium' && this.currentUser.plan_expires_at) {
+                // Verificar expiración de plan premium. Solo en modo local: en remoto el plan
+                // lo decide el servidor (el webhook de Stripe pasa a 'free' al cancelarse la
+                // suscripción) y plan_expires_at no se actualiza con las renovaciones, así
+                // que degradar aquí quitaba Premium a suscriptores al corriente de pago.
+                if (!this.isRemote && this.currentUser.plan === 'premium' && this.currentUser.plan_expires_at) {
                     const expiry = new Date(this.currentUser.plan_expires_at);
                     if (expiry < new Date()) {
                         // Plan expirado, downgrade a FREE
