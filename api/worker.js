@@ -27,10 +27,20 @@ import {
     verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 
+// Cabeceras de seguridad de todas las respuestas JSON de la API. no-store: son
+// datos personales y financieros, que no deben quedarse en cachés intermedias.
+const API_SECURITY_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer'
+};
+
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
         status,
-        headers: { 'Content-Type': 'application/json', ...extraHeaders }
+        headers: { 'Content-Type': 'application/json', ...API_SECURITY_HEADERS, ...extraHeaders }
     });
 
 function corsHeaders(request, env) {
