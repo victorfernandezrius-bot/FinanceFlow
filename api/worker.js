@@ -398,6 +398,10 @@ export default {
 
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
+                // Máx. 10 altas por IP y hora (anti creación masiva de cuentas y de emails)
+                const regIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:register:${regIp}`, 10, 3600))
+                    return json({ error: 'Demasiados registros desde esta conexión. Inténtalo más tarde.' }, 429, cors);
                 const { email, password, name } = await request.json();
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
@@ -450,6 +454,10 @@ export default {
             // Flujo "usernameless"/discoverable: sin allowCredentials, el dispositivo
             // elige entre las passkeys guardadas. El reto se cachea por un id temporal.
             if (path === '/api/auth/webauthn/login-options' && method === 'POST') {
+                // Cada llamada escribe un reto en KV: máx. 30 por IP cada 15 min
+                const optIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:wa-opt:${optIp}`, 30, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { rpID } = webauthnConfig(env);
                 const options = await generateAuthenticationOptions({
                     rpID,
@@ -517,6 +525,10 @@ export default {
             }
 
             if (path === '/api/auth/google' && method === 'POST') {
+                // Cada llamada consulta a Google: máx. 20 por IP cada 15 min
+                const gIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:google:${gIp}`, 20, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { credential } = await request.json();
                 if (!credential) return json({ error: 'Falta credential' }, 400, cors);
 
@@ -623,6 +635,10 @@ export default {
         return json({ success: true }, 200, cors);
       }
       if (path === "/api/auth/reset-password" && method === "POST") {
+        // Máx. 10 intentos por IP cada 15 min (el token es aleatorio de 122 bits; esto evita abuso)
+        const rpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (await rateLimited(env, `rl:reset-pw:${rpIp}`, 10, 900))
+          return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
         const rp = await request.json();
         if (!rp.token || !rp.password || rp.password.length < 8)
           return json({ error: "Datos inválidos (contraseña mínima 8 caracteres)" }, 400, cors);
@@ -1130,6 +1146,9 @@ export default {
             // ---------- STRIPE ----------
             if (path === '/api/stripe/create-checkout' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                // Cada llamada crea una Checkout Session en Stripe: máx. 10 por usuario cada 15 min
+                if (await rateLimited(env, `rl:checkout:${uid}`, 10, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const body = await request.json();
                 // Aceptar tanto plan_type como planType; normalizar 'annual'/'yearly'
                 const planRaw = body.plan_type || body.planType || 'monthly';
@@ -1229,6 +1248,8 @@ export default {
 
             if (path === '/api/stripe/verify-session' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `rl:verify:${uid}`, 20, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { session_id } = await request.json();
                 // Solo IDs de Checkout Session: el valor va en la URL de la API de Stripe
                 // con la clave secreta, así que no puede apuntar a otro recurso.
@@ -1255,6 +1276,9 @@ export default {
                 // cada requisición tiene coste en GoCardless: se exige en servidor, con el plan de D1.
                 if (authUser.plan !== 'premium')
                     return json({ error: 'La conexión bancaria requiere Premium' }, 403, cors);
+                // Cada llamada usa la cuenta de GoCardless de la app: máx. 60 por usuario y hora
+                if (await rateLimited(env, `rl:banking:${uid}`, 60, 3600))
+                    return json({ error: 'Demasiadas peticiones bancarias. Inténtalo más tarde.' }, 429, cors);
                 const gcToken = await getGoCardlessToken(env);
 
                 if (path === '/api/banking/institutions' && method === 'POST') {
