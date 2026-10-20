@@ -138,6 +138,25 @@ function webauthnConfig(env) {
     return { rpName: 'FinanceFlow', rpID, expectedOrigin: (env.APP_URL || '').replace(/\/$/, '') };
 }
 
+// ---------- Respuestas con columnas explícitas ----------
+// Nunca SELECT * hacia el cliente: así una columna nueva (o interna) no se expone
+// por accidente. Las listas son las columnas que escribe este Worker.
+const PUBLIC_USER_FIELDS = ['id', 'email', 'name', 'picture', 'auth_provider', 'plan', 'plan_expires_at',
+    'currency', 'created_at', 'updated_at'];
+function publicUser(u) {
+    const out = {};
+    for (const k of PUBLIC_USER_FIELDS) if (u && u[k] !== undefined) out[k] = u[k];
+    return out;
+}
+const ACCOUNT_COLUMNS = 'id, user_id, nombre, tipo, descripcion, saldo_inicial, saldo_actual, is_fixed_cost, ' +
+    'fixed_monthly_amount, fixed_due_day, is_bank_account, auto_created_by_rule, created_at, updated_at';
+const MOVEMENT_COLUMNS = 'id, user_id, tipo, cantidad, descripcion, fecha, cuenta_id, cuenta_destino_id, categoria, ' +
+    'origen, auto_categorized, applied_rule, rule_name, manually_categorized, bank_reference, created_at, updated_at';
+const NOTIFICATION_COLUMNS = 'id, user_id, type, title, message, data, read, created_at';
+const BANK_CONNECTION_COLUMNS = 'id, user_id, bank_code, bank_name, institution_id, requisition_id, ' +
+    'gocardless_account_id, linked_account_id, status, is_active, last_sync_at, created_at';
+const IMPORT_INFO_COLUMNS = 'user_id, bank_code, last_import_at, last_import_count, total_imported';
+
 async function getAuthUser(request, env) {
     const auth = request.headers.get('Authorization') || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -575,8 +594,7 @@ export default {
                 await loginSucceeded(env, loginEmail, loginIp, lock);
 
                 const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
-                return json({ success: true, token, currentUser: user }, 200, cors);
+                return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
 
             // ---------- WebAuthn: LOGIN (sin sesión previa) ----------
@@ -651,8 +669,7 @@ export default {
 
                 // Mismo JWT y mismo shape de respuesta que /api/auth/login
                 const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
-                return json({ success: true, token, currentUser: user }, 200, cors);
+                return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
 
             if (path === '/api/auth/google' && method === 'POST') {
@@ -728,15 +745,13 @@ export default {
                 }
 
                 const gToken = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
-                return json({ success: true, token: gToken, currentUser: user }, isNew ? 201 : 200, cors);
+                return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
             }
 
             if (path === '/api/auth/session' && method === 'GET') {
                 const user = await getAuthUser(request, env);
                 if (!user) return json({ token: null, currentUser: null }, 200, cors);
-                delete user.password_hash;
-                return json({ token: 'valid', currentUser: user }, 200, cors);
+                return json({ token: 'valid', currentUser: publicUser(user) }, 200, cors);
             }
 
             if (path === '/api/auth/logout' && method === 'POST') {
@@ -884,14 +899,13 @@ export default {
             if (path === '/api/users' && method === 'GET') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
                 // Solo devuelve el propio usuario (privacidad)
-                delete authUser.password_hash;
-                return json([authUser], 200, cors);
+                return json([publicUser(authUser)], 200, cors);
             }
 
             const userMatch = path.match(/^\/api\/users\/(.+)$/);
             if (userMatch) {
                 if (!authUser || authUser.id !== userMatch[1]) return json({ error: 'No autorizado' }, 403, cors);
-                if (method === 'GET') {  delete authUser.password_hash; return json(authUser, 200, cors); }
+                if (method === 'GET') return json(publicUser(authUser), 200, cors);
                 if (method === 'PUT') {
                     const u = await request.json();
                     if (!V.obj(u) || !V.optStr(u.name, 100)) return invalid('name (máx. 100 caracteres)', cors);
@@ -911,8 +925,7 @@ export default {
                     await env.DB.prepare(
                         `UPDATE users SET name=?, currency=?, updated_at=? WHERE id=?`)
                         .bind(newName, newCurrency, now, authUser.id).run();
-                    delete authUser.password_hash;
-                    return json({ ...authUser, name: newName, currency: newCurrency, updated_at: now }, 200, cors);
+                    return json(publicUser({ ...authUser, name: newName, currency: newCurrency, updated_at: now }), 200, cors);
                 }
                if (method === "DELETE") {
           const delId = authUser.id;
@@ -939,7 +952,7 @@ export default {
             if (path === '/api/accounts') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM accounts WHERE user_id=?').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE user_id=?`).bind(uid).all();
                     return json(results, 200, cors);
                 }
                 if (method === 'POST') {
@@ -977,7 +990,7 @@ export default {
             if (path === '/api/movements') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM movements WHERE user_id=?').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${MOVEMENT_COLUMNS} FROM movements WHERE user_id=?`).bind(uid).all();
                     return json(results, 200, cors);
                 }
                 if (method === 'POST') {
@@ -1144,7 +1157,7 @@ export default {
             if (path === '/api/notifications') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${NOTIFICATION_COLUMNS} FROM notifications WHERE user_id=? ORDER BY created_at DESC`).bind(uid).all();
                     return json(results.map(n => ({ ...n, read: !!n.read, data: n.data ? JSON.parse(n.data) : {} })), 200, cors);
                 }
                 if (method === 'POST') {
@@ -1259,7 +1272,7 @@ export default {
             if (path === '/api/bank-connections') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM bank_connections WHERE user_id=?').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${BANK_CONNECTION_COLUMNS} FROM bank_connections WHERE user_id=?`).bind(uid).all();
                     return json(results, 200, cors);
                 }
                 if (method === 'POST') {
@@ -1297,7 +1310,7 @@ export default {
                 if (method === 'GET') {
                     const bankCode = url.searchParams.get('bankCode');
                     if (!V.str(bankCode, 50)) return invalid('bankCode', cors);
-                    const row = await env.DB.prepare('SELECT * FROM import_info WHERE user_id=? AND bank_code=?').bind(uid, bankCode).first();
+                    const row = await env.DB.prepare(`SELECT ${IMPORT_INFO_COLUMNS} FROM import_info WHERE user_id=? AND bank_code=?`).bind(uid, bankCode).first();
                     return json(row || null, 200, cors);
                 }
                 if (method === 'POST') {
