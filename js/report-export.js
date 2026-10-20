@@ -3,7 +3,7 @@
 // (con los mismos cálculos que la pantalla) y solo le da forma de archivo:
 // aquí no se calcula ningún saldo.
 
-export const EXCELJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+export const EXCELJS_URL = '/vendor/exceljs-4.4.0/exceljs.min.js';   // autoalojado (ver vendor/README.md)
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const C = {

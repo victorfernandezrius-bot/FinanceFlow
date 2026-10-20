@@ -18,9 +18,9 @@
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- flag-icons: banderas SVG (se ven bien en todos los SO, incluido Windows) para el selector de divisa -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css" integrity="sha384-8olrmTcwXL3OYMeB+2ok8jx9/U/FZxeLnoRWdu1Pyi+lakrkqoI7hfysfQF5Q1Xx" crossorigin="anonymous">
     <!-- SimpleWebAuthn (browser) para activar el login biométrico Face ID / Touch ID -->
-    <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13/dist/bundle/index.umd.min.js"></script>
+    <script src="./vendor/simplewebauthn-browser-13.3.0/index.umd.min.js"></script>
     <style>
         /* Dropdown custom de divisa (Mi Perfil). Respeta variables CSS y dark mode. */
         .currency-select { position: relative; }
@@ -36,8 +36,8 @@
         .currency-option-name { color: var(--text-secondary); margin-left: auto; font-size: 0.82rem; }
         .currency-flag.fi { width: 1.33em; height: 1em; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); flex-shrink: 0; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="./vendor/chart.js-4.5.1/chart.umd.min.js"></script>
+    <script src="./vendor/xlsx-0.18.5/xlsx.full.min.js"></script>
     <script src="https://js.stripe.com/v3/"></script>
     <script src="./public/config.js"></script>
     <script src="./js/stripe-checkout.js"></script>
@@ -3400,11 +3400,11 @@
                 if (this._pdfjsPromise) return this._pdfjsPromise;
                 this._pdfjsPromise = new Promise((resolve, reject) => {
                     const script = document.createElement('script');
-                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                    script.src = '/vendor/pdfjs-dist-3.11.174/pdf.min.js';
                     script.onload = () => {
                         try {
                             window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-                                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                                '/vendor/pdfjs-dist-3.11.174/pdf.worker.min.js';
                             resolve(window.pdfjsLib);
                         } catch (e) { reject(e); }
                     };
