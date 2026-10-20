@@ -168,8 +168,8 @@ const SESSION_TTL = 7 * 86400;
 const SESSION_REFRESH_AFTER = 86400;
 async function issueToken(env, user, minExp = 0) {
     const now = Math.floor(Date.now() / 1000);
-    return signJWT({ sub: user.id, iat: now, jti: crypto.randomUUID(), exp: Math.max(now + SESSION_TTL, minExp) },
-        env.JWT_SECRET);
+    return signJWT({ sub: user.id, iat: now, jti: crypto.randomUUID(), tv: Number(user.token_version) || 0,
+        exp: Math.max(now + SESSION_TTL, minExp) }, env.JWT_SECRET);
 }
 const needsRefresh = (payload) =>
     !payload.jti || !payload.iat || Date.now() / 1000 - payload.iat > SESSION_REFRESH_AFTER;
@@ -199,7 +199,22 @@ async function authenticate(request, env) {
     if (!payload) return null;
     if (await isRevoked(env, payload, token)) return null;
     const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
-    return user ? { user, payload, token } : null;
+    if (!user) return null;
+    // Cambio/restablecimiento de contraseña: los tokens con tv anterior ya no valen.
+    // Sin la columna (migración 0001 sin aplicar) no se comprueba.
+    if (typeof user.token_version === 'number' && (Number(payload.tv) || 0) < user.token_version) return null;
+    return { user, payload, token };
+}
+
+// Invalida todas las sesiones del usuario (incrementa token_version). Si la migración
+// 0001 no está aplicada, no hace nada (solo lo registra) para no romper el cambio de clave.
+async function bumpTokenVersion(env, userId) {
+    try {
+        await env.DB.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id=?')
+            .bind(userId).run();
+    } catch (e) {
+        console.error('bumpTokenVersion (¿migración 0001 aplicada?):', e && e.message);
+    }
 }
 
 async function getAuthUser(request, env) {
@@ -843,6 +858,7 @@ export default {
         const rpHash = await hashPassword(rp.password);
         await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
           .bind(rpHash, new Date().toISOString(), rpUserId).run();
+        await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
         await env.CACHE.delete("reset:" + rp.token);
         return json({ success: true }, 200, cors);
       }
@@ -871,6 +887,7 @@ export default {
                 const newHash = await hashPassword(newPassword);
                 await env.DB.prepare('UPDATE users SET password_hash=?, updated_at=? WHERE id=?')
                     .bind(newHash, new Date().toISOString(), authUser.id).run();
+                await bumpTokenVersion(env, authUser.id);   // cierra las sesiones abiertas
                 return json({ success: true }, 200, cors);
             }
 

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
     feedback_requested_at TEXT DEFAULT NULL,
+    token_version INTEGER NOT NULL DEFAULT 0,  -- migración 0001 en BD existentes
     created_at TEXT NOT NULL,
     updated_at TEXT
 );
