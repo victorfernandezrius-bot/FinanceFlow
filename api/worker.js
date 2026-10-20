@@ -280,6 +280,22 @@ const validRule = (r) => V.obj(r) && V.id(r.id) && V.str(r.name, 120) &&
     (isNil(r.accountType) || ACCOUNT_TYPES.includes(r.accountType)) &&
     V.optId(r.accountId) && V.optStr(r.accountName, 120) && V.optDate(r.createdAt);
 
+// ---------- Registro de auditoría (eventos sensibles) ----------
+// Tabla audit_log (migración 0002). Nunca bloquea ni rompe la petición: si la tabla
+// no existe o falla la escritura, solo queda en el log del Worker.
+async function audit(env, request, event, userId, detail) {
+    try {
+        await env.DB.prepare(
+            'INSERT INTO audit_log (id, user_id, event, ip, user_agent, detail, created_at) VALUES (?,?,?,?,?,?,?)')
+            .bind(crypto.randomUUID(), userId || null, event,
+                request ? (request.headers.get('CF-Connecting-IP') || null) : null,
+                request ? ((request.headers.get('User-Agent') || '').slice(0, 200) || null) : null,
+                detail ? JSON.stringify(detail).slice(0, 1000) : null, new Date().toISOString()).run();
+    } catch (e) {
+        console.error('audit (¿migración 0002 aplicada?):', event, e && e.message);
+    }
+}
+
 // ---------- Cloudflare Turnstile (anti-bots) ----------
 // Solo se exige si existe el secreto TURNSTILE_SECRET_KEY (wrangler secret put):
 // sin él no cambia nada, para poder desplegar antes de crear el widget.
@@ -645,9 +661,11 @@ export default {
                     .bind(loginEmail).first();
                 if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
                     await loginFailed(env, loginEmail, loginIp, lock);
+                    if (user) ctx.waitUntil(audit(env, request, 'login_failed', user.id, { method: 'password' }));
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
                 }
                 await loginSucceeded(env, loginEmail, loginIp, lock);
+                ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'password' }));
 
                 const token = await issueToken(env, user);
                 return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
@@ -724,6 +742,7 @@ export default {
                 if (!user) return json({ error: 'Usuario no encontrado' }, 404, cors);
 
                 // Mismo JWT y mismo shape de respuesta que /api/auth/login
+                ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'passkey' }));
                 const token = await issueToken(env, user);
                 return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
@@ -800,6 +819,7 @@ export default {
                     }
                 }
 
+                ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
                 const gToken = await issueToken(env, user);
                 return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
             }
@@ -859,6 +879,7 @@ export default {
         await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
           .bind(rpHash, new Date().toISOString(), rpUserId).run();
         await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
+        ctx.waitUntil(audit(env, request, 'password_reset', rpUserId));
         await env.CACHE.delete("reset:" + rp.token);
         return json({ success: true }, 200, cors);
       }
@@ -888,6 +909,7 @@ export default {
                 await env.DB.prepare('UPDATE users SET password_hash=?, updated_at=? WHERE id=?')
                     .bind(newHash, new Date().toISOString(), authUser.id).run();
                 await bumpTokenVersion(env, authUser.id);   // cierra las sesiones abiertas
+                ctx.waitUntil(audit(env, request, 'password_changed', authUser.id));
                 return json({ success: true }, 200, cors);
             }
 
@@ -1010,6 +1032,11 @@ export default {
             env.DB.prepare("DELETE FROM push_log WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM users WHERE id=?").bind(delId)
           ]);
+          // Auditoría: se borra el historial del usuario y queda solo el evento de borrado
+          // (sin IP ni user-agent). Fuera del batch para no depender de la migración 0002.
+          try { await env.DB.prepare("DELETE FROM audit_log WHERE user_id=?").bind(delId).run(); }
+          catch (e) { console.error('audit_log (borrado):', e && e.message); }
+          await audit(env, null, 'account_deleted', delId);
           return json({ success: true }, 200, cors);
         }
       }
@@ -1484,6 +1511,7 @@ export default {
                         await env.DB.prepare(
                             `UPDATE users SET plan='premium', plan_expires_at=?, stripe_customer_id=?, stripe_subscription_id=?, updated_at=? WHERE id=?`)
                             .bind(exp, s.customer || null, s.subscription || null, new Date().toISOString(), userId).run();
+                        ctx.waitUntil(audit(env, null, 'plan_changed', userId, { plan: 'premium', planType, stripe_event: event.id }));
                         const u = await env.DB.prepare('SELECT email, name FROM users WHERE id=?').bind(userId).first();
                         if (u && u.email) {
                             ctx.waitUntil(sendEmail(env, {
@@ -1497,9 +1525,11 @@ export default {
 
                 if (event.type === 'customer.subscription.deleted') {
                     const sub = event.data.object;
+                    const subUser = await env.DB.prepare('SELECT id FROM users WHERE stripe_subscription_id=?').bind(sub.id).first();
                     await env.DB.prepare(
                         `UPDATE users SET plan='free', plan_expires_at=NULL WHERE stripe_subscription_id=?`)
                         .bind(sub.id).run();
+                    if (subUser) ctx.waitUntil(audit(env, null, 'plan_changed', subUser.id, { plan: 'free', stripe_event: event.id }));
                 }
                 return json({ received: true }, 200, cors);
             }
@@ -1667,6 +1697,14 @@ export default {
             } catch (e) {
                 console.error('Cron push, usuario', user.id, ':', e);
             }
+        }
+
+        // ── Retención del registro de auditoría: 365 días ──
+        try {
+            await env.DB.prepare('DELETE FROM audit_log WHERE created_at < ?')
+                .bind(new Date(Date.now() - 365 * 86400000).toISOString()).run();
+        } catch (e) {
+            console.error('Cron audit_log (¿migración 0002 aplicada?):', e && e.message);
         }
 
         // ── Solicitud de valoración al mes de registro (email, una sola vez) ──
