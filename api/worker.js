@@ -52,7 +52,9 @@ function corsHeaders(request, env) {
         'Access-Control-Allow-Origin': allowOrigin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Credentials': 'true'
+        'Access-Control-Allow-Credentials': 'true',
+        // El cliente necesita leer el token renovado (ver issueToken / authenticate)
+        'Access-Control-Expose-Headers': 'X-Refresh-Token'
     };
 }
 
@@ -157,13 +159,35 @@ const BANK_CONNECTION_COLUMNS = 'id, user_id, bank_code, bank_name, institution_
     'gocardless_account_id, linked_account_id, status, is_active, last_sync_at, created_at';
 const IMPORT_INFO_COLUMNS = 'user_id, bank_code, last_import_at, last_import_count, total_imported';
 
-async function getAuthUser(request, env) {
+// ---------- Sesiones ----------
+// JWT HS256 con jti, iat y caducidad de 7 días que se renueva sola mientras se usa:
+// si el token tiene más de un día, la respuesta lleva uno nuevo en X-Refresh-Token y
+// authFetch (data-client.js) lo guarda. Los tokens antiguos (30 días, sin jti) siguen
+// valiendo hasta su caducidad y la renovación nunca acorta la vida de un token.
+const SESSION_TTL = 7 * 86400;
+const SESSION_REFRESH_AFTER = 86400;
+async function issueToken(env, user, minExp = 0) {
+    const now = Math.floor(Date.now() / 1000);
+    return signJWT({ sub: user.id, iat: now, jti: crypto.randomUUID(), exp: Math.max(now + SESSION_TTL, minExp) },
+        env.JWT_SECRET);
+}
+const needsRefresh = (payload) =>
+    !payload.jti || !payload.iat || Date.now() / 1000 - payload.iat > SESSION_REFRESH_AFTER;
+
+// Devuelve { user, payload, token } si el Bearer token es válido, o null.
+async function authenticate(request, env) {
     const auth = request.headers.get('Authorization') || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     if (!token) return null;
     const payload = await verifyJWT(token, env.JWT_SECRET);
     if (!payload) return null;
-    return env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
+    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
+    return user ? { user, payload, token } : null;
+}
+
+async function getAuthUser(request, env) {
+    const auth = await authenticate(request, env);
+    return auth ? auth.user : null;
 }
 
 // Rate limit sencillo con KV (env.CACHE). Devuelve true si se SUPERA el límite.
@@ -561,7 +585,7 @@ export default {
                      VALUES (?,?,?,?,?,?,?)`)
                     .bind(id, email.toLowerCase(), name, pwHash, plan, planExp, now).run();
 
-                const token = await signJWT({ sub: id, exp: Math.floor(Date.now() / 1e3) + 30 * 86400 }, env.JWT_SECRET);
+                const token = await issueToken(env, { id });
         const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, currency: 'EUR', created_at: now };
         // Enviar email de bienvenida (sin bloquear la respuesta)
         ctx.waitUntil(sendEmail(env, {
@@ -593,7 +617,7 @@ export default {
                 }
                 await loginSucceeded(env, loginEmail, loginIp, lock);
 
-                const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
+                const token = await issueToken(env, user);
                 return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
 
@@ -668,7 +692,7 @@ export default {
                 if (!user) return json({ error: 'Usuario no encontrado' }, 404, cors);
 
                 // Mismo JWT y mismo shape de respuesta que /api/auth/login
-                const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
+                const token = await issueToken(env, user);
                 return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
 
@@ -744,7 +768,7 @@ export default {
                     }
                 }
 
-                const gToken = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
+                const gToken = await issueToken(env, user);
                 return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
             }
 
@@ -803,8 +827,13 @@ export default {
         return json({ success: true }, 200, cors);
       }
             // A partir de aquí, todo requiere autenticación
-            const authUser = await getAuthUser(request, env);
+            const auth = await authenticate(request, env);
+            const authUser = auth ? auth.user : null;
             const uid = authUser?.id;
+            // Renovación deslizante de la sesión (ver issueToken): todas las respuestas
+            // de esta petición llevan el token nuevo.
+            if (auth && needsRefresh(auth.payload))
+                cors['X-Refresh-Token'] = await issueToken(env, authUser, auth.payload.exp);
 
             // ---------- CAMBIO DE CONTRASEÑA (requiere sesión y la contraseña actual) ----------
             if (path === '/api/auth/change-password' && method === 'POST') {

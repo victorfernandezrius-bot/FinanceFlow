@@ -51,7 +51,12 @@ async function authFetch(url, options = {}) {
         if (token) _authToken = token;
     }
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    return fetch(url, { ...options, headers, credentials: 'include' });
+    const r = await fetch(url, { ...options, headers, credentials: 'include' });
+    // Renovación de sesión: el Worker envía un token nuevo cuando el actual tiene más
+    // de un día. Solo se guarda si sigue habiendo sesión (no tras un logout en curso).
+    const refreshed = r.headers.get('X-Refresh-Token');
+    if (refreshed && _authToken) setAuthToken(refreshed);
+    return r;
 }
 
 const DataClient = {
