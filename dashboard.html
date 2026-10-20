@@ -2382,10 +2382,28 @@
                 this.showSection(this.currentSection);
             }
 
+            // El plan lo decide el servidor (D1, que actualiza el webhook de Stripe): en cada
+            // carga se refresca el usuario en vez de fiarse de la copia de localStorage, que
+            // no ve renovaciones, cancelaciones ni pagos confirmados después del login.
+            async refreshCurrentUserFromServer() {
+                if (window.DATA_MODE !== 'remote' || !this.currentUser?.id) return;
+                try {
+                    const fresh = await DataClient.getUser(this.currentUser.id);
+                    if (!fresh || fresh.id !== this.currentUser.id) return;
+                    this.currentUser = fresh;
+                    if (Auth) Auth.currentUser = fresh;
+                    DataClient.saveSession({ currentUser: fresh });
+                } catch (e) {
+                    console.error('refreshCurrentUserFromServer:', e);
+                }
+            }
+
             async init() {
                 // En este punto sabemos que hay un usuario válido
                 this.setupEventListeners();
                 this.setupSidebar();
+
+                await this.refreshCurrentUserFromServer();
 
                 // CRÍTICO: cargar los datos ANTES de los renders
                 try {
