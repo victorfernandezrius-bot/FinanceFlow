@@ -9730,9 +9730,21 @@
                             </div>
                             
                             <hr style="border-color: var(--border-color);">
-                            
-                            <button 
-                                id="delete-account-btn" 
+
+                            <button
+                                id="change-password-btn"
+                                class="w-full text-left rounded-md transition-colors duration-200"
+                                style="padding: var(--space-3); color: var(--text-primary); border: 1px solid var(--border-color);"
+                                onmouseover="this.style.backgroundColor='var(--bg-secondary)'"
+                                onmouseout="this.style.backgroundColor='transparent'"
+                            >
+                                <i class="fas fa-key mr-2" style="color: var(--brand-primary);"></i>
+                                <span class="font-medium">Cambiar contraseña</span>
+                                <p class="small-text mt-1" style="color: var(--text-secondary);">Necesitarás tu contraseña actual</p>
+                            </button>
+
+                            <button
+                                id="delete-account-btn"
                                 class="w-full text-left rounded-md transition-colors duration-200" 
                                 style="padding: var(--space-3); color: #dc2626; border: 1px solid #f3c2c2;"
                                 onmouseover="this.style.backgroundColor='rgba(220,38,38,0.06)'" 
@@ -9769,6 +9781,10 @@
                 }
                 
                 // Botón cambiar contraseña
+                const changePasswordBtn = document.getElementById('change-password-btn');
+                if (changePasswordBtn) {
+                    changePasswordBtn.addEventListener('click', () => this.showChangePasswordModal());
+                }
                // Botón eliminar cuenta
                const deleteAccountBtn = document.getElementById('delete-account-btn');
                 if (deleteAccountBtn) {
@@ -9982,7 +9998,7 @@
                 });
             }
             
-            processPasswordChange() {
+            async processPasswordChange() {
                 try {
                     const currentPassword = document.getElementById('current-password').value;
                     const newPassword = document.getElementById('new-password').value;
@@ -10009,27 +10025,26 @@
                         return;
                     }
                     
-                    // Simulación de cambio de contraseña (en la vida real esto sería una llamada a API)
-                    // Por ahora solo simulamos el proceso
-                    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-                    
-                    // En un sistema real verificarías currentPassword contra la base de datos
-                    // Aquí simulamos que es correcta para propósitos de demo
-                    
-                    // Guardar nueva contraseña (en la realidad esto iría a la base de datos)
-                    user.password = btoa(newPassword); // Encoding básico solo para demo
-                    user.passwordLastChanged = new Date().toISOString();
-                    localStorage.setItem('currentUser', JSON.stringify(user));
-                    
+                    // El servidor verifica la contraseña actual y guarda el nuevo hash
+                    const submitBtn = document.querySelector('#change-password-form button[type="submit"]');
+                    if (submitBtn) submitBtn.disabled = true;
+                    const result = await DataClient.changePassword(this.currentUser?.id, currentPassword, newPassword);
+                    if (!result.success) {
+                        if (submitBtn) submitBtn.disabled = false;
+                        this.showNotification(result.error || 'Error al cambiar la contraseña', 'error');
+                        return;
+                    }
+
                     // Cerrar modal
                     document.getElementById('change-password-modal').remove();
-                    
+
                     // Mostrar éxito
                     this.showNotification('Contraseña cambiada correctamente', 'success');
-                    
-                    // Simular logout automático después de 2 segundos
-                    setTimeout(() => {
+
+                    // Cerrar sesión por seguridad después de 2 segundos (como indica el modal)
+                    setTimeout(async () => {
                         this.showNotification('Cerrando sesión por seguridad...', 'info');
+                        await Auth.logout();
                         setTimeout(() => {
                             window.location.href = './login.html';
                         }, 1500);

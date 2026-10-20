@@ -107,6 +107,27 @@ const DataClient = {
         return this.listUsers();
     },
 
+    // Cambio de contraseña: el servidor verifica la actual. Devuelve { success, error }.
+    async changePassword(userId, currentPassword, newPassword) {
+        if (MODE === 'local') {
+            const users = lsGet(KEYS.users, []);
+            const user = users.find(u => u.id === userId);
+            if (!user || user.password_hash !== btoa(currentPassword)) {
+                return { success: false, error: 'La contraseña actual no es correcta' };
+            }
+            user.password_hash = btoa(newPassword);
+            lsSet(KEYS.users, users);
+            return { success: true };
+        }
+        const r = await authFetch(`${window.API_URL}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const data = await r.json().catch(() => ({}));
+        return r.ok ? { success: true } : { success: false, error: data.error || 'No se pudo cambiar la contraseña' };
+    },
+
     // ===== SESSION =====
     async getSession() {
         // La sesión vive en localStorage en ambos modos (el token se envía

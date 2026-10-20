@@ -638,6 +638,25 @@ export default {
             const authUser = await getAuthUser(request, env);
             const uid = authUser?.id;
 
+            // ---------- CAMBIO DE CONTRASEÑA (requiere sesión y la contraseña actual) ----------
+            if (path === '/api/auth/change-password' && method === 'POST') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `rl:chpw:${authUser.id}`, 5, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+                const { currentPassword, newPassword } = await request.json();
+                if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' ||
+                    newPassword.length < 8 || newPassword.length > 256)
+                    return json({ error: 'Datos inválidos (contraseña nueva de 8 a 256 caracteres)' }, 400, cors);
+                if (!authUser.password_hash)
+                    return json({ error: 'Tu cuenta no tiene contraseña (entras con Google). Usa "¿Olvidaste tu contraseña?" para crear una.' }, 400, cors);
+                if (!(await verifyPassword(currentPassword, authUser.password_hash)))
+                    return json({ error: 'La contraseña actual no es correcta' }, 403, cors);
+                const newHash = await hashPassword(newPassword);
+                await env.DB.prepare('UPDATE users SET password_hash=?, updated_at=? WHERE id=?')
+                    .bind(newHash, new Date().toISOString(), authUser.id).run();
+                return json({ success: true }, 200, cors);
+            }
+
             // ---------- WebAuthn: REGISTRO de credencial (requiere sesión activa) ----------
             if (path === '/api/auth/webauthn/register-options' && method === 'POST') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
