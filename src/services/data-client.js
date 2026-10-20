@@ -156,14 +156,18 @@ const DataClient = {
     },
 
     async clearSession() {
+        // En remoto, invalidar el token en el Worker ANTES de borrarlo (si no, la petición
+        // sale sin Authorization y no revoca nada). Máx. 3 s; si falla, se sigue igual.
+        if (MODE === 'remote') {
+            try {
+                const signal = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(3000) : undefined;
+                await authFetch(`${window.API_URL}/auth/logout`, { method: 'POST', signal });
+            } catch (e) {}
+        }
         // Borrar siempre la sesión local
         lsDel(KEYS.token);
         lsDel(KEYS.currentUser);
         setAuthToken(null);
-        // En remoto, además notificar al Worker (sin bloquear si falla)
-        if (MODE === 'remote') {
-            try { await authFetch(`${window.API_URL}/auth/logout`, { method: 'POST' }); } catch (e) {}
-        }
         return true;
     },
 

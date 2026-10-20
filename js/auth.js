@@ -353,10 +353,12 @@ class AuthSystem {
     }
 
     async logout() {
+        // Primero clearSession: invalida el token en el servidor y después lo borra
+        // (si se borrase antes, el logout saldría sin Authorization y no revocaría nada)
+        await DataClient.clearSession();
         this.token = null;
         this.currentUser = null;
         if (typeof DataClient.setAuthToken === 'function') DataClient.setAuthToken(null);
-        await DataClient.clearSession();
         return { success: true };
     }
 

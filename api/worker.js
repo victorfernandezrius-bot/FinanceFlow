@@ -174,13 +174,30 @@ async function issueToken(env, user, minExp = 0) {
 const needsRefresh = (payload) =>
     !payload.jti || !payload.iat || Date.now() / 1000 - payload.iat > SESSION_REFRESH_AFTER;
 
-// Devuelve { user, payload, token } si el Bearer token es válido, o null.
+// Revocación (logout): KV `revoked:<id>` hasta la caducidad del token. El id es el jti
+// o, en los tokens antiguos sin jti, el SHA-256 del token. Fail-open si KV falla.
+async function revocationId(payload, token) {
+    if (payload.jti) return payload.jti;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function isRevoked(env, payload, token) {
+    try { return !!(await env.CACHE.get('revoked:' + await revocationId(payload, token))); }
+    catch (e) { console.error('isRevoked:', e); return false; }
+}
+async function revokeToken(env, payload, token) {
+    const ttl = Math.max(60, Math.ceil((payload.exp || 0) - Date.now() / 1000));
+    await env.CACHE.put('revoked:' + await revocationId(payload, token), '1', { expirationTtl: ttl });
+}
+
+// Devuelve { user, payload, token } si el Bearer token es válido y no está revocado, o null.
 async function authenticate(request, env) {
     const auth = request.headers.get('Authorization') || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     if (!token) return null;
     const payload = await verifyJWT(token, env.JWT_SECRET);
     if (!payload) return null;
+    if (await isRevoked(env, payload, token)) return null;
     const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
     return user ? { user, payload, token } : null;
 }
@@ -779,6 +796,9 @@ export default {
             }
 
             if (path === '/api/auth/logout' && method === 'POST') {
+                // Invalida en servidor el token con el que se llama (hasta su caducidad)
+                const auth = await authenticate(request, env);
+                if (auth) await revokeToken(env, auth.payload, auth.token);
                 return json({ success: true }, 200, cors);
             }
             if (path === "/api/auth/forgot-password" && method === "POST") {
