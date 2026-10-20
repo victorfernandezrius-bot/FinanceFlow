@@ -173,7 +173,29 @@ Falta:
 
 ## 5. Cambios aplicados
 
-_(se rellena en cada fase con el commit de cada corrección)_
+Cada corrección es un commit independiente (`git revert <hash>` deshace solo esa). Probado con un arnés que ejecuta `api/worker.js` en Node (D1 en SQLite, KV y `fetch` simulados) y con Chromium contra `wrangler dev --env staging` (frontend + API en local). **No probado:** llamadas reales a Stripe, GoCardless, Google y Resend, ni producción.
+
+### Fase 2 — P0
+
+| Commit | Punto | Cambio | Comprobado |
+|---|---|---|---|
+| `187ce94` | 4, 7 | `POST /api/bank-connections`: el upsert solo actúa sobre filas del propio usuario (`WHERE bank_connections.user_id = excluded.user_id`) | B no puede modificar la conexión de A |
+| `2ff2844` | f | Webhook: acepta cualquiera de las firmas `v1` (rotación de secreto). Se mantienen la comparación constante y los 5 min | varias v1 → 200; secreto malo → 400; timestamp viejo → 400 |
+| `8a87c60` | 4, d | `verify-session`: `session_id` con formato `cs_(live\|test)_…` (si no, 400 sin llamar a Stripe) y la sesión tiene que ser del usuario (`client_reference_id`/`metadata.user_id` = uid; si no, 403) | sesión propia → paid; ajena → 403; manipulada → 400 |
+| `136b1d1` | 4, 7, e | `/api/banking/*`: IDs UUID; `country` y `institution_id` validados; propiedad comprobada con la `reference` que genera el Worker (`<uid>_…`) consultada en GoCardless; en `/sync`, la cuenta tiene que estar en una requisición del usuario | ajena → 404; manipulada → 400; las requisiciones declaradas por el cliente no cuentan |
+| `6740b80` | A10 | `/api/banking/*` solo con `plan='premium'` en D1 (coste por conexión en GoCardless) | free → 403 |
+| `1e0e1c5` | g | `POST /api/auth/change-password` (sesión, contraseña actual verificada, máx. 5 intentos/15 min, 8-256 car.) + `DataClient.changePassword` (local y remoto) + botón en Ajustes que abre el modal que ya existía; tras el cambio cierra la sesión | UI: clave mala → error; buena → logout; la nueva sí vale y la vieja no |
+| `e21bda4` | A2 | El borrado de cuenta incluye `push_subscriptions` y `push_log` | sin restos tras el borrado |
+| `a237aec` | d | Dashboard: quitada la "Opción B" (Premium en localStorage). Espera hasta ~20 s a que el webhook lo escriba en D1 | sin webhook no se activa nada; con webhook se aplica el plan de D1 |
+| `3a78ceb` | d, A1 | El dashboard refresca el usuario desde el servidor en cada carga (el plan es el de D1) | copia local obsoleta → se corrige en las dos direcciones |
+| `af0f674` | A1 | `Auth.validateSession` ya no degrada a free por `plan_expires_at` en modo remoto (los suscriptores mensuales perdían Premium a los 30 días) | renovación con fecha pasada → sigue PREMIUM |
+| `67b600c` | d, A5 | `register.html`: fuera el flujo `?success=true` que marcaba Premium en local y el guardado de la contraseña en `sessionStorage`; eliminado `Auth.upgradeToPremium()` (sin llamadas) | alta Free igual; la contraseña ya no se guarda |
+
+Sin cambios en esta fase, porque ya estaban bien o no aplica:
+- Punto 8 (allowlist): el servidor ya enlaza campo a campo e ignora lo desconocido. Rechazar con 400 rompería los clientes actuales (ver dudosos).
+- Hipótesis a, b y c: ya estaban corregidas.
+
+_(fases 3 y 4: más abajo)_
 
 ## 6. Pasos manuales para Víctor
 
