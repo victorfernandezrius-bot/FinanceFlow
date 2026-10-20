@@ -2226,6 +2226,10 @@
         import AccountingManager from './js/accounting-manager.js';
         import DataClient from './src/services/data-client.js';
 
+        // Límites de la importación de extractos (el parseo se hace en el navegador):
+        // tipo de archivo, tamaño, número de filas y páginas de PDF.
+        const IMPORT_LIMITS = { maxBytes: 10 * 1024 * 1024, maxRows: 2000, maxPdfPages: 50 };
+
         // Texto explicativo del Índice Flow — peso, fórmula en lenguaje llano y cómo leer
         // cada sub-índice. Usado por renderFinancialHealth() y renderFlowDetailContent().
         const SUBINDICE_INFO = {
@@ -3047,6 +3051,8 @@
                 const fileInput = document.getElementById('import-file-input');
                 const file = fileInput.files && fileInput.files[0];
                 if (!file) { this.showToast('Selecciona un archivo de extracto', 'error'); return; }
+                if (!/\.(csv|xls|xlsx|pdf)$/i.test(file.name)) { this.showToast('Formato no admitido: usa CSV, XLS, XLSX o PDF', 'error'); return; }
+                if (file.size > IMPORT_LIMITS.maxBytes) { this.showToast('El archivo supera el máximo de 10 MB', 'error'); return; }
 
                 const parseBtn = document.getElementById('import-parse-btn');
                 const original = parseBtn.innerHTML;
@@ -3060,6 +3066,10 @@
                         rows = await this.parseStatementSpreadsheet(file);
                     }
                     rows = (rows || []).filter(r => r && r.descripcion && !isNaN(r.importe) && r.importe !== 0);
+                    if (rows.length > IMPORT_LIMITS.maxRows) {
+                        this.showToast(`El extracto tiene más de ${IMPORT_LIMITS.maxRows} movimientos. Divídelo en varios archivos.`, 'error');
+                        return;
+                    }
                     if (!rows.length) {
                         this.showToast('No se detectaron movimientos en el archivo. Revisa el formato.', 'error');
                         return;
@@ -3229,9 +3239,14 @@
 
             async parseStatementSpreadsheet(file) {
                 const data = new Uint8Array(await file.arrayBuffer());
-                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                // sheetRows acota el parseo (cabecera en las ~25 primeras filas + límite de movimientos)
+                const maxSheetRows = IMPORT_LIMITS.maxRows + 30;
+                const wb = XLSX.read(data, { type: 'array', cellDates: true, sheetRows: maxSheetRows });
                 const sheet = wb.Sheets[wb.SheetNames[0]];
                 const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+                if (matrix.length >= maxSheetRows) {
+                    throw new Error(`el extracto tiene más de ${IMPORT_LIMITS.maxRows} movimientos. Divídelo en varios archivos.`);
+                }
                 return this._rowsFromMatrix(matrix);
             }
 
@@ -3337,7 +3352,11 @@
             async parseStatementPDF(file) {
                 const pdfjsLib = await this._loadPdfJs();
                 const data = new Uint8Array(await file.arrayBuffer());
-                const pdf = await pdfjsLib.getDocument({ data }).promise;
+                // isEvalSupported:false = mitigación oficial de CVE-2024-4367 (PDF malicioso)
+                const pdf = await pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
+                if (pdf.numPages > IMPORT_LIMITS.maxPdfPages) {
+                    throw new Error(`el PDF tiene más de ${IMPORT_LIMITS.maxPdfPages} páginas.`);
+                }
                 const lines = [];
                 for (let pg = 1; pg <= pdf.numPages; pg++) {
                     const page = await pdf.getPage(pg);
