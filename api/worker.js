@@ -1234,6 +1234,7 @@ export default {
 
                 if (path === '/api/banking/institutions' && method === 'POST') {
                     const { country = 'ES' } = await request.json();
+                    if (!/^[A-Z]{2}$/.test(String(country))) return json({ error: 'País inválido' }, 400, cors);
                     const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/institutions/?country=${country}`, {
                         headers: { 'Authorization': `Bearer ${gcToken}`, 'Accept': 'application/json' }
                     });
@@ -1242,6 +1243,8 @@ export default {
 
                 if (path === '/api/banking/requisition' && method === 'POST') {
                     const { institution_id } = await request.json();
+                    if (typeof institution_id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(institution_id))
+                        return json({ error: 'Banco inválido' }, 400, cors);
                     const r = await fetch('https://bankaccountdata.gocardless.com/api/v2/requisitions/', {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${gcToken}`, 'Content-Type': 'application/json' },
@@ -1258,14 +1261,17 @@ export default {
 
                 if (path === '/api/banking/accounts' && method === 'GET') {
                     const requisitionId = url.searchParams.get('requisition_id');
-                    const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/requisitions/${requisitionId}/`, {
-                        headers: { 'Authorization': `Bearer ${gcToken}` }
-                    });
-                    return json(await r.json(), 200, cors);
+                    if (!isUuid(requisitionId)) return json({ error: 'Requisición inválida' }, 400, cors);
+                    const req = await getOwnedRequisition(gcToken, requisitionId, uid);
+                    if (!req) return json({ error: 'No encontrado' }, 404, cors);
+                    return json(req, 200, cors);
                 }
 
                 if (path === '/api/banking/sync' && method === 'POST') {
                     const { account_id } = await request.json();
+                    if (!isUuid(account_id)) return json({ error: 'Cuenta inválida' }, 400, cors);
+                    if (!(await gcAccountOwnedBy(env, gcToken, account_id, uid)))
+                        return json({ error: 'No encontrado' }, 404, cors);
                     const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/accounts/${account_id}/transactions/`, {
                         headers: { 'Authorization': `Bearer ${gcToken}` }
                     });
@@ -1394,6 +1400,39 @@ async function getGoCardlessToken(env) {
     // access expira en ~24h; lo cacheamos 23h por seguridad
     if (data.access) await env.CACHE.put('gc_access_token', data.access, { expirationTtl: 82800 });
     return data.access;
+}
+
+// Los IDs de requisiciones y cuentas de GoCardless son UUID. Validarlos impide
+// que el valor del cliente salga del recurso previsto en la URL de la API.
+function isUuid(v) {
+    return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
+// Una requisición es del usuario si su `reference` la generó este Worker para él
+// (`${uid}_${timestamp}` en /api/banking/requisition). Es la única prueba de
+// propiedad que el cliente no puede escribir (bank_connections sí la escribe él).
+async function getOwnedRequisition(gcToken, requisitionId, uid) {
+    const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/requisitions/${requisitionId}/`, {
+        headers: { 'Authorization': `Bearer ${gcToken}` }
+    });
+    if (!r.ok) return null;
+    const req = await r.json();
+    return (typeof req.reference === 'string' && req.reference.startsWith(`${uid}_`)) ? req : null;
+}
+
+// Una cuenta de GoCardless es del usuario si aparece en una requisición SUYA.
+// bank_connections solo aporta las requisiciones candidatas; la propiedad se
+// comprueba siempre contra GoCardless (máx. 10 para acotar llamadas).
+async function gcAccountOwnedBy(env, gcToken, accountId, uid) {
+    const { results } = await env.DB.prepare(
+        'SELECT DISTINCT requisition_id FROM bank_connections WHERE user_id=? AND requisition_id IS NOT NULL LIMIT 10')
+        .bind(uid).all();
+    for (const row of results || []) {
+        if (!isUuid(row.requisition_id)) continue;
+        const req = await getOwnedRequisition(gcToken, row.requisition_id, uid);
+        if (req && Array.isArray(req.accounts) && req.accounts.includes(accountId)) return true;
+    }
+    return false;
 }
 
 // ---------- Verificación firma Stripe ----------
