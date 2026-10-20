@@ -772,6 +772,8 @@ export default {
             env.DB.prepare("DELETE FROM bank_connections WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM import_info WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM webauthn_credentials WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM push_subscriptions WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM push_log WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM users WHERE id=?").bind(delId)
           ]);
           return json({ success: true }, 200, cors);
