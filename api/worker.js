@@ -1587,13 +1587,25 @@ export default {
                 await env.DB.prepare('INSERT INTO stripe_events (event_id,type,processed_at,payload) VALUES (?,?,?,?)')
                     .bind(event.id, event.type, new Date().toISOString(), body.slice(0, 5000)).run();
 
-                if (event.type === 'checkout.session.completed') {
+                // Premium solo para pagos iniciados por /api/stripe/create-checkout: es la única vía
+                // que fija metadata.user_id (y client_reference_id) con el uid, y metadata solo se
+                // escribe con la clave secreta. La cuenta de Stripe tiene más productos y Payment
+                // Links que también llegan a este webhook, y un Payment Link acepta
+                // ?client_reference_id=<lo que sea> en la URL: nunca deben dar Premium.
+                // Además, el pago tiene que estar hecho: 'paid', o 'no_payment_required' (cupón del
+                // 100 %). Con métodos de pago diferidos (SEPA…) la sesión se completa sin cobrar y
+                // el Premium llega con checkout.session.async_payment_succeeded.
+                if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
                     const s = event.data.object;
-                    const userId = s.metadata?.user_id || s.client_reference_id;
+                    const userId = s.metadata?.user_id;
+                    const fromApp = !!userId && s.client_reference_id === userId && s.mode === 'subscription';
+                    const paid = s.payment_status === 'paid' || s.payment_status === 'no_payment_required';
+                    if (!fromApp || !paid)
+                        console.log('Stripe: sesión ignorada', event.id, event.type, s.mode, s.payment_status, fromApp ? 'app' : 'otro producto');
                     const planType = s.metadata?.plan_type || 'monthly';
                     const expDays = planType === 'annual' ? 365 : 30;
                     const exp = new Date(Date.now() + expDays * 864e5).toISOString();
-                    if (userId) {
+                    if (fromApp && paid) {
                         await env.DB.prepare(
                             `UPDATE users SET plan='premium', plan_expires_at=?, stripe_customer_id=?, stripe_subscription_id=?, updated_at=? WHERE id=?`)
                             .bind(exp, s.customer || null, s.subscription || null, new Date().toISOString(), userId).run();
