@@ -777,18 +777,38 @@ export default {
                 let user = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?')
                     .bind(payload.sub).first();
                 let isNew = false;
+                let passwordRemoved = false;
                 if (!user) {
                     user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
                         .bind(gEmail).first();
                     if (user) {
-                        // Cuenta existente por email: vincular con Google
-                        await env.DB.prepare(
-                            `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
-                                picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
-                            .bind(payload.sub, payload.picture ?? null, now, user.id).run();
+                        // Cuenta existente por email: vincular con Google. El alta con contraseña
+                        // no verifica el email, así que esa cuenta pudo crearla otra persona con
+                        // el email de este usuario. Google acaba de demostrar quién controla el
+                        // email: todo acceso creado antes deja de valer (contraseña, sesiones,
+                        // passkeys y suscripciones push). Todo en un batch: o se aplica entero o nada.
+                        // El dueño legítimo puede crear otra contraseña con "¿Olvidaste tu contraseña?".
+                        passwordRemoved = !!user.password_hash;
+                        const linkStmts = [
+                            env.DB.prepare('DELETE FROM webauthn_credentials WHERE user_id=?').bind(user.id),
+                            env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id=?').bind(user.id),
+                            env.DB.prepare(
+                                `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
+                                    picture=COALESCE(?, picture), password_hash=NULL, updated_at=? WHERE id=?`)
+                                .bind(payload.sub, payload.picture ?? null, now, user.id)
+                        ];
+                        // Sin la migración 0001 no hay token_version (y authenticate no lo comprueba)
+                        const hasTokenVersion = typeof user.token_version === 'number';
+                        if (hasTokenVersion)
+                            linkStmts.push(env.DB.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?')
+                                .bind(user.id));
+                        await env.DB.batch(linkStmts);
+                        if (hasTokenVersion) user.token_version += 1;
+                        user.password_hash = null;
                         user.google_sub = payload.sub;
                         user.auth_provider = user.auth_provider || 'google';
                         user.picture = payload.picture ?? user.picture;
+                        ctx.waitUntil(audit(env, request, 'google_linked', user.id, { password_removed: passwordRemoved }));
                     } else {
                         // Usuario nuevo
                         isNew = true;
@@ -821,7 +841,8 @@ export default {
 
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
                 const gToken = await issueToken(env, user);
-                return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
+                return json({ success: true, token: gToken, currentUser: publicUser(user), passwordRemoved },
+                    isNew ? 201 : 200, cors);
             }
 
             if (path === '/api/auth/session' && method === 'GET') {
@@ -876,8 +897,16 @@ export default {
         const rpUserId = await env.CACHE.get("reset:" + rp.token);
         if (!rpUserId) return json({ error: "El enlace no es válido o ha caducado" }, 400, cors);
         const rpHash = await hashPassword(rp.password);
-        await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
-          .bind(rpHash, new Date().toISOString(), rpUserId).run();
+        // Restablecer es la vía para recuperar una cuenta robada: además de las sesiones
+        // (bumpTokenVersion), se revocan las passkeys y las suscripciones push, que no
+        // dependen de la contraseña. Los dispositivos legítimos vuelven a suscribirse solos
+        // al abrir el dashboard (reconcilePushSubscription).
+        await env.DB.batch([
+          env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
+            .bind(rpHash, new Date().toISOString(), rpUserId),
+          env.DB.prepare("DELETE FROM webauthn_credentials WHERE user_id=?").bind(rpUserId),
+          env.DB.prepare("DELETE FROM push_subscriptions WHERE user_id=?").bind(rpUserId)
+        ]);
         await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
         ctx.waitUntil(audit(env, request, 'password_reset', rpUserId));
         await env.CACHE.delete("reset:" + rp.token);
@@ -980,6 +1009,26 @@ export default {
                         now
                     ).run();
                 await env.CACHE.delete(`webauthn_challenge:${authUser.id}`);
+                return json({ success: true }, 200, cors);
+            }
+
+            // ---------- WebAuthn: passkeys del usuario (listar / quitar) ----------
+            // Sin credential_id ni clave pública: solo lo que el usuario necesita para
+            // reconocer sus dispositivos y quitar los que no son suyos.
+            if (path === '/api/auth/webauthn/credentials' && method === 'GET') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT id, device_name, created_at, last_used_at FROM webauthn_credentials WHERE user_id=? ORDER BY created_at DESC')
+                    .bind(authUser.id).all();
+                return json({ credentials: results || [] }, 200, cors);
+            }
+            const waCredMatch = path.match(/^\/api\/auth\/webauthn\/credentials\/([^/]+)$/);
+            if (waCredMatch && method === 'DELETE') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                if (!V.id(waCredMatch[1])) return invalid('passkey', cors);
+                const del = await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id=? AND user_id=?')
+                    .bind(waCredMatch[1], authUser.id).run();
+                if (del.meta?.changes) ctx.waitUntil(audit(env, request, 'passkey_removed', authUser.id));
                 return json({ success: true }, 200, cors);
             }
 
@@ -1158,15 +1207,18 @@ export default {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const { rules } = await request.json();
                 if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
-                await env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid).run();
-                for (const r of rules) {
-                    await env.DB.prepare(
+                // Atómico (batch = transacción en D1): si un INSERT falla, por ejemplo por un id
+                // que ya usa otro usuario (la PK es global), se deshace también el DELETE y el
+                // usuario conserva las reglas que tenía.
+                await env.DB.batch([
+                    env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid),
+                    ...rules.map(r => env.DB.prepare(
                         `INSERT INTO categorization_rules (id,user_id,name,keywords,account_type,account_id,account_name,enabled,is_default,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?)`)
                         .bind(r.id, uid, r.name, JSON.stringify(r.keywords || []), r.accountType ?? null,
                               r.accountId ?? null, r.accountName ?? null, r.enabled ? 1 : 0,
-                              r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()).run();
-                }
+                              r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()))
+                ]);
                 return json({ success: true, count: rules.length }, 200, cors);
             }
             const ruleMatch = path.match(/^\/api\/rules\/(.+)$/);

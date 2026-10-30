@@ -3918,7 +3918,7 @@
                 });
                 
                 // Manejar submit
-                document.getElementById('edit-default-rule-form').addEventListener('submit', (e) => {
+                document.getElementById('edit-default-rule-form').addEventListener('submit', async (e) => {
                     e.preventDefault();
                     
                     const newAccountId = document.getElementById('default-rule-account').value;
@@ -3940,7 +3940,12 @@
                             accountId: newAccount.id,
                             accountName: newAccount.nombre
                         };
-                        this.accountingManager.updateCategorizeRule(ruleId, updatedRule);
+                        try {
+                            await this.accountingManager.updateCategorizeRule(ruleId, updatedRule);
+                        } catch (error) {
+                            this.showToast(error.message, 'error');
+                            return;
+                        }
                     }
                     
                     this.showToast('Cuenta asociada actualizada correctamente', 'success');
@@ -4086,7 +4091,7 @@
                 document.getElementById('rule-modal').classList.remove('hidden');
             }
 
-            handleRuleSubmit(e) {
+            async handleRuleSubmit(e) {
                 e.preventDefault();
                 
                 // Prevenir múltiples submits
@@ -4138,11 +4143,11 @@
                     
                     if (form.dataset.editId) {
                         // Update existing rule
-                        this.accountingManager.updateCategorizeRule(form.dataset.editId, ruleData);
+                        await this.accountingManager.updateCategorizeRule(form.dataset.editId, ruleData);
                         this.showToast('Regla actualizada correctamente', 'success');
                     } else {
                         // Create new rule (SOLO UNA VEZ)
-                        this.accountingManager.addCategorizeRule(ruleData);
+                        await this.accountingManager.addCategorizeRule(ruleData);
                         this.showToast('Regla creada correctamente', 'success');
                     }
                     
@@ -4157,13 +4162,13 @@
                 }
             }
             
-            toggleRule(ruleId) {
+            async toggleRule(ruleId) {
                 try {
                     const rules = this.accountingManager.getCategorizeRules();
                     const rule = rules.find(r => r.id === ruleId);
                     
                     if (rule) {
-                        this.accountingManager.updateCategorizeRule(ruleId, { enabled: !rule.enabled });
+                        await this.accountingManager.updateCategorizeRule(ruleId, { enabled: !rule.enabled });
                         this.renderRulesList();
                         
                         const action = rule.enabled ? 'desactivada' : 'activada';
@@ -4175,10 +4180,10 @@
                 }
             }
             
-            deleteRule(ruleId) {
+            async deleteRule(ruleId) {
                 if (confirm('¿Estás seguro de que deseas eliminar esta regla?')) {
                     try {
-                        this.accountingManager.deleteCategorizeRule(ruleId);
+                        await this.accountingManager.deleteCategorizeRule(ruleId);
                         this.renderRulesList();
                         this.showToast('Regla eliminada correctamente', 'success');
                     } catch (error) {
@@ -9514,6 +9519,13 @@
                                     </button>
                                     <p id="biometric-status" class="small-text" style="margin-top:0.5rem;color:var(--text-secondary);line-height:1.5;"></p>
                                 </div>
+                                <div id="passkeys-profile-section" class="pt-2 hidden" style="border-top: 1px solid var(--border-color);">
+                                    <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Dispositivos con Face ID / Touch ID</label>
+                                    <ul id="passkeys-list" style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.5rem;"></ul>
+                                    <p class="small-text" style="margin-top:0.5rem;color:var(--text-secondary);line-height:1.5;">
+                                        Si no reconoces un dispositivo, quítalo y cambia tu contraseña.
+                                    </p>
+                                </div>
                             </div>
 
                             <div class="flex flex-col sm:flex-row justify-end gap-3 mt-8">
@@ -9538,6 +9550,76 @@
 
                 // Mostrar el bloque de acceso biométrico si el dispositivo lo soporta
                 this._setupProfileBiometric();
+                // Lista de passkeys de la cuenta (de cualquier dispositivo), para poder quitarlas
+                this._renderPasskeyList();
+            }
+
+            // Pinta las passkeys registradas en la cuenta. Se muestra aunque este
+            // dispositivo no tenga Face ID / Touch ID: sirve para quitar las de otros.
+            async _renderPasskeyList() {
+                const section = document.getElementById('passkeys-profile-section');
+                const list = document.getElementById('passkeys-list');
+                if (!section || !list) return;
+                const passkeys = await DataClient.listPasskeys().catch(() => null);
+                if (!passkeys || passkeys.length === 0) { section.classList.add('hidden'); return; }
+
+                const fmtDate = (iso) => {
+                    const d = iso ? new Date(iso) : null;
+                    return d && !isNaN(d) ? d.toLocaleDateString('es-ES') : null;
+                };
+                // device_name es el User-Agent con el que se registró: lo escribe el cliente,
+                // así que todo se pinta con textContent y nunca con innerHTML.
+                list.replaceChildren(...passkeys.map(pk => {
+                    const li = document.createElement('li');
+                    li.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.6rem 0.75rem;border:1px solid var(--border-color);border-radius:0.5rem;background-color:var(--bg-secondary);';
+                    const info = document.createElement('div');
+                    info.style.minWidth = '0';
+                    const name = document.createElement('div');
+                    name.className = 'small-text font-medium';
+                    name.style.color = 'var(--text-primary)';
+                    name.textContent = this._passkeyDeviceLabel(pk.device_name);
+                    const meta = document.createElement('div');
+                    meta.className = 'small-text';
+                    meta.style.color = 'var(--text-secondary)';
+                    const added = fmtDate(pk.created_at);
+                    const used = fmtDate(pk.last_used_at);
+                    meta.textContent = [added && `Añadida el ${added}`, used ? `último uso el ${used}` : 'sin usar todavía']
+                        .filter(Boolean).join(' · ');
+                    info.append(name, meta);
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = 'Quitar';
+                    btn.className = 'small-text';
+                    btn.style.cssText = 'flex-shrink:0;padding:0.35rem 0.75rem;border-radius:0.4rem;border:1px solid var(--border-color);background:transparent;color:#EF4444;cursor:pointer;';
+                    btn.addEventListener('click', () => this.removePasskey(pk.id, btn));
+                    li.append(info, btn);
+                    return li;
+                }));
+                section.classList.remove('hidden');
+            }
+
+            // Nombre legible del dispositivo a partir del User-Agent guardado al registrar la passkey
+            _passkeyDeviceLabel(ua) {
+                ua = String(ua || '');
+                const device = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
+                    : /Macintosh|Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : null;
+                const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome'
+                    : /Safari\//.test(ua) ? 'Safari' : null;
+                if (!device) return 'Dispositivo desconocido';
+                return browser ? `${device} · ${browser}` : device;
+            }
+
+            async removePasskey(passkeyId, btn) {
+                if (!confirm('¿Quitar esta passkey? Ese dispositivo ya no podrá entrar con Face ID / Touch ID.')) return;
+                if (btn) btn.disabled = true;
+                const ok = await DataClient.deletePasskey(passkeyId).catch(() => false);
+                if (!ok) {
+                    if (btn) btn.disabled = false;
+                    this.showToast('No se pudo quitar la passkey. Inténtalo de nuevo.', 'error');
+                    return;
+                }
+                this.showToast('Passkey eliminada', 'success');
+                this._renderPasskeyList();
             }
 
             // Revela el bloque biométrico del perfil solo si hay autenticador de plataforma
@@ -9593,6 +9675,7 @@
                     }
                     if (btn) { btn.hidden = true; }
                     setStatus('✓ Activado en este dispositivo. La próxima vez podrás entrar con Face ID / Touch ID.', 'var(--success-color)');
+                    this._renderPasskeyList();
                 } catch (e) {
                     if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
                     setStatus('No se pudo activar el acceso biométrico. Inténtalo de nuevo.', '#EF4444');
