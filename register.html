@@ -333,6 +333,9 @@
                 </div>
             </div>
 
+            <!-- Paso de verificación de email (tras crear la cuenta) -->
+            <div id="verify-step-container" class="bg-white rounded-2xl shadow-xl p-8 hidden"></div>
+
             <!-- Plan info -->
             <div class="text-center">
                 <div class="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -402,10 +405,13 @@
 
     <script type="module">
         import Auth from './js/auth.js';
+        import { mountVerifyStep } from './js/email-verify-step.js';
         
         class RegisterPage {
             constructor() {
                 this.selectedPlan = null;
+                this.pendingPlanType = null;   // 'monthly' | 'yearly' si va a Premium
+                this.verifyStep = null;
                 this.turnstile = null;
                 this.init();
             }
@@ -431,11 +437,11 @@
 
                 // Payment type modal
                 document.getElementById('monthly-payment').addEventListener('click', () => {
-                    this.startPremiumCheckout('monthly');
+                    this.choosePremium('monthly');
                 });
                 
                 document.getElementById('yearly-payment').addEventListener('click', () => {
-                    this.startPremiumCheckout('yearly');
+                    this.choosePremium('yearly');
                 });
                 
                 document.getElementById('cancel-payment').addEventListener('click', () => {
@@ -462,6 +468,7 @@
 
             selectPlan(plan) {
                 this.selectedPlan = plan;
+                this.pendingPlanType = null;
                 
                 // Update UI
                 document.querySelectorAll('.plan-card').forEach(card => {
@@ -486,6 +493,23 @@
 
             closePaymentModal() {
                 document.getElementById('payment-type-modal').classList.add('hidden');
+            }
+
+            // Premium: primero se elige la modalidad; después se crea la cuenta y, con la
+            // sesión ya creada (tras verificar el email), se abre el pago.
+            choosePremium(planType) {
+                this.pendingPlanType = planType;
+                this.closePaymentModal();
+                this.handleRegister();
+            }
+
+            // Si el pago no llega a abrirse (el error ya se avisa con un toast), la sesión
+            // existe: al panel, para no dejar al usuario en una pantalla sin salida.
+            async goToCheckout(planType) {
+                let leaving = false;
+                window.addEventListener('beforeunload', () => { leaving = true; }, { once: true });
+                await this.startPremiumCheckout(planType);
+                setTimeout(() => { if (!leaving) window.location.href = './dashboard.html'; }, 4000);
             }
 
             async startPremiumCheckout(planType) {
@@ -561,13 +585,13 @@
                     return;
                 }
 
-                // Si es Premium, mostrar modal de pago
-                if (this.selectedPlan === 'premium') {
+                // Si es Premium, primero se elige la modalidad de pago (choosePremium vuelve aquí)
+                if (this.selectedPlan === 'premium' && !this.pendingPlanType) {
                     this.showPaymentModal();
                     return;
                 }
 
-                // Si es Free, registrar directamente
+                // Crear la cuenta (Free y Premium: el pago va después, ya con sesión)
                 const turnstileToken = this.turnstile ? this.turnstile.token() : null;
                 if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
                     this.showError('Completa la verificación anti-bots');
@@ -587,8 +611,16 @@
                 this.showLoading(false);
                 if (this.turnstile) this.turnstile.reset();
 
-                if (result.success) {
+                if (result.success && result.needsVerification) {
+                    // Sin sesión hasta verificar el email: nada que dependa de ella (panel, pago) antes
+                    this.showVerifyStep(result.email);
+                } else if (result.success) {
+                    // Worker anterior a la verificación: la sesión ya está creada
                     // El Premium solo lo concede el servidor (webhook de Stripe), nunca esta página
+                    if (this.pendingPlanType) {
+                        this.goToCheckout(this.pendingPlanType);
+                        return;
+                    }
                     this.showSuccess('¡Cuenta creada exitosamente! Redirigiendo...');
 
                     setTimeout(() => {
@@ -597,6 +629,38 @@
                 } else {
                     this.showError(result.error);
                 }
+            }
+
+            showVerifyStep(email) {
+                document.getElementById('plan-selection').classList.add('hidden');
+                document.getElementById('register-form-container').classList.add('hidden');
+                const box = document.getElementById('verify-step-container');
+                box.classList.remove('hidden');
+                this.verifyStep = mountVerifyStep(box, {
+                    email,
+                    onVerified: (step) => {
+                        // Igual que tras un login normal; si eligió Premium, ahora sí al pago
+                        if (this.pendingPlanType) {
+                            step.showSuccess('¡Email verificado! Abriendo el pago...');
+                            this.goToCheckout(this.pendingPlanType);
+                            return;
+                        }
+                        step.showSuccess('¡Email verificado! Redirigiendo...');
+                        setTimeout(() => {
+                            window.location.href = './dashboard.html';
+                        }, 1000);
+                    },
+                    onChangeEmail: () => {
+                        if (this.verifyStep) this.verifyStep.destroy();
+                        this.verifyStep = null;
+                        box.classList.add('hidden');
+                        document.getElementById('plan-selection').classList.remove('hidden');
+                        document.getElementById('register-form-container').classList.remove('hidden');
+                        this.hideError();
+                        document.getElementById('email').focus();
+                    }
+                });
+                box.scrollIntoView({ behavior: 'smooth' });
             }
 
             showLoading(show) {
@@ -640,9 +704,10 @@
             }
         }
 
-        // Inicializar página
+        // Inicializar página (registerPage a nivel de módulo: lo usan también los handlers de Google)
+        let registerPage;
         document.addEventListener('DOMContentLoaded', () => {
-            const registerPage = new RegisterPage();
+            registerPage = new RegisterPage();
             
             // Verificar si viene con plan premium preseleccionado desde index
             const selectedPremiumPlan = sessionStorage.getItem('selectedPremiumPlan');

@@ -139,8 +139,11 @@
                         </button>
                     </div>
                 </form>
-                
-                <div class="mt-6">
+
+                <!-- Paso de verificación de email (se pinta al hacer login con el email sin verificar) -->
+                <div id="verify-step" class="hidden"></div>
+
+                <div id="login-alt" class="mt-6">
                     <!-- Botón Google -->
                     <div class="relative mb-4">
                         <div class="absolute inset-0 flex items-center">
@@ -199,6 +202,7 @@
     <script type="module">
         import Auth from './js/auth.js';
         import DataClient from './src/services/data-client.js';
+        import { mountVerifyStep } from './js/email-verify-step.js';
 
         class LoginPage {
             constructor() {
@@ -264,6 +268,11 @@
                         body: JSON.stringify({ loginId, response: asseResp })
                     });
                     const data = await verRes.json();
+                    if (verRes.status === 403 && data.needsVerification) {
+                        this.showLoading(false);
+                        this.showVerifyStep(data.email, true);
+                        return;
+                    }
                     if (!verRes.ok || !data.success) {
                         this.showLoading(false);
                         this.showError(data.error || 'No se pudo iniciar sesión con biometría.');
@@ -335,6 +344,8 @@
                             window.location.href = './dashboard.html';
                         }, 1000);
                         
+                    } else if (result.needsVerification) {
+                        this.showVerifyStep(result.email, true);
                     } else {
                         this.showError(result.error || 'Error al iniciar sesión');
                     }
@@ -346,6 +357,38 @@
                     this.showLoading(false);
                     if (this.turnstile) this.turnstile.reset();
                 }
+            }
+
+            // Email sin verificar: se sustituye el formulario por el paso del código. Al
+            // verificar, la sesión ya está creada y se sigue igual que tras un login normal.
+            showVerifyStep(email, autoResend) {
+                this.hideMessages();
+                const bio = document.getElementById('biometric-section');
+                this.bioWasVisible = !bio.classList.contains('hidden');
+                ['biometric-section', 'login-form', 'login-alt'].forEach(id => document.getElementById(id).classList.add('hidden'));
+                const box = document.getElementById('verify-step');
+                box.classList.remove('hidden');
+                this.verifyStep = mountVerifyStep(box, {
+                    email,
+                    autoResend,
+                    onVerified: (step) => {
+                        step.showSuccess('¡Login exitoso! Redirigiendo...');
+                        setTimeout(() => {
+                            window.location.href = './dashboard.html';
+                        }, 1000);
+                    },
+                    onChangeEmail: () => this.hideVerifyStep()
+                });
+            }
+
+            hideVerifyStep() {
+                if (this.verifyStep) this.verifyStep.destroy();
+                this.verifyStep = null;
+                document.getElementById('verify-step').classList.add('hidden');
+                ['login-form', 'login-alt'].forEach(id => document.getElementById(id).classList.remove('hidden'));
+                if (this.bioWasVisible) document.getElementById('biometric-section').classList.remove('hidden');
+                document.getElementById('password').value = '';
+                document.getElementById('email').focus();
             }
 
             validateEmail(email) {

@@ -171,6 +171,44 @@ const DataClient = {
         return true;
     },
 
+    // ===== VERIFICACIÓN DE EMAIL (código de 6 dígitos tras el registro) =====
+    // Si el código es correcto devuelve lo mismo que el login ({ success, token, currentUser });
+    // si no, { success:false, error, expired }. No guarda la sesión: lo hace Auth.verifyEmail.
+    // En modo local no hay verificación: éxito sin más.
+    async verifyEmail(email, code) {
+        if (MODE === 'local') return { success: true };
+        try {
+            const r = await fetch(`${window.API_URL}/auth/verify-email`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ email, code })
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok && data.success) return data;
+            return { success: false, error: data.error || 'No se pudo verificar el código', expired: !!data.expired };
+        } catch (e) {
+            return { success: false, error: 'Error de conexión. Inténtalo de nuevo.' };
+        }
+    },
+
+    // Pide un código nuevo. El servidor responde siempre igual (no revela si el email existe).
+    async resendCode(email, turnstileToken = null) {
+        if (MODE === 'local') return { success: true };
+        try {
+            const r = await fetch(`${window.API_URL}/auth/resend-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ email, turnstileToken })
+            });
+            const data = await r.json().catch(() => ({}));
+            return r.ok ? { success: true } : { success: false, error: data.error || 'No se pudo reenviar el código' };
+        } catch (e) {
+            return { success: false, error: 'Error de conexión. Inténtalo de nuevo.' };
+        }
+    },
+
     // ===== ACCOUNTS =====
     async listAccounts(userId) {
         if (MODE === 'local') return lsGet(KEYS.accounts(userId), []);

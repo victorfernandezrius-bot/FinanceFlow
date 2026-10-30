@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS users (
     stripe_subscription_id TEXT,
     feedback_requested_at TEXT DEFAULT NULL,
     token_version INTEGER NOT NULL DEFAULT 0,  -- migración 0001 en BD existentes
+    email_verified_at TEXT,                    -- migración 0003 en BD existentes (y las 4 siguientes)
+    verify_code_hash TEXT,
+    verify_code_expires_at TEXT,
+    verify_attempts INTEGER NOT NULL DEFAULT 0,
+    verify_sent_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT
 );
@@ -183,6 +188,83 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
+
+-- Cartera de Inversión (posiciones/holdings del usuario). Ver también
+-- db/migrations/0001_cartera_activos.sql. usuario_id es TEXT (users.id es TEXT).
+CREATE TABLE IF NOT EXISTS cartera_activos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  nombre TEXT,
+  tipo_activo TEXT NOT NULL, -- 'accion' | 'etf' | 'fondo' | 'cripto'
+  cantidad REAL NOT NULL,
+  precio_medio_compra REAL NOT NULL,
+  moneda TEXT DEFAULT 'EUR',
+  broker_origen TEXT,
+  fecha_creacion TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cartera_usuario ON cartera_activos(usuario_id);
+
+-- Cartera de Inversión v2: histórico de operaciones (fuente de verdad; las
+-- posiciones y el precio medio se calculan agregando esta tabla). cartera_activos
+-- queda obsoleta como fuente de verdad. Ver db/migrations/0002_cartera_operaciones.sql.
+CREATE TABLE IF NOT EXISTS cartera_operaciones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario_id TEXT NOT NULL,
+  ticker TEXT NOT NULL,
+  tipo_activo TEXT NOT NULL,        -- 'accion' | 'etf' | 'fondo' | 'cripto'
+  tipo_operacion TEXT NOT NULL,     -- 'compra' | 'venta'
+  fecha TEXT NOT NULL,              -- YYYY-MM-DD
+  cantidad REAL NOT NULL,
+  precio REAL NOT NULL,             -- entrada en compras, cierre en ventas
+  comision REAL DEFAULT 0,
+  moneda TEXT DEFAULT 'EUR',
+  broker_origen TEXT,
+  cierra_operacion_id INTEGER,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  importe REAL,                     -- v4: importe de 'aportacion' | 'retirada' (efectivo; ticker='__CASH__')
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_operaciones_usuario ON cartera_operaciones(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_operaciones_usuario_ticker ON cartera_operaciones(usuario_id, ticker);
+CREATE INDEX IF NOT EXISTS idx_operaciones_fecha ON cartera_operaciones(usuario_id, fecha);
+
+-- Snapshot diario del valor total de cartera (para histórico y rentabilidad).
+CREATE TABLE IF NOT EXISTS cartera_valor_diario (
+  usuario_id TEXT NOT NULL,
+  fecha TEXT NOT NULL,              -- YYYY-MM-DD
+  valor_total REAL NOT NULL,
+  PRIMARY KEY (usuario_id, fecha),
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Cartera v3: atributos estáticos por instrumento (sector, RF, derivados).
+CREATE TABLE IF NOT EXISTS cartera_instrumentos (
+  usuario_id TEXT NOT NULL, ticker TEXT NOT NULL, nombre TEXT, tipo_activo TEXT NOT NULL,
+  sector TEXT,
+  rf_tipo_interes REAL, rf_cupon REAL, rf_frecuencia_cupon TEXT, rf_vencimiento TEXT, rf_nominal REAL,
+  der_tipo TEXT, der_vencimiento TEXT, der_subyacente_cobertura TEXT, der_tipo_opcion TEXT, der_prima REAL,
+  PRIMARY KEY (usuario_id, ticker),
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Cartera v3: liquidez por moneda. v4: `saldo` queda OBSOLETO (se calcula desde
+-- las operaciones; el Worker lo escribe a 0). La tabla guarda solo la remuneración.
+CREATE TABLE IF NOT EXISTS cartera_liquidez (
+  usuario_id TEXT NOT NULL, moneda TEXT NOT NULL DEFAULT 'EUR', saldo REAL NOT NULL DEFAULT 0,
+  remunerada INTEGER DEFAULT 0, tipo_interes_anual REAL DEFAULT 0,
+  capitalizacion TEXT DEFAULT 'anual', fecha_inicio TEXT,
+  PRIMARY KEY (usuario_id, moneda),
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Cartera v3: caché del cálculo de riesgo diario.
+CREATE TABLE IF NOT EXISTS cartera_riesgo_cache (
+  usuario_id TEXT NOT NULL, benchmark TEXT NOT NULL, fecha_calculo TEXT NOT NULL, payload TEXT NOT NULL,
+  PRIMARY KEY (usuario_id, benchmark),
+  FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
+);
 
 -- Registro de auditoría de eventos sensibles (migración 0002 en BD existentes)
 CREATE TABLE IF NOT EXISTS audit_log (

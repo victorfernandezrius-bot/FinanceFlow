@@ -24,7 +24,13 @@ class AuthSystem {
             body: JSON.stringify(body)
         });
         const data = await r.json();
-        if (!r.ok) throw new Error(data.error || 'Error de servidor');
+        if (!r.ok) {
+            // status y data viajan en el error (p. ej. 403 needsVerification del login)
+            const err = new Error(data.error || 'Error de servidor');
+            err.status = r.status;
+            err.data = data;
+            throw err;
+        }
         return data;
     }
 
@@ -93,6 +99,11 @@ class AuthSystem {
             // --- MODO REMOTO: registrar contra el Worker ---
             if (this.isRemote) {
                 const data = await this._apiPost('/auth/register', { email, password, name, plan, turnstileToken });
+                // Verificación de email: no hay token ni sesión hasta introducir el código.
+                // (Un Worker anterior responde sin needsVerification y con token: sigue abajo.)
+                if (data.needsVerification) {
+                    return { success: true, needsVerification: true, email: data.email || email };
+                }
                 this.currentUser = data.currentUser;
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
@@ -276,7 +287,16 @@ class AuthSystem {
 
             // --- MODO REMOTO: login contra el Worker ---
             if (this.isRemote) {
-                const data = await this._apiPost('/auth/login', { email, password, turnstileToken });
+                let data;
+                try {
+                    data = await this._apiPost('/auth/login', { email, password, turnstileToken });
+                } catch (e) {
+                    // Contraseña correcta pero email sin verificar (403): sin token ni sesión
+                    if (e.data && e.data.needsVerification) {
+                        return { success: false, needsVerification: true, email: e.data.email || email, error: e.message };
+                    }
+                    throw e;
+                }
                 this.currentUser = data.currentUser;
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
@@ -317,6 +337,26 @@ class AuthSystem {
                 success: false,
                 error: error.message
             };
+        }
+    }
+
+    // Verificación del email con el código de 6 dígitos. Si es correcto, la sesión se
+    // crea EXACTAMENTE igual que en el login. Devuelve { success, user } o { success:false, error, expired }.
+    async verifyEmail(email, code) {
+        try {
+            const data = await DataClient.verifyEmail(email, code);
+            if (!data.success) return { success: false, error: data.error, expired: !!data.expired };
+            if (this.isRemote && data.token) {
+                this.currentUser = data.currentUser;
+                this.token = data.token;
+                DataClient.setAuthToken(data.token);
+                await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                await this.refreshPremiumTrial();
+            }
+            return { success: true, user: this.currentUser, message: 'Email verificado' };
+        } catch (error) {
+            console.error('Error verificando el email:', error);
+            return { success: false, error: error.message || 'No se pudo verificar el código' };
         }
     }
 
