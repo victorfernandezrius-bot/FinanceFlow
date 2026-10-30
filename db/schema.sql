@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS users (
     feedback_requested_at TEXT DEFAULT NULL,
     currency TEXT DEFAULT 'EUR',               -- divisa que ve el usuario (PUT /api/users/:id); ya existe en producción
     token_version INTEGER NOT NULL DEFAULT 0,  -- migración 0001 en BD existentes
+    email_verified_at TEXT,                    -- migración 0003 en BD existentes (y las 4 siguientes)
+    verify_code_hash TEXT,
+    verify_code_expires_at TEXT,
+    verify_attempts INTEGER NOT NULL DEFAULT 0,
+    verify_sent_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT
 );
