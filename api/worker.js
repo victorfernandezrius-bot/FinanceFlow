@@ -1113,6 +1113,10 @@ export default {
                 }
                if (method === "DELETE") {
           const delId = authUser.id;
+          // Antes de borrar nada: cancelar sus suscripciones de Stripe (si no, se le seguiría
+          // cobrando una cuenta que ya no existe). Si Stripe falla, no se borra la cuenta.
+          if (!(await cancelUserSubscriptions(env, authUser)))
+            return json({ error: 'No hemos podido cancelar tu suscripción Premium, así que tu cuenta no se ha borrado. Inténtalo de nuevo en unos minutos.' }, 502, cors);
           await env.DB.batch([
             env.DB.prepare("DELETE FROM movements WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM accounts WHERE user_id=?").bind(delId),
@@ -1539,6 +1543,10 @@ export default {
                 // Cada llamada crea una Checkout Session en Stripe: máx. 10 por usuario cada 15 min
                 if (await rateLimited(env, `rl:checkout:${uid}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+                // Una sola suscripción por usuario: si ya es Premium, el cambio de plan o la baja se
+                // hacen en el portal de Stripe. Así se evita pagar dos veces (pasó en mayo).
+                if (authUser.plan === 'premium')
+                    return json({ error: 'Ya tienes Premium. Para cambiar de plan o cancelar, usa «Gestionar suscripción».' }, 409, cors);
                 const body = await request.json();
                 // Aceptar tanto plan_type como planType; normalizar 'annual'/'yearly'
                 const planRaw = body.plan_type || body.planType || 'monthly';
@@ -1910,6 +1918,36 @@ async function gcAccountOwnedBy(env, gcToken, accountId, uid) {
         if (req && Array.isArray(req.accounts) && req.accounts.includes(accountId)) return true;
     }
     return false;
+}
+
+// ---------- Cancelar las suscripciones de un usuario (al borrar la cuenta) ----------
+// Todas las de FinanceFlow: la guardada en users y las de pagos anteriores registrados en
+// stripe_events (alguien pudo pagar dos veces y solo se guarda la última). Cancelación inmediata,
+// sin prorrateo. Devuelve false si alguna no se pudo cancelar.
+async function cancelUserSubscriptions(env, user) {
+    const ids = new Set();
+    if (user.stripe_subscription_id) ids.add(user.stripe_subscription_id);
+    const { results } = await env.DB.prepare(
+        `SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.data.object.subscription') END AS sub
+         FROM stripe_events
+         WHERE type IN ('checkout.session.completed', 'checkout.session.async_payment_succeeded')
+           AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.data.object.metadata.user_id') END = ?`)
+        .bind(user.id).all();
+    for (const r of results || []) if (typeof r.sub === 'string') ids.add(r.sub);
+    const subs = [...ids].filter(id => /^sub_[A-Za-z0-9]+$/.test(id));
+    if (!subs.length) return true;
+    if (!env.STRIPE_SECRET_KEY) { console.error('cancelUserSubscriptions: falta STRIPE_SECRET_KEY'); return false; }
+    const headers = { 'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}` };
+    for (const id of subs) {
+        const got = await fetch(`https://api.stripe.com/v1/subscriptions/${id}`, { headers });
+        if (got.status === 404) continue;   // ya no existe
+        if (!got.ok) { console.error('Stripe leer suscripción:', id, got.status); return false; }
+        const sub = await got.json();
+        if (sub.status === 'canceled' || sub.status === 'incomplete_expired') continue;
+        const del = await fetch(`https://api.stripe.com/v1/subscriptions/${id}`, { method: 'DELETE', headers });
+        if (!del.ok) { console.error('Stripe cancelar suscripción:', id, del.status); return false; }
+    }
+    return true;
 }
 
 // ---------- Verificación firma Stripe ----------
