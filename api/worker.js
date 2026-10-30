@@ -1207,15 +1207,18 @@ export default {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const { rules } = await request.json();
                 if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
-                await env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid).run();
-                for (const r of rules) {
-                    await env.DB.prepare(
+                // Atómico (batch = transacción en D1): si un INSERT falla, por ejemplo por un id
+                // que ya usa otro usuario (la PK es global), se deshace también el DELETE y el
+                // usuario conserva las reglas que tenía.
+                await env.DB.batch([
+                    env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid),
+                    ...rules.map(r => env.DB.prepare(
                         `INSERT INTO categorization_rules (id,user_id,name,keywords,account_type,account_id,account_name,enabled,is_default,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?)`)
                         .bind(r.id, uid, r.name, JSON.stringify(r.keywords || []), r.accountType ?? null,
                               r.accountId ?? null, r.accountName ?? null, r.enabled ? 1 : 0,
-                              r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()).run();
-                }
+                              r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()))
+                ]);
                 return json({ success: true, count: rules.length }, 200, cors);
             }
             const ruleMatch = path.match(/^\/api\/rules\/(.+)$/);

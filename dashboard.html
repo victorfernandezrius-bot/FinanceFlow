@@ -3918,7 +3918,7 @@
                 });
                 
                 // Manejar submit
-                document.getElementById('edit-default-rule-form').addEventListener('submit', (e) => {
+                document.getElementById('edit-default-rule-form').addEventListener('submit', async (e) => {
                     e.preventDefault();
                     
                     const newAccountId = document.getElementById('default-rule-account').value;
@@ -3940,7 +3940,12 @@
                             accountId: newAccount.id,
                             accountName: newAccount.nombre
                         };
-                        this.accountingManager.updateCategorizeRule(ruleId, updatedRule);
+                        try {
+                            await this.accountingManager.updateCategorizeRule(ruleId, updatedRule);
+                        } catch (error) {
+                            this.showToast(error.message, 'error');
+                            return;
+                        }
                     }
                     
                     this.showToast('Cuenta asociada actualizada correctamente', 'success');
@@ -4086,7 +4091,7 @@
                 document.getElementById('rule-modal').classList.remove('hidden');
             }
 
-            handleRuleSubmit(e) {
+            async handleRuleSubmit(e) {
                 e.preventDefault();
                 
                 // Prevenir múltiples submits
@@ -4138,11 +4143,11 @@
                     
                     if (form.dataset.editId) {
                         // Update existing rule
-                        this.accountingManager.updateCategorizeRule(form.dataset.editId, ruleData);
+                        await this.accountingManager.updateCategorizeRule(form.dataset.editId, ruleData);
                         this.showToast('Regla actualizada correctamente', 'success');
                     } else {
                         // Create new rule (SOLO UNA VEZ)
-                        this.accountingManager.addCategorizeRule(ruleData);
+                        await this.accountingManager.addCategorizeRule(ruleData);
                         this.showToast('Regla creada correctamente', 'success');
                     }
                     
@@ -4157,13 +4162,13 @@
                 }
             }
             
-            toggleRule(ruleId) {
+            async toggleRule(ruleId) {
                 try {
                     const rules = this.accountingManager.getCategorizeRules();
                     const rule = rules.find(r => r.id === ruleId);
                     
                     if (rule) {
-                        this.accountingManager.updateCategorizeRule(ruleId, { enabled: !rule.enabled });
+                        await this.accountingManager.updateCategorizeRule(ruleId, { enabled: !rule.enabled });
                         this.renderRulesList();
                         
                         const action = rule.enabled ? 'desactivada' : 'activada';
@@ -4175,10 +4180,10 @@
                 }
             }
             
-            deleteRule(ruleId) {
+            async deleteRule(ruleId) {
                 if (confirm('¿Estás seguro de que deseas eliminar esta regla?')) {
                     try {
-                        this.accountingManager.deleteCategorizeRule(ruleId);
+                        await this.accountingManager.deleteCategorizeRule(ruleId);
                         this.renderRulesList();
                         this.showToast('Regla eliminada correctamente', 'success');
                     } catch (error) {

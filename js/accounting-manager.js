@@ -1155,10 +1155,14 @@ class AccountingManager {
             return null;
         };
         
+        // IDs únicos por usuario: la PK de categorization_rules en D1 es global, y con IDs
+        // fijos ('rule_salary'…) el primer usuario que las guardaba bloqueaba a todos los demás.
+        const defaultId = (base) => `${base}_${crypto.randomUUID()}`;
+
         // Definir reglas por defecto SIN cuentas asociadas (usuario las asignará manualmente)
         const defaultRules = [
             {
-                id: 'rule_salary',
+                id: defaultId('rule_salary'),
                 name: 'Salarios y Nóminas',
                 keywords: ['salario', 'nomina', 'nómina', 'sueldo', 'pago empresa'],
                 accountType: 'ingreso',
@@ -1168,7 +1172,7 @@ class AccountingManager {
                 isDefault: true
             },
             {
-                id: 'rule_supermarket',
+                id: defaultId('rule_supermarket'),
                 name: 'Supermercados',
                 keywords: ['mercadona', 'carrefour', 'alcampo', 'dia', 'lidl', 'supermercado', 'alimentación'],
                 accountType: 'gasto',
@@ -1178,7 +1182,7 @@ class AccountingManager {
                 isDefault: true
             },
             {
-                id: 'rule_gas',
+                id: defaultId('rule_gas'),
                 name: 'Gasolineras',
                 keywords: ['repsol', 'cepsa', 'bp', 'shell', 'gasolina', 'combustible'],
                 accountType: 'gasto',
@@ -1188,7 +1192,7 @@ class AccountingManager {
                 isDefault: true
             },
             {
-                id: 'rule_transport',
+                id: defaultId('rule_transport'),
                 name: 'Transporte Público',
                 keywords: ['metro', 'bus', 'tren', 'taxi', 'uber', 'cabify'],
                 accountType: 'gasto',
@@ -1198,7 +1202,7 @@ class AccountingManager {
                 isDefault: true
             },
             {
-                id: 'rule_restaurants',
+                id: defaultId('rule_restaurants'),
                 name: 'Restaurantes y Bares',
                 keywords: ['restaurante', 'bar', 'cafetería', 'mcdonald', 'burger', 'pizza'],
                 accountType: 'gasto',
@@ -1208,7 +1212,7 @@ class AccountingManager {
                 isDefault: true
             },
             {
-                id: 'rule_subscriptions',
+                id: defaultId('rule_subscriptions'),
                 name: 'Suscripciones',
                 keywords: ['netflix', 'spotify', 'amazon prime', 'disney', 'suscripción'],
                 accountType: 'gasto',
@@ -1230,7 +1234,9 @@ class AccountingManager {
             throw new Error('Las reglas de categorización requieren Premium');
         }
         
-        await DataClient.saveRules(this.auth.currentUser?.id, rules);
+        const saved = await DataClient.saveRules(this.auth.currentUser?.id, rules);
+        // saveRules devuelve null si el servidor no las guardó: avisar en vez de dar el cambio por hecho
+        if (saved === null) throw new Error('No se pudieron guardar las reglas. Inténtalo de nuevo.');
         return { success: true };
     }
     
