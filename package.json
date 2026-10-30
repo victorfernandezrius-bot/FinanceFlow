@@ -11,7 +11,7 @@
     "tail": "wrangler tail"
   },
   "dependencies": {
-    "@block65/webcrypto-web-push": "^0.3.0",
+    "@block65/webcrypto-web-push": "^2.0.0",
     "@simplewebauthn/server": "^13.3.2"
   },
   "devDependencies": {
