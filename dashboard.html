@@ -9927,6 +9927,7 @@
                         <p style="color: var(--text-primary); margin-bottom:1rem; line-height:1.5;">
                             Esta acción es <strong>permanente e irreversible</strong>. Se borrarán tu cuenta,
                             tus cuentas, movimientos, reglas y todos tus datos. No podrás recuperarlos.
+                            Si tienes una suscripción Premium, se cancelará en ese momento y no se te volverá a cobrar.
                         </p>
                         <p style="color: var(--text-secondary); margin-bottom:.5rem; font-size:.9rem;">
                             Para confirmar, escribe <strong>ELIMINAR</strong> en el campo:
@@ -9972,6 +9973,7 @@
                         <p style="color: var(--text-primary); margin-bottom:1rem; line-height:1.5;">
                             Esta acción es <strong>permanente e irreversible</strong>. Se borrarán tu cuenta,
                             tus cuentas, movimientos, reglas y todos tus datos. No podrás recuperarlos.
+                            Si tienes una suscripción Premium, se cancelará en ese momento y no se te volverá a cobrar.
                         </p>
                         <p style="color: var(--text-secondary); margin-bottom:.5rem; font-size:.9rem;">
                             Para confirmar, escribe <strong>ELIMINAR</strong> en el campo:
@@ -10014,7 +10016,13 @@
                         method: 'DELETE',
                         headers: { 'Authorization': 'Bearer ' + token }
                     });
-                    if (!r.ok) throw new Error('No se pudo eliminar la cuenta');
+                    if (!r.ok) {
+                        // El servidor explica el motivo (p. ej. si no pudo cancelar la suscripción)
+                        const data = await r.json().catch(() => ({}));
+                        const err = new Error('No se pudo eliminar la cuenta');
+                        err.userMessage = data.error;
+                        throw err;
+                    }
                     // Limpiar sesión local y salir
                     localStorage.removeItem('financeflow_token');
                     localStorage.removeItem('currentUser');
@@ -10025,7 +10033,7 @@
                     console.error('Error al eliminar cuenta:', e);
                     confirmBtn.disabled = false;
                     confirmBtn.innerHTML = '<i class="fas fa-trash-alt mr-2"></i>Eliminar definitivamente';
-                    this.showNotification('Error al eliminar la cuenta. Inténtalo de nuevo.', 'error');
+                    this.showNotification(e.userMessage || 'Error al eliminar la cuenta. Inténtalo de nuevo.', 'error');
                 }
             }
             showChangePasswordModal() {
