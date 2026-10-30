@@ -640,9 +640,11 @@
             }
         }
 
-        // Inicializar página
+        // Inicializar página. registerPage vive fuera del listener porque el callback de
+        // Google (más abajo) también la usa; dentro era una const local y daba ReferenceError.
+        let registerPage = null;
         document.addEventListener('DOMContentLoaded', () => {
-            const registerPage = new RegisterPage();
+            registerPage = new RegisterPage();
             
             // Verificar si viene con plan premium preseleccionado desde index
             const selectedPremiumPlan = sessionStorage.getItem('selectedPremiumPlan');
