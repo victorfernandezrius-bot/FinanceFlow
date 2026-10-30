@@ -73,7 +73,11 @@ class StripeCheckout {
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                // El servidor explica el motivo (p. ej. 409 si ya tienes Premium): se le muestra al usuario
+                const data = await response.json().catch(() => ({}));
+                const err = new Error(`HTTP ${response.status}: ${response.statusText}`);
+                err.userMessage = data.error;
+                throw err;
             }
 
             const session = await response.json();
@@ -100,7 +104,9 @@ class StripeCheckout {
 
         } catch (error) {
             console.error('Stripe checkout error:', error);
-            if (error.message && error.message.includes('session')) {
+            if (error.userMessage) {
+                this.showError(error.userMessage);
+            } else if (error.message && error.message.includes('session')) {
                 this.showError('Error al crear la sesión de pago. Inténtalo de nuevo.');
             } else {
                 this.showError('Error al procesar el pago. Contacta soporte si persiste.');

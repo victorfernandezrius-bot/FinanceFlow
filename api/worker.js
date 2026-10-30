@@ -1543,6 +1543,10 @@ export default {
                 // Cada llamada crea una Checkout Session en Stripe: máx. 10 por usuario cada 15 min
                 if (await rateLimited(env, `rl:checkout:${uid}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+                // Una sola suscripción por usuario: si ya es Premium, el cambio de plan o la baja se
+                // hacen en el portal de Stripe. Así se evita pagar dos veces (pasó en mayo).
+                if (authUser.plan === 'premium')
+                    return json({ error: 'Ya tienes Premium. Para cambiar de plan o cancelar, usa «Gestionar suscripción».' }, 409, cors);
                 const body = await request.json();
                 // Aceptar tanto plan_type como planType; normalizar 'annual'/'yearly'
                 const planRaw = body.plan_type || body.planType || 'monthly';
