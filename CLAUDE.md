@@ -40,6 +40,23 @@ npm run tail                             # logs del Worker en vivo
 ```
 No hay tests automáticos. Para verificar: `node --check api/worker.js` como mínimo y, después, una prueba manual en staging. Di siempre qué has probado y qué no.
 
+## Git y deploy (autonomía)
+Regla general: haz tú todo lo que puedas. Si no puedes, dame los pasos exactos para ejecutarlos yo. Nunca respondas solo "hazlo tú".
+
+**Sin pedir permiso:**
+- `node --check api/worker.js`, y después `git add`, `git commit` (mensaje claro en español) y `git push` en la rama actual.
+- Staging: `npx wrangler deploy --env staging`.
+- `npm run dev` y `npm run tail`.
+
+**Pedir confirmación antes (una sola pregunta, con el comando exacto):**
+- `npm run deploy:worker`, `npm run deploy:pages`, `npm run db:schema` (afectan a producción).
+
+**Si un comando falla** (login, permisos, red, rama protegida):
+1. No reintentes variantes ni busques atajos.
+2. Dime la causa en una frase.
+3. Dame los comandos exactos y en orden, listos para pegar en el cmd, indicando carpeta y rama.
+4. Dime qué has probado y qué no.
+
 ## Reglas de este proyecto
 - **Todo endpoint nuevo** debe usar `getAuthUser()` y filtrar **siempre** por `user_id` en SQL (`WHERE id=? AND user_id=?`). Usa solo consultas con `.bind()`; nunca concatenes strings en SQL.
 - **Endpoint nuevo = 3 sitios**: la ruta en `worker.js`, el método en `data-client.js` (en sus dos modos, local y remote) y la llamada desde la UI.
