@@ -279,6 +279,19 @@ const V = {
     dueDay: (x) => isNil(x) || (Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 31),
 };
 const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 400, cors);
+
+// ---------- Plan Premium y límites (fuente de verdad: D1) ----------
+// Igual que Auth.isPremium() en el cliente (js/auth.js): plan de pago o prueba antigua aún vigente.
+const isPremiumUser = (u) => !!u && (u.plan === 'premium' ||
+    (!!u.premium_trial_expires_at && new Date(u.premium_trial_expires_at) > new Date()));
+const premiumRequired = (que, cors) => json({ error: `${que} requiere el plan Premium` }, 403, cors);
+// Cuentas por tipo y plan: los mismos números que getPlanLimits() en js/auth.js (si cambian
+// allí, cambiarlos aquí). Solo se aplican al crear una cuenta nueva, no al editarla: quien ya
+// los supera (p. ej. al dejar Premium) conserva sus cuentas.
+const ACCOUNT_LIMITS = {
+    free:    { activo: 1,  ingreso: 2, gasto: 8,  pasivo: 2,  patrimonio: 1 },
+    premium: { activo: 10, ingreso: 8, gasto: 25, pasivo: 10, patrimonio: 3 }
+};
 // Endpoint de Web Push: https y nombre de host (los servicios reales son FCM, Mozilla,
 // Apple y WNS); se rechazan IPs literales y localhost para no usar el Worker como proxy.
 function isPushEndpoint(u) {
@@ -671,7 +684,7 @@ export default {
         ctx.waitUntil(sendEmail(env, {
           to: email.toLowerCase(),
           subject: '¡Bienvenido a Finance Flow!',
-          html: welcomeEmailHTML(name)
+          html: welcomeEmailHTML()
         }));
         return json({ success: true, token, currentUser: user }, 201, cors);
             }
@@ -866,7 +879,7 @@ export default {
                         ctx.waitUntil(sendEmail(env, {
                             to: gEmail,
                             subject: '¡Bienvenido a Finance Flow!',
-                            html: welcomeEmailHTML(gName)
+                            html: welcomeEmailHTML()
                         }));
                     }
                 }
@@ -911,7 +924,7 @@ export default {
           ctx.waitUntil(sendEmail(env, {
             to: fpUser.email,
             subject: "Recupera tu contraseña - Finance Flow",
-            html: resetPasswordEmailHTML(fpUser.name || "", link)
+            html: resetPasswordEmailHTML(link)
           }));
         }
         return json({ success: true }, 200, cors);
@@ -1137,6 +1150,14 @@ export default {
                         !V.optStr(a.descripcion, 500) || !V.optAmount(a.saldo_inicial) || !V.optAmount(a.saldo_actual) ||
                         !V.optAmount(a.fixed_monthly_amount) || !V.dueDay(a.fixed_due_day) || !V.optDate(a.created_at))
                         return invalid('cuenta', cors);
+                    const isNewAccount = !(await env.DB.prepare('SELECT 1 FROM accounts WHERE id=? AND user_id=?').bind(a.id, uid).first());
+                    if (isNewAccount) {
+                        const limit = ACCOUNT_LIMITS[isPremiumUser(authUser) ? 'premium' : 'free'][a.tipo];
+                        const { n } = await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE user_id=? AND tipo=?')
+                            .bind(uid, a.tipo).first();
+                        if (n >= limit)
+                            return json({ error: `Has alcanzado el límite de cuentas de tipo ${a.tipo} de tu plan` }, 403, cors);
+                    }
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO accounts (id,user_id,nombre,tipo,descripcion,saldo_inicial,saldo_actual,
@@ -1222,6 +1243,7 @@ export default {
                     })), 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('Las reglas de registro automático', cors);
                     const r = await request.json();
                     if (!validRule(r)) return invalid('regla', cors);
                     await env.DB.prepare(
@@ -1239,6 +1261,7 @@ export default {
             }
             if (path === '/api/rules/bulk' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (!isPremiumUser(authUser)) return premiumRequired('Las reglas de registro automático', cors);
                 const { rules } = await request.json();
                 if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
                 // Atómico (batch = transacción en D1): si un INSERT falla, por ejemplo por un id
@@ -1271,6 +1294,7 @@ export default {
                     return json(row ? JSON.parse(row.plan_data) : null, 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('El plan de autocontrol', cors);
                     const plan = await request.json();
                     if (!V.blob(plan, 100000)) return invalid('plan de autocontrol', cors);
                     await env.DB.prepare(
@@ -1289,6 +1313,7 @@ export default {
                     return json(row ? JSON.parse(row.associations_data) : null, 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('El plan de autocontrol', cors);
                     const assoc = await request.json();
                     if (!V.blob(assoc, 100000)) return invalid('asociaciones', cors);
                     await env.DB.prepare(
@@ -1587,13 +1612,25 @@ export default {
                 await env.DB.prepare('INSERT INTO stripe_events (event_id,type,processed_at,payload) VALUES (?,?,?,?)')
                     .bind(event.id, event.type, new Date().toISOString(), body.slice(0, 5000)).run();
 
-                if (event.type === 'checkout.session.completed') {
+                // Premium solo para pagos iniciados por /api/stripe/create-checkout: es la única vía
+                // que fija metadata.user_id (y client_reference_id) con el uid, y metadata solo se
+                // escribe con la clave secreta. La cuenta de Stripe tiene más productos y Payment
+                // Links que también llegan a este webhook, y un Payment Link acepta
+                // ?client_reference_id=<lo que sea> en la URL: nunca deben dar Premium.
+                // Además, el pago tiene que estar hecho: 'paid', o 'no_payment_required' (cupón del
+                // 100 %). Con métodos de pago diferidos (SEPA…) la sesión se completa sin cobrar y
+                // el Premium llega con checkout.session.async_payment_succeeded.
+                if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
                     const s = event.data.object;
-                    const userId = s.metadata?.user_id || s.client_reference_id;
+                    const userId = s.metadata?.user_id;
+                    const fromApp = !!userId && s.client_reference_id === userId && s.mode === 'subscription';
+                    const paid = s.payment_status === 'paid' || s.payment_status === 'no_payment_required';
+                    if (!fromApp || !paid)
+                        console.log('Stripe: sesión ignorada', event.id, event.type, s.mode, s.payment_status, fromApp ? 'app' : 'otro producto');
                     const planType = s.metadata?.plan_type || 'monthly';
                     const expDays = planType === 'annual' ? 365 : 30;
                     const exp = new Date(Date.now() + expDays * 864e5).toISOString();
-                    if (userId) {
+                    if (fromApp && paid) {
                         await env.DB.prepare(
                             `UPDATE users SET plan='premium', plan_expires_at=?, stripe_customer_id=?, stripe_subscription_id=?, updated_at=? WHERE id=?`)
                             .bind(exp, s.customer || null, s.subscription || null, new Date().toISOString(), userId).run();
@@ -1809,7 +1846,7 @@ export default {
                     await sendEmail(env, {
                         to: u.email,
                         subject: '¿Nos ayudas a mejorar Finance Flow?',
-                        html: feedbackRequestEmailHTML(u.name || '', 'https://www.contabilidadpersonal.com/valoracion-finance-flow/')
+                        html: feedbackRequestEmailHTML('https://www.contabilidadpersonal.com/valoracion-finance-flow/')
                     });
                 } catch (e) {
                     console.error('Cron feedback, usuario', u.id, ':', e);
@@ -1929,15 +1966,16 @@ async function sendEmail(env, { to, subject, html }) {
     return false;
   }
 }
-// El nombre lo escribe el usuario (o quien se registra con un email ajeno):
-// se escapa antes de meterlo en el HTML de los emails.
+// El nombre lo escribe el usuario (o quien se registra con un email ajeno): se escapa antes
+// de meterlo en el HTML. Los emails que salen sin que nadie haya demostrado ser el dueño del
+// email (bienvenida, recuperación, valoración) no lo llevan: si no, cualquiera podría mandar
+// a cualquier dirección un email de la marca con su propio texto (p. ej. un enlace de phishing).
 function escapeHtml(str) {
     return String(str == null ? '' : str)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function welcomeEmailHTML(name) {
-  name = escapeHtml(name);
+function welcomeEmailHTML() {
   return `
   <!DOCTYPE html>
   <html lang="es">
@@ -1952,7 +1990,7 @@ function welcomeEmailHTML(name) {
             </tr></table>
           </td></tr>
           <tr><td style="padding:32px;">
-            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido, ${name}! 👋</h2>
+            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido a Finance Flow! 👋</h2>
             <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
               Gracias por unirte a Finance Flow. Ya puedes empezar a controlar tus finanzas con precisión:
               crea tus cuentas, registra movimientos y descubre tu situación financiera real.
@@ -1995,8 +2033,7 @@ function premiumActivatedEmailHTML(name, planType) {
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Contabilidad Personal · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-                function resetPasswordEmailHTML(name, link) {
-    name = escapeHtml(name);
+function resetPasswordEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
@@ -2008,15 +2045,14 @@ function premiumActivatedEmailHTML(name, planType) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Recupera tu contraseña</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Restablecer contraseña</a>
     <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has solicitado esto, ignora este correo. Tu contraseña no cambiará.</p>
     </td></tr>
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-function feedbackRequestEmailHTML(name, link) {
-    name = escapeHtml(name);
+function feedbackRequestEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
@@ -2028,7 +2064,7 @@ function feedbackRequestEmailHTML(name, link) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¿Nos ayudas a mejorar?</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
     <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">Nos encantaría conocer tu opinión: qué te está funcionando y qué podríamos hacer mejor. Son solo 2 minutos y nos ayuda muchísimo.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Dar mi opinión</a>
     <p style="margin:28px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si ahora no es buen momento, no pasa nada: no volveremos a insistir.</p>
