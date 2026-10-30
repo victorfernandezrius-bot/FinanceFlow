@@ -897,8 +897,16 @@ export default {
         const rpUserId = await env.CACHE.get("reset:" + rp.token);
         if (!rpUserId) return json({ error: "El enlace no es válido o ha caducado" }, 400, cors);
         const rpHash = await hashPassword(rp.password);
-        await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
-          .bind(rpHash, new Date().toISOString(), rpUserId).run();
+        // Restablecer es la vía para recuperar una cuenta robada: además de las sesiones
+        // (bumpTokenVersion), se revocan las passkeys y las suscripciones push, que no
+        // dependen de la contraseña. Los dispositivos legítimos vuelven a suscribirse solos
+        // al abrir el dashboard (reconcilePushSubscription).
+        await env.DB.batch([
+          env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
+            .bind(rpHash, new Date().toISOString(), rpUserId),
+          env.DB.prepare("DELETE FROM webauthn_credentials WHERE user_id=?").bind(rpUserId),
+          env.DB.prepare("DELETE FROM push_subscriptions WHERE user_id=?").bind(rpUserId)
+        ]);
         await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
         ctx.waitUntil(audit(env, request, 'password_reset', rpUserId));
         await env.CACHE.delete("reset:" + rp.token);
@@ -1001,6 +1009,26 @@ export default {
                         now
                     ).run();
                 await env.CACHE.delete(`webauthn_challenge:${authUser.id}`);
+                return json({ success: true }, 200, cors);
+            }
+
+            // ---------- WebAuthn: passkeys del usuario (listar / quitar) ----------
+            // Sin credential_id ni clave pública: solo lo que el usuario necesita para
+            // reconocer sus dispositivos y quitar los que no son suyos.
+            if (path === '/api/auth/webauthn/credentials' && method === 'GET') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT id, device_name, created_at, last_used_at FROM webauthn_credentials WHERE user_id=? ORDER BY created_at DESC')
+                    .bind(authUser.id).all();
+                return json({ credentials: results || [] }, 200, cors);
+            }
+            const waCredMatch = path.match(/^\/api\/auth\/webauthn\/credentials\/([^/]+)$/);
+            if (waCredMatch && method === 'DELETE') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                if (!V.id(waCredMatch[1])) return invalid('passkey', cors);
+                const del = await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id=? AND user_id=?')
+                    .bind(waCredMatch[1], authUser.id).run();
+                if (del.meta?.changes) ctx.waitUntil(audit(env, request, 'passkey_removed', authUser.id));
                 return json({ success: true }, 200, cors);
             }
 
