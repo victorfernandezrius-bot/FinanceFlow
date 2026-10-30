@@ -222,6 +222,20 @@ async function getAuthUser(request, env) {
     return auth ? auth.user : null;
 }
 
+// IP del cliente para las claves de rate limit. IPv6 se agrupa por /64: un cliente suele
+// tener un /64 entero y, contando cada dirección por separado, tendría intentos casi
+// ilimitados. IPv4 (y IPv6 con IPv4 incrustada) se usa tal cual.
+function rateLimitIp(request) {
+    const ip = (request.headers.get('CF-Connecting-IP') || 'unknown').toLowerCase();
+    if (!ip.includes(':')) return ip;
+    if (ip.includes('.')) return ip.slice(ip.lastIndexOf(':') + 1);
+    const [head, tail] = ip.split('::');
+    const left = head ? head.split(':') : [];
+    const right = tail ? tail.split(':') : [];
+    const groups = tail === undefined ? left : [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+    return groups.slice(0, 4).map(g => parseInt(g || '0', 16).toString(16)).join(':') + '::/64';
+}
+
 // Rate limit sencillo con KV (env.CACHE). Devuelve true si se SUPERA el límite.
 // Ventana deslizante (el TTL se renueva en cada intento). No es transaccional
 // (posible sub-conteo con alta concurrencia), suficiente para frenar abuso.
@@ -321,23 +335,32 @@ const TURNSTILE_ERROR = { error: 'Completa la verificación anti-bots e inténta
 //  - email+IP: desde el 5.º fallo, bloqueo con backoff exponencial (1, 2, 4… min,
 //    máx. 60). Solo afecta a esa IP: no sirve para dejar fuera al dueño de la cuenta.
 //  - email (cualquier IP): tope de 50 fallos por hora contra ataques distribuidos.
-// Un login correcto borra el contador email+IP. Fail-open si KV falla.
+//    No se aplica a las IPs de confianza de ese email (lok:<email>:<ip>, 90 días): las
+//    IPs desde las que ya entró con su contraseña o restableció la contraseña. Así un
+//    ataque repartido entre muchas IPs no deja fuera al dueño desde su red habitual.
+// Un login correcto borra el contador email+IP; un reset de contraseña borra los dos.
+// Las IPs son las de rateLimitIp (IPv6 agrupada por /64). Fail-open si KV falla.
 const LOGIN_FAILS_BEFORE_BACKOFF = 5;
 const LOGIN_EMAIL_MAX_FAILS_PER_HOUR = 50;
+const LOGIN_TRUSTED_IP_TTL = 90 * 86400;
 async function loginLockState(env, email, ip) {
     try {
-        const [pairRaw, totalRaw] = await Promise.all([
-            env.CACHE.get(`lf:${email}:${ip}`), env.CACHE.get(`lf:${email}`)]);
+        const [pairRaw, totalRaw, trusted] = await Promise.all([
+            env.CACHE.get(`lf:${email}:${ip}`), env.CACHE.get(`lf:${email}`), env.CACHE.get(`lok:${email}:${ip}`)]);
         const pair = pairRaw ? JSON.parse(pairRaw) : { n: 0 };
         const total = parseInt(totalRaw, 10) || 0;
         let wait = 0;
         if (pair.until && pair.until > Date.now()) wait = Math.ceil((pair.until - Date.now()) / 1000);
-        else if (total >= LOGIN_EMAIL_MAX_FAILS_PER_HOUR) wait = 3600;
-        return { wait, pair, total };
+        else if (total >= LOGIN_EMAIL_MAX_FAILS_PER_HOUR && !trusted) wait = 3600;
+        return { wait, pair, total, trusted: !!trusted };
     } catch (e) {
         console.error('loginLockState:', e);
-        return { wait: 0, pair: { n: 0 }, total: 0 };
+        return { wait: 0, pair: { n: 0 }, total: 0, trusted: false };
     }
+}
+async function trustLoginIp(env, email, ip) {
+    try { await env.CACHE.put(`lok:${email}:${ip}`, '1', { expirationTtl: LOGIN_TRUSTED_IP_TTL }); }
+    catch (e) { console.error('trustLoginIp:', e); }
 }
 async function loginFailed(env, email, ip, state) {
     try {
@@ -349,8 +372,17 @@ async function loginFailed(env, email, ip, state) {
     } catch (e) { console.error('loginFailed:', e); }
 }
 async function loginSucceeded(env, email, ip, state) {
+    if (!state.trusted) await trustLoginIp(env, email, ip);
     if (!state.pair.n) return;
     try { await env.CACHE.delete(`lf:${email}:${ip}`); } catch (e) { console.error('loginSucceeded:', e); }
+}
+// Restablecer la contraseña demuestra que controla el email: se levanta el bloqueo por
+// fallos (también el global) y esa IP pasa a ser de confianza.
+async function clearLoginLock(env, email, ip) {
+    try {
+        await Promise.all([env.CACHE.delete(`lf:${email}`), env.CACHE.delete(`lf:${email}:${ip}`)]);
+    } catch (e) { console.error('clearLoginLock:', e); }
+    await trustLoginIp(env, email, ip);
 }
 
 // ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
@@ -606,11 +638,11 @@ export default {
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
                 // Máx. 10 altas por IP y hora (anti creación masiva de cuentas y de emails)
-                const regIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const regIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:register:${regIp}`, 10, 3600))
                     return json({ error: 'Demasiados registros desde esta conexión. Inténtalo más tarde.' }, 429, cors);
                 const { email, password, name, turnstileToken } = await request.json();
-                if (!(await turnstileOk(env, turnstileToken, regIp))) return json(TURNSTILE_ERROR, 400, cors);
+                if (!(await turnstileOk(env, turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
                 if (!V.email(email) || !V.str(password, 256) || !V.str(name, 100))
@@ -646,12 +678,12 @@ export default {
 
             if (path === '/api/auth/login' && method === 'POST') {
                 // B4: máx. 10 intentos por IP cada 15 min (anti fuerza bruta)
-                const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const loginIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { email, password, turnstileToken } = await request.json();
                 if (!V.str(email, 254) || !V.str(password, 1024)) return invalid('email o contraseña', cors);
-                if (!(await turnstileOk(env, turnstileToken, loginIp))) return json(TURNSTILE_ERROR, 400, cors);
+                if (!(await turnstileOk(env, turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
                 const loginEmail = (email || '').toLowerCase();
                 const lock = await loginLockState(env, loginEmail, loginIp);
                 if (lock.wait > 0)
@@ -676,7 +708,7 @@ export default {
             // elige entre las passkeys guardadas. El reto se cachea por un id temporal.
             if (path === '/api/auth/webauthn/login-options' && method === 'POST') {
                 // Cada llamada escribe un reto en KV: máx. 30 por IP cada 15 min
-                const optIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const optIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:wa-opt:${optIp}`, 30, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { rpID } = webauthnConfig(env);
@@ -691,7 +723,7 @@ export default {
 
             if (path === '/api/auth/webauthn/login-verify' && method === 'POST') {
                 // Mismo rate limit por IP que /api/auth/login (anti fuerza bruta)
-                const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const loginIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
 
@@ -749,7 +781,7 @@ export default {
 
             if (path === '/api/auth/google' && method === 'POST') {
                 // Cada llamada consulta a Google: máx. 20 por IP cada 15 min
-                const gIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const gIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:google:${gIp}`, 20, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { credential } = await request.json();
@@ -864,12 +896,12 @@ export default {
         const fpEmail = (fp.email || "").toLowerCase();
         // B4: máx. 3 solicitudes por email/hora y 10 por IP/hora (anti bombardeo de emails).
         // Se responde igual que el flujo normal para no revelar el límite ni si el email existe.
-        const fpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        const fpIp = rateLimitIp(request);
         if (await rateLimited(env, `rl:reset:${fpEmail}`, 3, 3600) ||
             await rateLimited(env, `rl:reset-ip:${fpIp}`, 10, 3600)) {
           return json({ success: true }, 200, cors);
         }
-        if (!(await turnstileOk(env, fp.turnstileToken, fpIp))) return json(TURNSTILE_ERROR, 400, cors);
+        if (!(await turnstileOk(env, fp.turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
         const fpUser = await env.DB.prepare("SELECT id, name, email FROM users WHERE email=?")
           .bind(fpEmail).first();
         if (fpUser) {
@@ -886,7 +918,7 @@ export default {
       }
       if (path === "/api/auth/reset-password" && method === "POST") {
         // Máx. 10 intentos por IP cada 15 min (el token es aleatorio de 122 bits; esto evita abuso)
-        const rpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        const rpIp = rateLimitIp(request);
         if (await rateLimited(env, `rl:reset-pw:${rpIp}`, 10, 900))
           return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
         const rp = await request.json();
@@ -908,6 +940,8 @@ export default {
           env.DB.prepare("DELETE FROM push_subscriptions WHERE user_id=?").bind(rpUserId)
         ]);
         await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
+        const rpUser = await env.DB.prepare("SELECT email FROM users WHERE id=?").bind(rpUserId).first();
+        if (rpUser) ctx.waitUntil(clearLoginLock(env, rpUser.email, rpIp));
         ctx.waitUntil(audit(env, request, 'password_reset', rpUserId));
         await env.CACHE.delete("reset:" + rp.token);
         return json({ success: true }, 200, cors);
