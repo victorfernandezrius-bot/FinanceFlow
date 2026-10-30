@@ -684,7 +684,7 @@ export default {
         ctx.waitUntil(sendEmail(env, {
           to: email.toLowerCase(),
           subject: '¡Bienvenido a Finance Flow!',
-          html: welcomeEmailHTML(name)
+          html: welcomeEmailHTML()
         }));
         return json({ success: true, token, currentUser: user }, 201, cors);
             }
@@ -879,7 +879,7 @@ export default {
                         ctx.waitUntil(sendEmail(env, {
                             to: gEmail,
                             subject: '¡Bienvenido a Finance Flow!',
-                            html: welcomeEmailHTML(gName)
+                            html: welcomeEmailHTML()
                         }));
                     }
                 }
@@ -924,7 +924,7 @@ export default {
           ctx.waitUntil(sendEmail(env, {
             to: fpUser.email,
             subject: "Recupera tu contraseña - Finance Flow",
-            html: resetPasswordEmailHTML(fpUser.name || "", link)
+            html: resetPasswordEmailHTML(link)
           }));
         }
         return json({ success: true }, 200, cors);
@@ -1846,7 +1846,7 @@ export default {
                     await sendEmail(env, {
                         to: u.email,
                         subject: '¿Nos ayudas a mejorar Finance Flow?',
-                        html: feedbackRequestEmailHTML(u.name || '', 'https://www.contabilidadpersonal.com/valoracion-finance-flow/')
+                        html: feedbackRequestEmailHTML('https://www.contabilidadpersonal.com/valoracion-finance-flow/')
                     });
                 } catch (e) {
                     console.error('Cron feedback, usuario', u.id, ':', e);
@@ -1966,15 +1966,16 @@ async function sendEmail(env, { to, subject, html }) {
     return false;
   }
 }
-// El nombre lo escribe el usuario (o quien se registra con un email ajeno):
-// se escapa antes de meterlo en el HTML de los emails.
+// El nombre lo escribe el usuario (o quien se registra con un email ajeno): se escapa antes
+// de meterlo en el HTML. Los emails que salen sin que nadie haya demostrado ser el dueño del
+// email (bienvenida, recuperación, valoración) no lo llevan: si no, cualquiera podría mandar
+// a cualquier dirección un email de la marca con su propio texto (p. ej. un enlace de phishing).
 function escapeHtml(str) {
     return String(str == null ? '' : str)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function welcomeEmailHTML(name) {
-  name = escapeHtml(name);
+function welcomeEmailHTML() {
   return `
   <!DOCTYPE html>
   <html lang="es">
@@ -1989,7 +1990,7 @@ function welcomeEmailHTML(name) {
             </tr></table>
           </td></tr>
           <tr><td style="padding:32px;">
-            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido, ${name}! 👋</h2>
+            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido a Finance Flow! 👋</h2>
             <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
               Gracias por unirte a Finance Flow. Ya puedes empezar a controlar tus finanzas con precisión:
               crea tus cuentas, registra movimientos y descubre tu situación financiera real.
@@ -2032,8 +2033,7 @@ function premiumActivatedEmailHTML(name, planType) {
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Contabilidad Personal · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-                function resetPasswordEmailHTML(name, link) {
-    name = escapeHtml(name);
+function resetPasswordEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
@@ -2045,15 +2045,14 @@ function premiumActivatedEmailHTML(name, planType) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Recupera tu contraseña</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Restablecer contraseña</a>
     <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has solicitado esto, ignora este correo. Tu contraseña no cambiará.</p>
     </td></tr>
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-function feedbackRequestEmailHTML(name, link) {
-    name = escapeHtml(name);
+function feedbackRequestEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
@@ -2065,7 +2064,7 @@ function feedbackRequestEmailHTML(name, link) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¿Nos ayudas a mejorar?</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
     <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">Nos encantaría conocer tu opinión: qué te está funcionando y qué podríamos hacer mejor. Son solo 2 minutos y nos ayuda muchísimo.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Dar mi opinión</a>
     <p style="margin:28px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si ahora no es buen momento, no pasa nada: no volveremos a insistir.</p>
