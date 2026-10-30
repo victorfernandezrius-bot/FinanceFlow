@@ -1614,11 +1614,11 @@ export default {
                 if (!verified) return json({ error: 'Firma inválida' }, 400, cors);
 
                 const event = JSON.parse(body);
-                // Idempotencia
+                // Idempotencia: un evento ya procesado se ignora. Se marca como procesado AL
+                // TERMINAR (abajo): si algo falla antes, el 500 hace que Stripe lo reintente y se
+                // procesa de nuevo (los UPDATE de aquí dan el mismo resultado si se repiten).
                 const seen = await env.DB.prepare('SELECT event_id FROM stripe_events WHERE event_id=?').bind(event.id).first();
                 if (seen) return json({ received: true, duplicate: true }, 200, cors);
-                await env.DB.prepare('INSERT INTO stripe_events (event_id,type,processed_at,payload) VALUES (?,?,?,?)')
-                    .bind(event.id, event.type, new Date().toISOString(), body.slice(0, 5000)).run();
 
                 // Premium solo para pagos iniciados por /api/stripe/create-checkout: es la única vía
                 // que fija metadata.user_id (y client_reference_id) con el uid, y metadata solo se
@@ -1662,6 +1662,9 @@ export default {
                         .bind(sub.id).run();
                     if (subUser) ctx.waitUntil(audit(env, null, 'plan_changed', subUser.id, { plan: 'free', stripe_event: event.id }));
                 }
+                // OR IGNORE: si Stripe entregó el mismo evento dos veces a la vez, no es un error
+                await env.DB.prepare('INSERT OR IGNORE INTO stripe_events (event_id,type,processed_at,payload) VALUES (?,?,?,?)')
+                    .bind(event.id, event.type, new Date().toISOString(), body.slice(0, 5000)).run();
                 return json({ received: true }, 200, cors);
             }
 
