@@ -2,7 +2,8 @@
 // FinanceFlow / Contabilidad Personal — Cloudflare Worker API
 // ------------------------------------------------------------
 // Endpoints:
-//   Auth:      POST /api/auth/register, /api/auth/login, /api/auth/logout
+//   Auth:      POST /api/auth/register, /api/auth/login, /api/auth/logout,
+//              POST /api/auth/verify-email, /api/auth/resend-code
 //              GET  /api/auth/session
 //   Users:     GET/PUT/DELETE /api/users/:id, GET /api/users
 //   Accounts:  GET/POST /api/accounts, DELETE /api/accounts/:id
@@ -214,6 +215,9 @@ async function authenticate(request, env) {
     if (await isRevoked(env, payload, token)) return null;
     const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
     if (!user) return null;
+    // Modo estricto: con el email sin verificar no hay sesión. Con === null (no falsy): sin la
+    // migración 0003 la columna no existe (undefined) y no se bloquea a nadie.
+    if (user.email_verified_at === null) return null;
     // Cambio/restablecimiento de contraseña: los tokens con tv anterior ya no valen.
     // Sin la columna (migración 0001 sin aplicar) no se comprueba.
     if (typeof user.token_version === 'number' && (Number(payload.tv) || 0) < user.token_version) return null;
@@ -365,6 +369,53 @@ async function loginFailed(env, email, ip, state) {
 async function loginSucceeded(env, email, ip, state) {
     if (!state.pair.n) return;
     try { await env.CACHE.delete(`lf:${email}:${ip}`); } catch (e) { console.error('loginSucceeded:', e); }
+}
+
+// ---------- Verificación de email (código de 6 dígitos, migración 0003) ----------
+// Modo estricto: una cuenta de email/contraseña no recibe sesión hasta verificar el email.
+// El código solo se guarda como HMAC-SHA256 (clave JWT_SECRET, ligado al id del usuario),
+// caduca a los 10 min y admite 5 intentos. El contador de intentos y los 60 s entre
+// envíos se aplican con UPDATE condicionales en D1 (atómicos); KV no sirve para esto
+// porque es eventualmente consistente.
+const VERIFY_CODE_TTL = 600;
+const VERIFY_MAX_ATTEMPTS = 5;
+const VERIFY_RESEND_GAP = 60;
+const NEEDS_VERIFICATION_ERROR = 'Tienes que verificar tu email antes de entrar.';
+// Uniforme: se descartan los valores >= 4.294.000.000 (el mayor múltiplo de 10^6 que
+// cabe en 32 bits), así ningún código sale más a menudo que otro.
+function newVerifyCode() {
+    const limit = Math.floor(0x100000000 / 1e6) * 1e6;
+    const buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return String(buf[0] % 1e6).padStart(6, '0');
+}
+async function verifyCodeHash(env, userId, code) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode(env.JWT_SECRET),
+        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, enc.encode(`email-verify:${userId}:${code}`));
+    return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+// Genera un código nuevo, lo guarda (reinicia los intentos) y lo envía por email, sin
+// bloquear la respuesta. Respeta los 60 s entre envíos (condición dentro del UPDATE, así
+// dos peticiones simultáneas no envían dos códigos) y máx. 5 envíos por hora y email.
+// Devuelve true si lo ha enviado.
+async function sendVerifyCode(env, ctx, user) {
+    if (await rateLimited(env, `rl:vcode:${user.email}`, 5, 3600)) return false;
+    const code = newVerifyCode();
+    const now = Date.now();
+    const r = await env.DB.prepare(
+        `UPDATE users SET verify_code_hash=?, verify_code_expires_at=?, verify_attempts=0, verify_sent_at=?
+         WHERE id=? AND email_verified_at IS NULL AND (verify_sent_at IS NULL OR verify_sent_at <= ?)`)
+        .bind(await verifyCodeHash(env, user.id, code), new Date(now + VERIFY_CODE_TTL * 1000).toISOString(),
+            new Date(now).toISOString(), user.id, new Date(now - VERIFY_RESEND_GAP * 1000).toISOString()).run();
+    if (!r.meta || r.meta.changes !== 1) return false;
+    ctx.waitUntil(sendEmail(env, {
+        to: user.email,
+        subject: 'Tu código de verificación - Finance Flow',
+        html: verifyCodeEmailHTML(user.name || '', code)
+    }));
+    return true;
 }
 
 // ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
@@ -1370,9 +1421,21 @@ export default {
                 if (!V.email(email) || !V.str(password, 256) || !V.str(name, 100))
                     return invalid('email válido, contraseña de hasta 256 caracteres y nombre de hasta 100', cors);
 
-                const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
-                    .bind(email.toLowerCase()).first();
-                if (exists) return json({ error: 'Email ya registrado' }, 409, cors);
+                const regEmail = email.toLowerCase();
+                const exists = await env.DB.prepare(
+                    'SELECT id, auth_provider, email_verified_at FROM users WHERE email = ?')
+                    .bind(regEmail).first();
+                if (exists) {
+                    // Solo se puede repetir el alta de una cuenta de email aún SIN verificar (no le
+                    // llegó el código, se equivocó de email o de contraseña): se actualizan nombre
+                    // y contraseña y se reenvía el código. Verificada (o sin migración 0003) → 409.
+                    if (exists.email_verified_at !== null || (exists.auth_provider || 'email') !== 'email')
+                        return json({ error: 'Email ya registrado' }, 409, cors);
+                    await env.DB.prepare('UPDATE users SET name=?, password_hash=?, updated_at=? WHERE id=?')
+                        .bind(name, await hashPassword(password), new Date().toISOString(), exists.id).run();
+                    await sendVerifyCode(env, ctx, { id: exists.id, email: regEmail, name });
+                    return json({ success: true, needsVerification: true, email: regEmail }, 201, cors);
+                }
 
                 const id = crypto.randomUUID();
                 const now = new Date().toISOString();
@@ -1382,20 +1445,89 @@ export default {
                 const plan = 'free';
                 const planExp = null;
 
+                // Nace con email_verified_at NULL: sin token hasta verificar el código
+                // (el email de bienvenida se envía al verificar, no aquí).
                 await env.DB.prepare(
                     `INSERT INTO users (id,email,name,password_hash,plan,plan_expires_at,created_at)
                      VALUES (?,?,?,?,?,?,?)`)
-                    .bind(id, email.toLowerCase(), name, pwHash, plan, planExp, now).run();
+                    .bind(id, regEmail, name, pwHash, plan, planExp, now).run();
+                await sendVerifyCode(env, ctx, { id, email: regEmail, name });
+                return json({ success: true, needsVerification: true, email: regEmail }, 201, cors);
+            }
 
-                const token = await issueToken(env, { id });
-        const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, currency: 'EUR', created_at: now };
-        // Enviar email de bienvenida (sin bloquear la respuesta)
-        ctx.waitUntil(sendEmail(env, {
-          to: email.toLowerCase(),
-          subject: '¡Bienvenido a Finance Flow!',
-          html: welcomeEmailHTML(name)
-        }));
-        return json({ success: true, token, currentUser: user }, 201, cors);
+            // Verificación del email con el código de 6 dígitos. Si es correcto, responde
+            // igual que /api/auth/login (token + currentUser).
+            if (path === '/api/auth/verify-email' && method === 'POST') {
+                const vIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:verify:${vIp}`, 20, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+                const { email, code } = await request.json();
+                if (!V.email(email) || typeof code !== 'string' || !/^\d{6}$/.test(code))
+                    return json({ error: 'Introduce el código de 6 dígitos que te hemos enviado.' }, 400, cors);
+
+                // Consume un intento de forma atómica: el UPDATE solo suma si quedan intentos,
+                // así que ni con peticiones en paralelo se pasa de 5 por código.
+                const row = await env.DB.prepare(
+                    `UPDATE users SET verify_attempts = verify_attempts + 1
+                     WHERE email = ? AND email_verified_at IS NULL AND verify_code_hash IS NOT NULL
+                       AND verify_attempts < ?
+                     RETURNING id, verify_code_hash, verify_code_expires_at, verify_attempts`)
+                    .bind(email.toLowerCase(), VERIFY_MAX_ATTEMPTS).first();
+                if (!row)
+                    return json({ error: 'El código ha caducado o se ha bloqueado. Pide uno nuevo.', expired: true }, 400, cors);
+                if (!(String(row.verify_code_expires_at) > new Date().toISOString()))
+                    return json({ error: 'El código ha caducado. Pide uno nuevo.', expired: true }, 400, cors);
+                if (!timingSafeEqual(await verifyCodeHash(env, row.id, code), row.verify_code_hash)) {
+                    const left = VERIFY_MAX_ATTEMPTS - row.verify_attempts;
+                    return json({
+                        error: left > 0 ? `Código incorrecto. Te quedan ${left} intento${left === 1 ? '' : 's'}.`
+                            : 'Código incorrecto. Has agotado los intentos: pide un código nuevo.',
+                        expired: left <= 0
+                    }, 400, cors);
+                }
+
+                // Solo marca si el código sigue siendo el mismo (no se ha reenviado otro entre medias)
+                const vNow = new Date().toISOString();
+                const marked = await env.DB.prepare(
+                    `UPDATE users SET email_verified_at=?, verify_code_hash=NULL, verify_code_expires_at=NULL,
+                        verify_attempts=0, updated_at=?
+                     WHERE id=? AND email_verified_at IS NULL AND verify_code_hash=?`)
+                    .bind(vNow, vNow, row.id, row.verify_code_hash).run();
+                const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.id).first();
+                // changes=0 y sigue sin verificar: se reenvió un código nuevo mientras tanto
+                if (!user || user.email_verified_at === null)
+                    return json({ error: 'El código ha caducado. Pide uno nuevo.', expired: true }, 400, cors);
+                // changes=0 y ya verificado: doble envío simultáneo; sesión sí, bienvenida no
+                if (marked.meta && marked.meta.changes === 1) {
+                    ctx.waitUntil(sendEmail(env, {
+                        to: user.email,
+                        subject: '¡Bienvenido a Finance Flow!',
+                        html: welcomeEmailHTML(user.name)
+                    }));
+                    ctx.waitUntil(audit(env, request, 'email_verified', user.id));
+                }
+                const token = await issueToken(env, user);
+                return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
+            }
+
+            // Reenvío del código. Respuesta siempre genérica (no revela si el email existe ni
+            // si se ha enviado): solo envía a cuentas de email existentes y sin verificar.
+            if (path === '/api/auth/resend-code' && method === 'POST') {
+                const rcIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const generic = { success: true };
+                if (await rateLimited(env, `rl:vresend-ip:${rcIp}`, 10, 3600)) return json(generic, 200, cors);
+                const { email, turnstileToken } = await request.json();
+                if (!V.email(email)) return json(generic, 200, cors);
+                if (!(await turnstileOk(env, turnstileToken, rcIp))) return json(TURNSTILE_ERROR, 400, cors);
+                const rcEmail = email.toLowerCase();
+                const rcUser = await env.DB.prepare(
+                    'SELECT id, name, email, auth_provider, email_verified_at FROM users WHERE email = ?')
+                    .bind(rcEmail).first();
+                // El límite de 5/h por email se aplica dentro de sendVerifyCode, solo a cuentas
+                // pendientes: así nadie puede agotarlo antes de que el dueño se registre.
+                if (rcUser && rcUser.email_verified_at === null && (rcUser.auth_provider || 'email') === 'email')
+                    await sendVerifyCode(env, ctx, rcUser);
+                return json(generic, 200, cors);
             }
 
             if (path === '/api/auth/login' && method === 'POST') {
@@ -1419,6 +1551,10 @@ export default {
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
                 }
                 await loginSucceeded(env, loginEmail, loginIp, lock);
+                // Modo estricto: sin email verificado no hay token. Va DESPUÉS de comprobar la
+                // contraseña para no revelar a cualquiera qué cuentas están pendientes.
+                if (user.email_verified_at === null)
+                    return json({ error: NEEDS_VERIFICATION_ERROR, needsVerification: true, email: user.email }, 403, cors);
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'password' }));
 
                 const token = await issueToken(env, user);
@@ -1494,6 +1630,9 @@ export default {
 
                 const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(cred.user_id).first();
                 if (!user) return json({ error: 'Usuario no encontrado' }, 404, cors);
+                // Defensivo (para tener una passkey hace falta sesión, y sin verificar no la hay)
+                if (user.email_verified_at === null)
+                    return json({ error: NEEDS_VERIFICATION_ERROR, needsVerification: true, email: user.email }, 403, cors);
 
                 // Mismo JWT y mismo shape de respuesta que /api/auth/login
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'passkey' }));
@@ -1534,8 +1673,8 @@ export default {
                 if (!user) {
                     user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
                         .bind(gEmail).first();
-                    if (user) {
-                        // Cuenta existente por email: vincular con Google
+                    if (user && user.email_verified_at !== null) {
+                        // Cuenta existente (y verificada) por email: vincular con Google
                         await env.DB.prepare(
                             `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
                                 picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
@@ -1543,8 +1682,8 @@ export default {
                         user.google_sub = payload.sub;
                         user.auth_provider = user.auth_provider || 'google';
                         user.picture = payload.picture ?? user.picture;
-                    } else {
-                        // Usuario nuevo
+                    } else if (!user) {
+                        // Usuario nuevo (Google ya acredita el email: nace verificado)
                         isNew = true;
                         const gName = payload.name || gEmail.split('@')[0];
                         user = {
@@ -1557,13 +1696,14 @@ export default {
                             picture: payload.picture || null,
                             plan: 'free',
                             plan_expires_at: null,
+                            email_verified_at: now,
                             created_at: now
                         };
                         await env.DB.prepare(
-                            `INSERT INTO users (id,email,name,password_hash,auth_provider,google_sub,picture,plan,plan_expires_at,created_at)
-                             VALUES (?,?,?,?,?,?,?,?,?,?)`)
+                            `INSERT INTO users (id,email,name,password_hash,auth_provider,google_sub,picture,plan,plan_expires_at,email_verified_at,created_at)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
                             .bind(user.id, user.email, user.name, null, 'google', user.google_sub,
-                                  user.picture, 'free', null, now).run();
+                                  user.picture, 'free', null, now, now).run();
                         // Email de bienvenida SOLO para usuarios nuevos (mismo patrón que /api/auth/register)
                         ctx.waitUntil(sendEmail(env, {
                             to: gEmail,
@@ -1571,6 +1711,26 @@ export default {
                             html: welcomeEmailHTML(gName)
                         }));
                     }
+                }
+
+                // A3 (pre-account takeover): cuenta con el email SIN verificar, que pudo crear un
+                // tercero con contraseña. Google acredita el email: se marca verificada, se vincula,
+                // se anula esa contraseña y se cierran sus sesiones (sube token_version).
+                if (!isNew && user.email_verified_at === null) {
+                    await env.DB.prepare(
+                        `UPDATE users SET google_sub=?, auth_provider='google', password_hash=NULL,
+                            email_verified_at=?, verify_code_hash=NULL, verify_code_expires_at=NULL,
+                            verify_attempts=0, picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
+                        .bind(payload.sub, now, payload.picture ?? null, now, user.id).run();
+                    await bumpTokenVersion(env, user.id);
+                    ctx.waitUntil(audit(env, request, 'email_verified', user.id, { method: 'google', password_cleared: !!user.password_hash }));
+                    // Es su primera entrada real: la bienvenida no se envió al registrarse
+                    ctx.waitUntil(sendEmail(env, {
+                        to: gEmail,
+                        subject: '¡Bienvenido a Finance Flow!',
+                        html: welcomeEmailHTML(user.name || payload.name || gEmail.split('@')[0])
+                    }));
+                    user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
                 }
 
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
@@ -3117,6 +3277,28 @@ function premiumActivatedEmailHTML(name, planType) {
     <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Restablecer contraseña</a>
     <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has solicitado esto, ignora este correo. Tu contraseña no cambiará.</p>
+    </td></tr>
+    <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
+    </table></td></tr></table></body></html>`;
+}
+function verifyCodeEmailHTML(name, code) {
+    name = escapeHtml(name);
+    code = escapeHtml(code);
+  return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+    <tr><td style="background:#0158C9;padding:24px 32px;">
+      <table cellpadding="0" cellspacing="0"><tr>
+        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
+        <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:32px;">
+    <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Verifica tu email</h2>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, introduce este código en Finance Flow para activar tu cuenta:</p>
+    <p style="margin:0 0 16px;padding:16px;background:#f4f6f9;border-radius:8px;text-align:center;color:#0158C9;font-size:34px;font-weight:700;letter-spacing:10px;font-family:'Courier New',Courier,monospace;">${code}</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">El código caduca en 10 minutos.</p>
+    <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has sido tú, ignora este correo: sin este código nadie puede activar la cuenta.</p>
     </td></tr>
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
