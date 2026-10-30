@@ -83,7 +83,7 @@ class AuthSystem {
 
     async register(userData) {
         try {
-            const { email, password, name, plan = 'free' } = userData;
+            const { email, password, name, plan = 'free', turnstileToken = null } = userData;
 
             // Validaciones
             if (!this.validateEmail(email)) {
@@ -92,7 +92,7 @@ class AuthSystem {
 
             // --- MODO REMOTO: registrar contra el Worker ---
             if (this.isRemote) {
-                const data = await this._apiPost('/auth/register', { email, password, name, plan });
+                const data = await this._apiPost('/auth/register', { email, password, name, plan, turnstileToken });
                 this.currentUser = data.currentUser;
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
@@ -268,7 +268,7 @@ class AuthSystem {
         }
     }
 
-    async login(email, password) {
+    async login(email, password, turnstileToken = null) {
         try {
             if (!email || !password) {
                 throw new Error('Email y contraseña son requeridos');
@@ -276,7 +276,7 @@ class AuthSystem {
 
             // --- MODO REMOTO: login contra el Worker ---
             if (this.isRemote) {
-                const data = await this._apiPost('/auth/login', { email, password });
+                const data = await this._apiPost('/auth/login', { email, password, turnstileToken });
                 this.currentUser = data.currentUser;
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
@@ -327,8 +327,11 @@ class AuthSystem {
             if (storedSession.currentUser && this.token) {
                 this.currentUser = storedSession.currentUser;
                 
-                // Verificar expiración de plan premium
-                if (this.currentUser.plan === 'premium' && this.currentUser.plan_expires_at) {
+                // Verificar expiración de plan premium. Solo en modo local: en remoto el plan
+                // lo decide el servidor (el webhook de Stripe pasa a 'free' al cancelarse la
+                // suscripción) y plan_expires_at no se actualiza con las renovaciones, así
+                // que degradar aquí quitaba Premium a suscriptores al corriente de pago.
+                if (!this.isRemote && this.currentUser.plan === 'premium' && this.currentUser.plan_expires_at) {
                     const expiry = new Date(this.currentUser.plan_expires_at);
                     if (expiry < new Date()) {
                         // Plan expirado, downgrade a FREE
@@ -350,45 +353,18 @@ class AuthSystem {
     }
 
     async logout() {
+        // Primero clearSession: invalida el token en el servidor y después lo borra
+        // (si se borrase antes, el logout saldría sin Authorization y no revocaría nada)
+        await DataClient.clearSession();
         this.token = null;
         this.currentUser = null;
         if (typeof DataClient.setAuthToken === 'function') DataClient.setAuthToken(null);
-        await DataClient.clearSession();
         return { success: true };
     }
 
     // ===== PLAN UPGRADE =====
-
-    async upgradeToPremium() {
-        if (!this.currentUser) {
-            throw new Error('No hay usuario autenticado');
-        }
-
-        try {
-            // Actualizar plan local (en producción sería a través de Stripe)
-            this.currentUser.plan = 'premium';
-            this.currentUser.plan_expires_at = new Date(Date.now() + 30*24*60*60*1000).toISOString();
-            
-            // Actualizar en localStorage
-            await DataClient.saveSession({ userId: this.currentUser.id, token: this.token, user: this.currentUser });
-            
-            // Actualizar en registro de usuarios (DataClient ya hace upsert)
-            await DataClient.saveUser(this.currentUser);
-
-            return {
-                success: true,
-                user: this.currentUser,
-                message: 'Upgrade a Premium exitoso'
-            };
-
-        } catch (error) {
-            console.error('Error en upgrade:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
+    // El Premium solo lo concede el servidor (webhook de Stripe verificado): no hay
+    // ningún método de cliente que active el plan.
 
     // ===== UTILIDADES =====
 
@@ -477,7 +453,7 @@ class AuthSystem {
             return {
                 max_activo_accounts: 10,
                 max_income_accounts: 8,
-                max_expense_accounts: 15,
+                max_expense_accounts: 25,
                 max_pasivo_accounts: 10,
                 max_patrimonio_accounts: 3,
                 features: [

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
     feedback_requested_at TEXT DEFAULT NULL,
+    token_version INTEGER NOT NULL DEFAULT 0,  -- migración 0001 en BD existentes
     created_at TEXT NOT NULL,
     updated_at TEXT
 );
@@ -259,3 +260,16 @@ CREATE TABLE IF NOT EXISTS cartera_riesgo_cache (
   PRIMARY KEY (usuario_id, benchmark),
   FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Registro de auditoría de eventos sensibles (migración 0002 en BD existentes)
+CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    event TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    detail TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event, created_at);

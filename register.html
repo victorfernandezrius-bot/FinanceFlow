@@ -276,9 +276,12 @@
                         </label>
                     </div>
 
+                    <!-- Cloudflare Turnstile (solo si TURNSTILE_SITE_KEY está configurada) -->
+                    <div id="turnstile-register"></div>
+
                     <!-- Botón de registro -->
-                    <button 
-                        type="submit" 
+                    <button
+                        type="submit"
                         id="register-btn"
                         class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -403,6 +406,7 @@
         class RegisterPage {
             constructor() {
                 this.selectedPlan = null;
+                this.turnstile = null;
                 this.init();
             }
 
@@ -467,6 +471,8 @@
                 
                 // Show form
                 document.getElementById('register-form-container').classList.remove('hidden');
+                // Turnstile se pinta cuando el formulario ya es visible
+                if (!this.turnstile && window.FFTurnstile) this.turnstile = window.FFTurnstile.mount('turnstile-register');
                 document.getElementById('selected-plan-name').textContent = plan === 'free' ? 'Gratuito' : 'Premium';
                 document.getElementById('register-btn-text').textContent = plan === 'free' ? 'Crear Cuenta Gratuita' : 'Continuar con Premium';
                 
@@ -486,17 +492,7 @@
                 this.closePaymentModal();
                 
                 try {
-                    // Store user data for after payment
-                    const userData = {
-                        nombre: document.getElementById('nombre').value,
-                        email: document.getElementById('email').value,
-                        password: document.getElementById('password').value,
-                        plan: planType
-                    };
-                    
-                    sessionStorage.setItem('pendingRegistration', JSON.stringify(userData));
-                    
-                    // Start Stripe checkout
+                    // Start Stripe checkout (nunca se guarda la contraseña en el navegador)
                     await window.stripeCheckout.redirectToCheckout(planType);
                 } catch (error) {
                     console.error('Error starting premium checkout:', error);
@@ -572,128 +568,34 @@
                 }
 
                 // Si es Free, registrar directamente
+                const turnstileToken = this.turnstile ? this.turnstile.token() : null;
+                if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
+                    this.showError('Completa la verificación anti-bots');
+                    return;
+                }
+
                 this.showLoading(true);
                 this.hideError();
 
                 const result = await Auth.register({
                     name: nombre,
                     email,
-                    password
+                    password,
+                    turnstileToken
                 });
 
                 this.showLoading(false);
+                if (this.turnstile) this.turnstile.reset();
 
                 if (result.success) {
-                    // Verificar si hay Premium pendiente tras Stripe
-                    const pendingPremium = sessionStorage.getItem('pendingPremium');
-                    if (pendingPremium) {
-                        const premiumData = JSON.parse(pendingPremium);
-                        
-                        // Actualizar usuario a premium
-                        const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-                        currentUser.isPremium = true;
-                        currentUser.premium = true;
-                        currentUser.premiumPlan = premiumData.plan;
-                        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-                        
-                        // Limpiar datos pendientes
-                        sessionStorage.removeItem('pendingPremium');
-                        
-                        this.showSuccess(`¡Cuenta Premium ${premiumData.plan === 'monthly' ? 'mensual' : 'anual'} activada exitosamente! Redirigiendo...`);
-                    } else {
-                        this.showSuccess('¡Cuenta creada exitosamente! Redirigiendo...');
-                    }
-                    
+                    // El Premium solo lo concede el servidor (webhook de Stripe), nunca esta página
+                    this.showSuccess('¡Cuenta creada exitosamente! Redirigiendo...');
+
                     setTimeout(() => {
                         window.location.href = './dashboard.html';
                     }, 2000);
                 } else {
                     this.showError(result.error);
-                }
-            }
-
-            async verifyStripePayment(sessionId, planType) {
-                try {
-                    this.showLoading(true);
-                    
-                    const response = await fetch('/api/stripe/verify-session', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ 
-                            sessionId: sessionId
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success && result.paid === true) {
-                        // Pago verificado - proceder con registro
-                        const pendingRegistration = sessionStorage.getItem('pendingRegistration');
-                        if (pendingRegistration) {
-                            const userData = JSON.parse(pendingRegistration);
-                            this.completePremiumRegistration(userData, result.planType || planType);
-                        } else {
-                            this.showSuccess(`¡Pago verificado! Completa tu registro para activar tu plan ${result.planType === 'yearly' ? 'anual' : 'mensual'} de Premium.`);
-                            sessionStorage.setItem('pendingPremium', JSON.stringify({ 
-                                plan: result.planType || planType, 
-                                sessionId: sessionId,
-                                verified: true 
-                            }));
-                        }
-                        console.log('✅ Payment verified for new registration');
-                    } else {
-                        console.error('❌ Payment verification failed:', result.error);
-                        this.showError('No se pudo verificar el pago. Por favor contacta soporte.');
-                    }
-                } catch (error) {
-                    console.error('Payment verification error:', error);
-                    // Fallback para compatibilidad
-                    this.showSuccess(`Completa tu registro para activar tu plan ${planType === 'yearly' ? 'anual' : 'mensual'} de Premium.`);
-                    sessionStorage.setItem('pendingPremium', JSON.stringify({ 
-                        plan: planType, 
-                        sessionId: sessionId 
-                    }));
-                } finally {
-                    this.showLoading(false);
-                }
-            }
-
-            async completePremiumRegistration(userData, planType) {
-                this.showLoading(true);
-                
-                try {
-                    const result = await Auth.register({
-                        name: userData.nombre,
-                        email: userData.email,
-                        password: userData.password
-                    });
-
-                    if (result.success) {
-                        // Activar Premium inmediatamente
-                        const currentUser = JSON.parse(localStorage.getItem('currentUser'));
-                        currentUser.isPremium = true;
-                        currentUser.premium = true;
-                        currentUser.premiumPlan = planType;
-                        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-                        
-                        // Limpiar datos pendientes
-                        sessionStorage.removeItem('pendingRegistration');
-                        
-                        this.showSuccess(`¡Cuenta Premium ${planType === 'monthly' ? 'mensual' : 'anual'} activada exitosamente! Redirigiendo...`);
-                        
-                        setTimeout(() => {
-                            window.location.href = './dashboard.html';
-                        }, 2000);
-                    } else {
-                        throw new Error(result.error);
-                    }
-                } catch (error) {
-                    this.showError('Error al completar el registro. Por favor, contacta soporte.');
-                    console.error('Premium registration error:', error);
-                } finally {
-                    this.showLoading(false);
                 }
             }
 
@@ -747,34 +649,6 @@
             if (selectedPremiumPlan) {
                 registerPage.selectPlan('premium');
                 sessionStorage.removeItem('selectedPremiumPlan');
-            }
-            
-            // Detectar si viene de Stripe con pago exitoso
-            const urlParams = new URLSearchParams(window.location.search);
-            const success = urlParams.get('success');
-            const plan = urlParams.get('plan');
-            const sessionId = urlParams.get('session_id');
-            
-            if (success === 'true' && plan && sessionId) {
-                // Verificar el pago con Stripe antes de proceder
-                registerPage.verifyStripePayment(sessionId, plan);
-                // Limpiar URL
-                window.history.replaceState({}, document.title, window.location.pathname);
-            } else if (success === 'true' && plan) {
-                // Fallback para compatibilidad
-                const pendingRegistration = sessionStorage.getItem('pendingRegistration');
-                if (pendingRegistration) {
-                    const userData = JSON.parse(pendingRegistration);
-                    registerPage.completePremiumRegistration(userData, plan);
-                } else {
-                    registerPage.showSuccess(`¡Pago exitoso! Completa tu registro para activar tu plan ${plan === 'monthly' ? 'mensual' : 'anual'} de Premium.`);
-                    sessionStorage.setItem('pendingPremium', JSON.stringify({ 
-                        plan: plan, 
-                        sessionId: sessionId 
-                    }));
-                }
-                // Limpiar URL
-                window.history.replaceState({}, document.title, window.location.pathname);
             }
         });
 
@@ -834,6 +708,8 @@
             google.accounts.id.prompt();
         });
     </script>
+    <!-- Cloudflare Turnstile (anti-bots; inactivo sin TURNSTILE_SITE_KEY) -->
+    <script src="/public/turnstile.js"></script>
     <!-- Aviso para navegadores in-app de redes (Instagram/Facebook/TikTok) -->
     <script src="/public/inapp-browser-banner.js"></script>
     <!-- Service worker (PWA): registro + migración de scope /public/ -> / -->

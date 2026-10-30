@@ -1,0 +1,50 @@
+# Seguridad en cada push/PR a main y cada lunes: secretos en el historial (gitleaks)
+# y vulnerabilidades conocidas en dependencias (npm audit). No despliega nada.
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '27 6 * * 1'   # lunes 06:27 UTC (nuevos avisos de seguridad)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Secretos (gitleaks, historial completo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # todo el historial, no solo el último commit
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      # Instalación desde el Go module proxy: la integridad la verifica sum.golang.org
+      - name: Instalar gitleaks v8.30.1
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+      - name: gitleaks (valores redactados)
+        run: "$(go env GOPATH)/bin/gitleaks git --config .gitleaks.toml --redact --verbose --exit-code 1 ."
+
+  npm-audit:
+    name: Dependencias (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Sintaxis del Worker (mínimo de CLAUDE.md)
+        run: node --check api/worker.js
+      # Bloqueante: dependencias que se despliegan con el Worker
+      - name: npm audit (producción)
+        run: npm audit --omit=dev --audit-level=high
+      # Informativo: herramientas de desarrollo (wrangler 3 arrastra avisos que se
+      # arreglan con wrangler 4, cambio mayor pendiente de decidir)
+      - name: npm audit (desarrollo, informativo)
+        run: npm audit --audit-level=high || true

@@ -1,0 +1,11 @@
+-- 0001 · Versión de sesión por usuario (solo ADITIVA: añade una columna con default)
+-- Al cambiar o restablecer la contraseña, el Worker incrementa token_version y los
+-- JWT emitidos antes (claim `tv` menor) dejan de valer: se cierran las sesiones
+-- abiertas en otros dispositivos. Los usuarios actuales quedan con 0, igual que sus
+-- tokens, así que aplicarla no desloguea a nadie.
+-- El código funciona con o sin esta columna: sin ella, simplemente no invalida.
+--
+-- Aplicar UNA vez en producción:
+--   npx wrangler d1 execute cp-db --remote --file=db/migrations/0001_users_token_version.sql
+-- Si responde "duplicate column name: token_version", ya estaba aplicada.
+ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0;

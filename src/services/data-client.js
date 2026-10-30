@@ -51,7 +51,12 @@ async function authFetch(url, options = {}) {
         if (token) _authToken = token;
     }
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    return fetch(url, { ...options, headers, credentials: 'include' });
+    const r = await fetch(url, { ...options, headers, credentials: 'include' });
+    // Renovación de sesión: el Worker envía un token nuevo cuando el actual tiene más
+    // de un día. Solo se guarda si sigue habiendo sesión (no tras un logout en curso).
+    const refreshed = r.headers.get('X-Refresh-Token');
+    if (refreshed && _authToken) setAuthToken(refreshed);
+    return r;
 }
 
 const DataClient = {
@@ -107,6 +112,27 @@ const DataClient = {
         return this.listUsers();
     },
 
+    // Cambio de contraseña: el servidor verifica la actual. Devuelve { success, error }.
+    async changePassword(userId, currentPassword, newPassword) {
+        if (MODE === 'local') {
+            const users = lsGet(KEYS.users, []);
+            const user = users.find(u => u.id === userId);
+            if (!user || user.password_hash !== btoa(currentPassword)) {
+                return { success: false, error: 'La contraseña actual no es correcta' };
+            }
+            user.password_hash = btoa(newPassword);
+            lsSet(KEYS.users, users);
+            return { success: true };
+        }
+        const r = await authFetch(`${window.API_URL}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const data = await r.json().catch(() => ({}));
+        return r.ok ? { success: true } : { success: false, error: data.error || 'No se pudo cambiar la contraseña' };
+    },
+
     // ===== SESSION =====
     async getSession() {
         // La sesión vive en localStorage en ambos modos (el token se envía
@@ -130,14 +156,18 @@ const DataClient = {
     },
 
     async clearSession() {
+        // En remoto, invalidar el token en el Worker ANTES de borrarlo (si no, la petición
+        // sale sin Authorization y no revoca nada). Máx. 3 s; si falla, se sigue igual.
+        if (MODE === 'remote') {
+            try {
+                const signal = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(3000) : undefined;
+                await authFetch(`${window.API_URL}/auth/logout`, { method: 'POST', signal });
+            } catch (e) {}
+        }
         // Borrar siempre la sesión local
         lsDel(KEYS.token);
         lsDel(KEYS.currentUser);
         setAuthToken(null);
-        // En remoto, además notificar al Worker (sin bloquear si falla)
-        if (MODE === 'remote') {
-            try { await authFetch(`${window.API_URL}/auth/logout`, { method: 'POST' }); } catch (e) {}
-        }
         return true;
     },
 

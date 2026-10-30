@@ -18,9 +18,9 @@
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap">
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700;800&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- flag-icons: banderas SVG (se ven bien en todos los SO, incluido Windows) para el selector de divisa -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.5.0/css/flag-icons.min.css" integrity="sha384-8olrmTcwXL3OYMeB+2ok8jx9/U/FZxeLnoRWdu1Pyi+lakrkqoI7hfysfQF5Q1Xx" crossorigin="anonymous">
     <!-- SimpleWebAuthn (browser) para activar el login biométrico Face ID / Touch ID -->
-    <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13/dist/bundle/index.umd.min.js"></script>
+    <script src="./vendor/simplewebauthn-browser-13.3.0/index.umd.min.js"></script>
     <style>
         /* Dropdown custom de divisa (Mi Perfil). Respeta variables CSS y dark mode. */
         .currency-select { position: relative; }
@@ -36,8 +36,8 @@
         .currency-option-name { color: var(--text-secondary); margin-left: auto; font-size: 0.82rem; }
         .currency-flag.fi { width: 1.33em; height: 1em; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); flex-shrink: 0; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="./vendor/chart.js-4.5.1/chart.umd.min.js"></script>
+    <script src="./vendor/xlsx-0.18.5/xlsx.full.min.js"></script>
     <script src="https://js.stripe.com/v3/"></script>
     <script src="./public/config.js"></script>
     <script src="./js/stripe-checkout.js"></script>
@@ -805,7 +805,7 @@
                         
                         <!-- Métricas secundarias -->
                         <div class="grid-responsive-1 grid-responsive-2 grid-responsive-4">
-                            <div class="rounded-lg p-6 shadow-sm transition-colors duration-300" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);">
+                            <div class="rounded-lg p-6 shadow-sm transition-colors duration-300 cursor-pointer hover:shadow-md" style="background-color: var(--bg-primary); border: 1px solid var(--border-color);" onclick="dashboard.openBankAccountMajorBook()">
                                 <div class="flex items-center">
                                     <div class="p-3 rounded-lg" style="background-color: rgba(1, 88, 201, 0.1);">
                                         <i class="fas flow-cash text-xl" style="color: var(--brand-primary);"></i>
@@ -913,8 +913,8 @@
                         </div>
                     </div>
                     
-                    <!-- Panel de Insights Financieros -->
-                    <div id="insights-panel" style="margin-bottom: var(--space-6);">
+                    <!-- Panel de Insights Financieros (solo Premium; se muestra en updatePremiumWidgets) -->
+                    <div id="insights-panel" class="hidden" style="margin-bottom: var(--space-6);">
                         <div class="flex items-center justify-between mb-3">
                             <h3 class="font-semibold" style="color: var(--text-primary); font-size: var(--text-base);">
                                 <i class="fas fa-lightbulb mr-2" style="color: #F59E0B;"></i>
@@ -930,8 +930,8 @@
                         </div>
                     </div>
 
-                    <!-- Salud financiera (Índice Flow) -->
-                    <div class="bg-white rounded-lg p-6 shadow-sm border border-gray-200" style="margin-bottom: var(--space-6);">
+                    <!-- Salud financiera (Índice Flow) (solo Premium; se muestra en updatePremiumWidgets) -->
+                    <div id="financial-health-card" class="bg-white rounded-lg p-6 shadow-sm border border-gray-200 hidden" style="margin-bottom: var(--space-6);">
                         <div id="financial-health-body">
                             <!-- Se llenará dinámicamente -->
                         </div>
@@ -1190,7 +1190,7 @@
                     
                     <!-- Filtros de fecha para reportes -->
                     <div class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Período</label>
                                 <select id="report-period-filter" class="border border-gray-300 rounded-md px-3 py-2 w-full">
@@ -1210,7 +1210,17 @@
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Hasta</label>
                                 <input type="date" id="report-date-to" class="border border-gray-300 rounded-md px-3 py-2 w-full" disabled>
                             </div>
-                            
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                                <select id="report-type-filter" class="border border-gray-300 rounded-md px-3 py-2 w-full">
+                                    <option value="">Todos</option>
+                                    <option value="ingreso">Ingreso</option>
+                                    <option value="gasto">Gasto</option>
+                                    <option value="transferencia">Transferencia</option>
+                                </select>
+                            </div>
+
                             <div class="flex items-end">
                                 <button id="apply-report-filters-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 w-full">
                                     Aplicar Filtros
@@ -2014,7 +2024,7 @@
     </div>
 
     <!-- Modal para Exportación de Datos (PREMIUM) -->
-    <div id="export-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+    <div id="export-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50 overflow-y-auto">
         <div class="flex items-center justify-center min-h-screen p-4">
             <div class="bg-white rounded-lg max-w-lg w-full p-6">
                 <div class="flex justify-between items-center mb-4">
@@ -2039,6 +2049,7 @@
                                 <option value="movements">Movimientos</option>
                                 <option value="accounts">Cuentas</option>
                                 <option value="balance">Balance General</option>
+                                <option value="income_statement">Estado de Resultados</option>
                             </select>
                             <p class="text-xs text-gray-500 mt-1" id="export-data-description">
                                 Selecciona el tipo de datos para ver su descripción
@@ -2057,7 +2068,7 @@
                                         <div class="text-center">
                                             <i class="fas fa-file-csv text-2xl text-green-600 mb-2"></i>
                                             <div class="text-sm font-medium">CSV</div>
-                                            <div class="text-xs text-gray-500">Compatible con Excel</div>
+                                            <div class="text-xs text-gray-500">Solo datos, sin formato</div>
                                         </div>
                                     </label>
                                 </div>
@@ -2074,24 +2085,44 @@
                             </div>
                         </div>
                         
-                        <!-- Rango de fechas (solo para movimientos) -->
+                        <!-- Fechas (Desde/Hasta; en el Balance, solo "Fecha del balance") -->
                         <div id="date-range-section" class="hidden">
                             <label class="block text-sm font-medium text-gray-700 mb-2">
                                 <i class="fas fa-calendar-alt mr-1"></i>
-                                Rango de fechas (opcional)
+                                <span id="export-date-title">Rango de fechas (opcional)</span>
                             </label>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
+                            <div class="grid grid-cols-2 gap-3" id="export-date-grid">
+                                <div id="export-start-date-wrapper">
                                     <label for="export-start-date" class="block text-xs text-gray-600 mb-1">Desde</label>
                                     <input type="date" id="export-start-date" name="startDate" class="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
                                 </div>
                                 <div>
-                                    <label for="export-end-date" class="block text-xs text-gray-600 mb-1">Hasta</label>
+                                    <label for="export-end-date" id="export-end-date-label" class="block text-xs text-gray-600 mb-1">Hasta</label>
                                     <input type="date" id="export-end-date" name="endDate" class="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
                                 </div>
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">
+                            <p class="text-xs text-gray-500 mt-1" id="export-date-hint">
                                 Si no especificas fechas, se exportarán todos los datos
+                            </p>
+                        </div>
+
+                        <!-- Cuentas a exportar (solo para "Cuentas") -->
+                        <div id="export-accounts-section" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                <i class="fas fa-list mr-1"></i>
+                                Cuentas
+                            </label>
+                            <input type="text" id="export-accounts-search" placeholder="Buscar cuenta..." autocomplete="off"
+                                   class="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm mb-2">
+                            <div class="border border-gray-300 rounded-md">
+                                <label class="flex items-center gap-2 px-3 py-2 border-b border-gray-200 text-sm font-medium text-gray-900 cursor-pointer">
+                                    <input type="checkbox" id="export-accounts-all" checked class="h-4 w-4">
+                                    Todas las cuentas
+                                </label>
+                                <div id="export-accounts-list" class="max-h-48 overflow-y-auto px-3 py-2 space-y-2"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                Con todas las cuentas se exportan sus saldos. Si eliges algunas, se exporta su libro mayor.
                             </p>
                         </div>
                     </div>
@@ -2194,6 +2225,10 @@
         import Auth from './js/auth.js';
         import AccountingManager from './js/accounting-manager.js';
         import DataClient from './src/services/data-client.js';
+
+        // Límites de la importación de extractos (el parseo se hace en el navegador):
+        // tipo de archivo, tamaño, número de filas y páginas de PDF.
+        const IMPORT_LIMITS = { maxBytes: 10 * 1024 * 1024, maxRows: 2000, maxPdfPages: 50 };
 
         // Texto explicativo del Índice Flow — peso, fórmula en lenguaje llano y cómo leer
         // cada sub-índice. Usado por renderFinancialHealth() y renderFlowDetailContent().
@@ -2298,8 +2333,9 @@
 
             // Verifica el pago con Stripe (verify-session), refresca el usuario desde el
             // servidor con reintentos (carrera con el webhook checkout.session.completed)
-            // y desbloquea Premium sin recargar. Nunca lanza: cualquier fallo deja el
-            // dashboard funcionando (el usuario siempre puede cerrar sesión y volver a entrar).
+            // y desbloquea Premium sin recargar. El Premium SOLO lo concede el servidor
+            // (webhook verificado): aquí nunca se activa en local. Nunca lanza: cualquier
+            // fallo deja el dashboard funcionando y el plan se aplica en la siguiente carga.
             async handleUpgradeReturn(sessionId) {
                 try {
                     const resp = await fetch(`${window.API_URL}/stripe/verify-session`, {
@@ -2317,22 +2353,21 @@
                     }
 
                     // Pago confirmado por Stripe. Refrescar el usuario desde la BD,
-                    // reintentando por si el webhook aún no ha escrito plan='premium'.
+                    // reintentando mientras el webhook escribe plan='premium' (~20 s).
                     let fresh = null;
-                    for (let intento = 0; intento < 3; intento++) {
+                    for (let intento = 0; intento < 10; intento++) {
                         fresh = await DataClient.getUser(this.currentUser.id).catch(() => null);
                         if (fresh && fresh.plan === 'premium') break;
-                        if (intento < 2) await new Promise(res => setTimeout(res, 1500));
+                        if (intento < 9) await new Promise(res => setTimeout(res, 2000));
                     }
 
-                    // Opción B: si la BD aún no refleja Premium (webhook con retraso),
-                    // como Stripe ya confirmó el pago activamos Premium en local; el
-                    // webhook consolidará la BD. Partimos del usuario del servidor si lo
-                    // tenemos (datos frescos) o del actual.
-                    const base = fresh || this.currentUser;
-                    const premiumUser = { ...base, plan: 'premium', isPremium: true, premium: true, trial_active: false };
-                    this._applyPremiumUser(premiumUser);
-                    this.showToast('¡Bienvenido a Premium! Ya tienes todas las funciones desbloqueadas.', 'success');
+                    if (fresh && fresh.plan === 'premium') {
+                        this._applyPremiumUser(fresh);
+                        this.showToast('¡Bienvenido a Premium! Ya tienes todas las funciones desbloqueadas.', 'success');
+                    } else {
+                        // El webhook aún no ha llegado: el plan se aplicará al recargar.
+                        this.showToast('Pago recibido. Estamos activando tu Premium: recarga la página en unos minutos.', 'success');
+                    }
                 } catch (error) {
                     console.error('handleUpgradeReturn:', error);
                     // No bloquea la carga del dashboard.
@@ -2351,10 +2386,28 @@
                 this.showSection(this.currentSection);
             }
 
+            // El plan lo decide el servidor (D1, que actualiza el webhook de Stripe): en cada
+            // carga se refresca el usuario en vez de fiarse de la copia de localStorage, que
+            // no ve renovaciones, cancelaciones ni pagos confirmados después del login.
+            async refreshCurrentUserFromServer() {
+                if (window.DATA_MODE !== 'remote' || !this.currentUser?.id) return;
+                try {
+                    const fresh = await DataClient.getUser(this.currentUser.id);
+                    if (!fresh || fresh.id !== this.currentUser.id) return;
+                    this.currentUser = fresh;
+                    if (Auth) Auth.currentUser = fresh;
+                    DataClient.saveSession({ currentUser: fresh });
+                } catch (e) {
+                    console.error('refreshCurrentUserFromServer:', e);
+                }
+            }
+
             async init() {
                 // En este punto sabemos que hay un usuario válido
                 this.setupEventListeners();
                 this.setupSidebar();
+
+                await this.refreshCurrentUserFromServer();
 
                 // CRÍTICO: cargar los datos ANTES de los renders
                 try {
@@ -2458,7 +2511,12 @@
                 document.getElementById('report-period-filter')?.addEventListener('change', (e) => {
                     this.handleReportPeriodChange(e.target.value);
                 });
-                
+
+                // Filtro por tipo: re-renderiza el informe activo al cambiarlo
+                document.getElementById('report-type-filter')?.addEventListener('change', () => {
+                    this.applyReportFilters();
+                });
+
                 document.getElementById('apply-report-filters-btn')?.addEventListener('click', () => {
                     this.applyReportFilters();
                 });
@@ -2599,6 +2657,7 @@
                 document.querySelectorAll('input[name="format"]').forEach(radio => {
                     radio.addEventListener('change', () => {
                         this.updateExportPreview();
+                        this.updateFormatRadioStyles();
                     });
                 });
                 
@@ -2609,6 +2668,23 @@
                 
                 document.getElementById('export-end-date').addEventListener('change', () => {
                     this.updateExportPreview();
+                });
+
+                // Selección de cuentas (exportación de "Cuentas")
+                document.getElementById('export-accounts-all').addEventListener('change', (e) => {
+                    document.querySelectorAll('#export-accounts-list .export-acc-cb').forEach(cb => {
+                        cb.checked = e.target.checked;
+                    });
+                    this.updateExportPreview();
+                });
+                document.getElementById('export-accounts-list').addEventListener('change', (e) => {
+                    if (!e.target.classList.contains('export-acc-cb')) return;
+                    const cbs = [...document.querySelectorAll('#export-accounts-list .export-acc-cb')];
+                    document.getElementById('export-accounts-all').checked = cbs.length > 0 && cbs.every(cb => cb.checked);
+                    this.updateExportPreview();
+                });
+                document.getElementById('export-accounts-search').addEventListener('input', (e) => {
+                    this.filterExportAccounts(e.target.value);
                 });
                 
                 // Reglas de Categorización Premium
@@ -2975,6 +3051,8 @@
                 const fileInput = document.getElementById('import-file-input');
                 const file = fileInput.files && fileInput.files[0];
                 if (!file) { this.showToast('Selecciona un archivo de extracto', 'error'); return; }
+                if (!/\.(csv|xls|xlsx|pdf)$/i.test(file.name)) { this.showToast('Formato no admitido: usa CSV, XLS, XLSX o PDF', 'error'); return; }
+                if (file.size > IMPORT_LIMITS.maxBytes) { this.showToast('El archivo supera el máximo de 10 MB', 'error'); return; }
 
                 const parseBtn = document.getElementById('import-parse-btn');
                 const original = parseBtn.innerHTML;
@@ -2988,6 +3066,10 @@
                         rows = await this.parseStatementSpreadsheet(file);
                     }
                     rows = (rows || []).filter(r => r && r.descripcion && !isNaN(r.importe) && r.importe !== 0);
+                    if (rows.length > IMPORT_LIMITS.maxRows) {
+                        this.showToast(`El extracto tiene más de ${IMPORT_LIMITS.maxRows} movimientos. Divídelo en varios archivos.`, 'error');
+                        return;
+                    }
                     if (!rows.length) {
                         this.showToast('No se detectaron movimientos en el archivo. Revisa el formato.', 'error');
                         return;
@@ -3157,9 +3239,14 @@
 
             async parseStatementSpreadsheet(file) {
                 const data = new Uint8Array(await file.arrayBuffer());
-                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                // sheetRows acota el parseo (cabecera en las ~25 primeras filas + límite de movimientos)
+                const maxSheetRows = IMPORT_LIMITS.maxRows + 30;
+                const wb = XLSX.read(data, { type: 'array', cellDates: true, sheetRows: maxSheetRows });
                 const sheet = wb.Sheets[wb.SheetNames[0]];
                 const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+                if (matrix.length >= maxSheetRows) {
+                    throw new Error(`el extracto tiene más de ${IMPORT_LIMITS.maxRows} movimientos. Divídelo en varios archivos.`);
+                }
                 return this._rowsFromMatrix(matrix);
             }
 
@@ -3265,7 +3352,11 @@
             async parseStatementPDF(file) {
                 const pdfjsLib = await this._loadPdfJs();
                 const data = new Uint8Array(await file.arrayBuffer());
-                const pdf = await pdfjsLib.getDocument({ data }).promise;
+                // isEvalSupported:false = mitigación oficial de CVE-2024-4367 (PDF malicioso)
+                const pdf = await pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
+                if (pdf.numPages > IMPORT_LIMITS.maxPdfPages) {
+                    throw new Error(`el PDF tiene más de ${IMPORT_LIMITS.maxPdfPages} páginas.`);
+                }
                 const lines = [];
                 for (let pg = 1; pg <= pdf.numPages; pg++) {
                     const page = await pdf.getPage(pg);
@@ -3309,11 +3400,11 @@
                 if (this._pdfjsPromise) return this._pdfjsPromise;
                 this._pdfjsPromise = new Promise((resolve, reject) => {
                     const script = document.createElement('script');
-                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+                    script.src = '/vendor/pdfjs-dist-3.11.174/pdf.min.js';
                     script.onload = () => {
                         try {
                             window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-                                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                                '/vendor/pdfjs-dist-3.11.174/pdf.worker.min.js';
                             resolve(window.pdfjsLib);
                         } catch (e) { reject(e); }
                     };
@@ -3340,8 +3431,8 @@
                 this.hideDataTypeDescription();
                 document.getElementById('export-btn').disabled = true;
                 
-                // Ocultar sección de fechas
-                document.getElementById('date-range-section').classList.add('hidden');
+                // Ocultar secciones de fechas y cuentas (y dejar sus textos por defecto)
+                this.handleExportDataTypeChange('');
             }
             
             closeExportModal() {
@@ -3352,11 +3443,13 @@
             handleExportDataTypeChange(dataType) {
                 const descriptionElement = document.getElementById('export-data-description');
                 const dateRangeSection = document.getElementById('date-range-section');
+                const accountsSection = document.getElementById('export-accounts-section');
                 
                 const descriptions = {
-                    'movements': 'Historial completo de movimientos contables con fechas, cuentas y categorías',
-                    'accounts': 'Lista de todas las cuentas con sus saldos actuales y información detallada',
-                    'balance': 'Resumen financiero con totales de activos, pasivos y patrimonio neto'
+                    'movements': 'Movimientos del periodo con fecha, tipo, cuenta de origen, cuenta de destino, descripción e importe',
+                    'accounts': 'Saldos de todas las cuentas o, si eliges algunas, su libro mayor (saldo inicial, movimientos y saldo final)',
+                    'balance': 'Balance de Situación: activo, patrimonio neto y pasivo a una fecha, con el Balance Total',
+                    'income_statement': 'Cuenta de Pérdidas y Ganancias: ingresos y gastos del periodo y su resultado'
                 };
                 
                 if (descriptions[dataType]) {
@@ -3369,15 +3462,104 @@
                     descriptionElement.classList.add('text-gray-500');
                 }
                 
-                // Mostrar/ocultar sección de fechas solo para movimientos
-                if (dataType === 'movements') {
+                // Fechas según el informe. El Balance solo usa "Fecha del balance" (un único campo).
+                const dateConfig = {
+                    'movements': { title: 'Rango de fechas (opcional)', hint: 'Si no especificas fechas, se exportarán todos los movimientos' },
+                    'income_statement': { title: 'Periodo', hint: 'Si no especificas fechas, se exporta el mes actual' },
+                    'accounts': { title: 'Periodo (opcional)', hint: 'Todas las cuentas: saldos a la fecha «Hasta» (vacía = saldos actuales). Libro mayor: movimientos entre «Desde» y «Hasta».' },
+                    'balance': { title: 'Fecha del balance', hint: 'Si no indicas fecha, se exportan los saldos actuales', single: true }
+                };
+                const cfg = dateConfig[dataType];
+                const startWrapper = document.getElementById('export-start-date-wrapper');
+                const dateGrid = document.getElementById('export-date-grid');
+                const endLabel = document.getElementById('export-end-date-label');
+                if (cfg) {
                     dateRangeSection.classList.remove('hidden');
+                    document.getElementById('export-date-title').textContent = cfg.title;
+                    document.getElementById('export-date-hint').textContent = cfg.hint;
+                    startWrapper.classList.toggle('hidden', !!cfg.single);
+                    endLabel.classList.toggle('hidden', !!cfg.single);
+                    dateGrid.classList.toggle('grid-cols-2', !cfg.single);
+                    dateGrid.classList.toggle('grid-cols-1', !!cfg.single);
+                    if (cfg.single) document.getElementById('export-start-date').value = '';
                 } else {
                     dateRangeSection.classList.add('hidden');
+                    document.getElementById('export-date-title').textContent = 'Rango de fechas (opcional)';
+                    startWrapper.classList.remove('hidden');
+                    endLabel.classList.remove('hidden');
+                    dateGrid.classList.add('grid-cols-2');
+                    dateGrid.classList.remove('grid-cols-1');
+                }
+                
+                // Selección de cuentas, solo para "Cuentas"
+                if (dataType === 'accounts') {
+                    this.renderExportAccountsList();
+                    accountsSection.classList.remove('hidden');
+                } else {
+                    accountsSection.classList.add('hidden');
                 }
                 
                 this.updateExportPreview();
                 this.updateFormatRadioStyles();
+            }
+            
+            // Lista de cuentas con casillas, agrupada por tipo. Por defecto, todas marcadas.
+            renderExportAccountsList() {
+                const list = document.getElementById('export-accounts-list');
+                const groups = [
+                    ['activo', 'Activo'], ['pasivo', 'Pasivo'], ['patrimonio', 'Patrimonio'],
+                    ['ingreso', 'Ingresos'], ['gasto', 'Gastos']
+                ];
+                const accounts = this.accountingManager.getAccounts();
+                document.getElementById('export-accounts-all').checked = true;
+                document.getElementById('export-accounts-search').value = '';
+                
+                list.innerHTML = groups.map(([tipo, titulo]) => {
+                    const items = accounts.filter(a => a.tipo === tipo);
+                    if (items.length === 0) return '';
+                    return `
+                        <div class="export-acc-group">
+                            <div class="text-xs font-semibold uppercase text-gray-500 mb-1">${titulo}</div>
+                            ${items.map(a => `
+                                <label class="export-acc-item flex items-center gap-2 text-sm text-gray-700 cursor-pointer py-0.5" data-name="${this._escapeHtml(String(a.nombre || '').toLowerCase())}">
+                                    <input type="checkbox" class="export-acc-cb h-4 w-4" value="${this._escapeHtml(a.id)}" checked>
+                                    <span class="truncate">${this._escapeHtml(a.nombre)}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    `;
+                }).join('') || '<p class="text-sm text-gray-500">No tienes cuentas</p>';
+            }
+            
+            // Búsqueda simple por nombre (solo oculta; no cambia la selección)
+            filterExportAccounts(query) {
+                const q = String(query || '').trim().toLowerCase();
+                document.querySelectorAll('#export-accounts-list .export-acc-group').forEach(group => {
+                    let visibles = 0;
+                    group.querySelectorAll('.export-acc-item').forEach(item => {
+                        const match = !q || item.dataset.name.includes(q);
+                        item.classList.toggle('hidden', !match);
+                        if (match) visibles++;
+                    });
+                    group.classList.toggle('hidden', visibles === 0);
+                });
+            }
+            
+            // null = todas las cuentas; array = solo las marcadas (libro mayor)
+            getSelectedExportAccountIds() {
+                const cbs = [...document.querySelectorAll('#export-accounts-list .export-acc-cb')];
+                const ids = cbs.filter(cb => cb.checked).map(cb => cb.value);
+                if (cbs.length > 0 && ids.length === cbs.length) return null;
+                // Los ids de las casillas son texto; se devuelven con el tipo original de la cuenta
+                const byId = {};
+                this.accountingManager.getAccounts().forEach(a => { byId[String(a.id)] = a.id; });
+                return ids.map(id => (id in byId ? byId[id] : id));
+            }
+            
+            // 'YYYY-MM-DD' → 'dd/mm/aaaa' sin pasar por Date (sin desfases de zona horaria)
+            _exportDmy(iso) {
+                const [y, m, d] = String(iso || '').split('-');
+                return (y && m && d) ? `${d}/${m}/${y}` : '';
             }
             
             updateExportPreview() {
@@ -3396,47 +3578,73 @@
                     return;
                 }
                 
-                // Calcular estadísticas para la vista previa
-                let recordCount = 0;
-                let dateRangeText = '';
+                const am = this.accountingManager;
+                const dmy = (iso) => this._exportDmy(iso);
+                const today = this._formatDateLocal(new Date());
+                const rangeText = (from, to) => {
+                    if (from && to) return ` del ${dmy(from)} al ${dmy(to)}`;
+                    if (from) return ` desde el ${dmy(from)}`;
+                    if (to) return ` hasta el ${dmy(to)}`;
+                    return '';
+                };
+                const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+                const formatLabel = { 'csv': 'CSV', 'excel': 'Excel' }[format];
+                
+                let text = '';
+                let canExport = true;
                 
                 if (dataType === 'movements') {
-                    const movements = this.accountingManager.getMovements();
-                    let filteredMovements = movements;
-                    
-                    if (startDate && endDate) {
-                        filteredMovements = movements.filter(m => m.fecha >= startDate && m.fecha <= endDate);
-                        dateRangeText = ` del ${new Date(startDate).toLocaleDateString('es-ES')} al ${new Date(endDate).toLocaleDateString('es-ES')}`;
-                    } else if (startDate) {
-                        filteredMovements = movements.filter(m => m.fecha >= startDate);
-                        dateRangeText = ` desde el ${new Date(startDate).toLocaleDateString('es-ES')}`;
-                    } else if (endDate) {
-                        filteredMovements = movements.filter(m => m.fecha <= endDate);
-                        dateRangeText = ` hasta el ${new Date(endDate).toLocaleDateString('es-ES')}`;
-                    }
-                    
-                    recordCount = filteredMovements.length;
+                    let movements = am.getMovements();
+                    if (startDate) movements = movements.filter(m => m.fecha >= startDate);
+                    if (endDate) movements = movements.filter(m => m.fecha <= endDate);
+                    text = `Se exportarán ${plural(movements.length, 'movimiento', 'movimientos')}${rangeText(startDate, endDate)}`;
+                    canExport = movements.length > 0;
                 } else if (dataType === 'accounts') {
-                    recordCount = this.accountingManager.getAccounts().length;
+                    const ids = this.getSelectedExportAccountIds();
+                    if (ids === null) {
+                        const n = am.getAccounts().length;
+                        text = `Se exportarán los saldos de ${plural(n, 'cuenta', 'cuentas')}` +
+                            (endDate ? ` a ${dmy(endDate)}` : ' (saldos actuales)');
+                        canExport = n > 0;
+                    } else if (ids.length === 0) {
+                        text = 'Selecciona al menos una cuenta';
+                        canExport = false;
+                    } else {
+                        // Mismo periodo que el archivo: sin "desde", desde el primer movimiento; sin "hasta", hoy
+                        const first = am.getMovements()
+                            .filter(m => ids.includes(m.cuenta_id) || ids.includes(m.cuenta_destino_id))
+                            .reduce((min, m) => (!min || m.fecha < min ? m.fecha : min), '');
+                        const from = startDate || first || today;
+                        const to = endDate || today;
+                        text = `Se exportará el libro mayor de ${plural(ids.length, 'cuenta', 'cuentas')} del ${dmy(from)} al ${dmy(to)}`;
+                    }
                 } else if (dataType === 'balance') {
-                    recordCount = 7; // Elementos fijos del balance
+                    const n = am.getAccounts().filter(a => ['activo', 'pasivo', 'patrimonio'].includes(a.tipo)).length;
+                    text = `Se exportará el Balance de Situación ` +
+                        (endDate ? `a ${dmy(endDate)}` : 'con los saldos actuales') +
+                        ` (${plural(n, 'cuenta', 'cuentas')})`;
+                } else if (dataType === 'income_statement') {
+                    let from = startDate;
+                    let to = endDate;
+                    if (!from && !to) {
+                        const now = new Date();
+                        from = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+                        to = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+                    }
+                    const n = am.getAccounts().filter(a => a.tipo === 'ingreso' || a.tipo === 'gasto').length;
+                    text = `Se exportará la Cuenta de Pérdidas y Ganancias${rangeText(from, to)}` +
+                        ` (${plural(n, 'cuenta', 'cuentas')} de ingresos y gastos)`;
                 }
                 
-                const typeLabels = {
-                    'movements': 'movimientos',
-                    'accounts': 'cuentas',
-                    'balance': 'conceptos del balance'
-                };
+                if (startDate && endDate && startDate > endDate && dataType !== 'balance') {
+                    text = 'La fecha «Desde» no puede ser posterior a «Hasta»';
+                    canExport = false;
+                }
                 
-                const formatLabels = {
-                    'csv': 'CSV',
-                    'excel': 'Excel'
-                };
-                
-                previewText.textContent = `Se exportarán ${recordCount} ${typeLabels[dataType]}${dateRangeText} en formato ${formatLabels[format]}`;
+                previewText.textContent = canExport ? `${text} en formato ${formatLabel}` : text;
                 previewContainer.classList.remove('hidden');
                 
-                exportBtn.disabled = recordCount === 0;
+                exportBtn.disabled = !canExport;
             }
             
             hideExportPreview() {
@@ -3483,8 +3691,8 @@
                     return;
                 }
                 
-                // Validar rango de fechas si se proporcionan ambas
-                if (startDate && endDate && startDate > endDate) {
+                // Validar rango de fechas si se proporcionan ambas (el Balance usa solo una fecha)
+                if (dataType !== 'balance' && startDate && endDate && startDate > endDate) {
                     this.showToast('La fecha de inicio no puede ser posterior a la fecha de fin', 'error');
                     return;
                 }
@@ -3498,13 +3706,21 @@
                     
                     // Realizar exportación
                     const options = {};
-                    if (startDate) options.startDate = startDate;
+                    if (startDate && dataType !== 'balance') options.startDate = startDate;
                     if (endDate) options.endDate = endDate;
+                    if (dataType === 'accounts') {
+                        const accountIds = this.getSelectedExportAccountIds();
+                        if (accountIds !== null) options.accountIds = accountIds;
+                    }
                     
                     const result = await this.accountingManager.exportData(dataType, format, options);
                     
                     if (result.success) {
-                        this.showToast(`${result.format} exportado: ${result.filename} (${result.records} registros)`, 'success');
+                        if (result.fallback) {
+                            this.showToast('Exportado sin formato', 'success');
+                        } else {
+                            this.showToast(`${result.format} exportado: ${result.filename} (${result.records} registros)`, 'success');
+                        }
                         this.closeExportModal();
                     }
                     
@@ -3573,7 +3789,7 @@
                         <div class="flex items-start justify-between">
                             <div class="flex-1">
                                 <div class="flex items-center mb-2">
-                                    <h4 class="font-medium text-gray-900">${rule.name}</h4>
+                                    <h4 class="font-medium text-gray-900">${this._escapeHtml(rule.name)}</h4>
                                     ${rule.isDefault ? 
                                         '<span class="ml-2 px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded">Por defecto</span>' : 
                                         '<span class="ml-2 px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">Personalizada</span>'
@@ -3584,10 +3800,10 @@
                                     }
                                 </div>
                                 <div class="text-sm text-gray-600 mb-1">
-                                    <strong>Palabras clave:</strong> ${rule.keywords.join(', ')}
+                                    <strong>Palabras clave:</strong> ${this._escapeHtml(rule.keywords.join(', '))}
                                 </div>
                                 <div class="text-sm text-gray-600">
-                                    <strong>Asigna a:</strong> ${rule.accountName} (${rule.accountType})
+                                    <strong>Asigna a:</strong> ${this._escapeHtml(rule.accountName)} (${rule.accountType})
                                     ${this.accountingManager.getRuleAccount(rule) ? '<span class="text-green-600">✓ Conectada</span>' : '<span class="text-red-600">⚠ Sin cuenta</span>'}
                                 </div>
                             </div>
@@ -3649,10 +3865,10 @@
                         
                         <div class="mb-4">
                             <p class="text-sm text-gray-600 mb-2">
-                                <strong>Regla:</strong> ${rule.name}
+                                <strong>Regla:</strong> ${this._escapeHtml(rule.name)}
                             </p>
                             <p class="text-sm text-gray-600 mb-4">
-                                <strong>Palabras clave:</strong> ${rule.keywords.join(', ')}
+                                <strong>Palabras clave:</strong> ${this._escapeHtml(rule.keywords.join(', '))}
                             </p>
                         </div>
                         
@@ -3666,7 +3882,7 @@
                                     <option value="">Seleccionar cuenta...</option>
                                     ${filteredAccounts.map(acc => `
                                         <option value="${acc.id}" ${acc.id === rule.accountId ? 'selected' : ''}>
-                                            ${acc.nombre}
+                                            ${this._escapeHtml(acc.nombre)}
                                         </option>
                                     `).join('')}
                                 </select>
@@ -3743,7 +3959,7 @@
                 accountSelector.innerHTML += '<option value="_new_">✨ Crear nueva cuenta</option>';
                 
                 accounts.forEach(acc => {
-                    accountSelector.innerHTML += `<option value="${acc.id}">${acc.nombre}</option>`;
+                    accountSelector.innerHTML += `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`;
                 });
                 
                 // Ocultar input de nueva cuenta al cambiar tipo
@@ -4143,14 +4359,14 @@
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta de ingreso</label>
                             <select id="sc-source-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${ingresos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${ingresos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta destino (activo)</label>
                             <select id="sc-dest-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${activos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>`;
                 } else if (type === 'gasto') {
@@ -4161,14 +4377,14 @@
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta origen (activo)</label>
                             <select id="sc-source-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${activos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta de gasto</label>
                             <select id="sc-dest-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${gastos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+                                ${gastos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)}</option>`).join('')}
                             </select>
                         </div>`;
                 } else if (type === 'transferencia') {
@@ -4178,14 +4394,14 @@
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta origen</label>
                             <select id="sc-source-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activosPasivos.map(a => `<option value="${a.id}">${a.nombre} (${a.tipo})</option>`).join('')}
+                                ${activosPasivos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)} (${a.tipo})</option>`).join('')}
                             </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Cuenta destino</label>
                             <select id="sc-dest-account" class="w-full border border-gray-300 rounded-lg px-3 py-2" required>
                                 <option value="">Seleccionar...</option>
-                                ${activosPasivos.map(a => `<option value="${a.id}">${a.nombre} (${a.tipo})</option>`).join('')}
+                                ${activosPasivos.map(a => `<option value="${a.id}">${this._escapeHtml(a.nombre)} (${a.tipo})</option>`).join('')}
                             </select>
                         </div>`;
                 } else {
@@ -4283,8 +4499,8 @@
                                     <i class="fas ${icon} text-xs ${colorClass}"></i>
                                 </div>
                                 <div class="min-w-0">
-                                    <p class="text-sm font-medium text-gray-900 truncate">${m.descripcion}</p>
-                                    <p class="text-xs text-gray-400 truncate">${m.cuenta_nombre} → ${m.cuenta_destino_nombre}</p>
+                                    <p class="text-sm font-medium text-gray-900 truncate">${this._escapeHtml(m.descripcion)}</p>
+                                    <p class="text-xs text-gray-400 truncate">${this._escapeHtml(m.cuenta_nombre)} → ${this._escapeHtml(m.cuenta_destino_nombre)}</p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-3 flex-shrink-0">
@@ -4865,13 +5081,13 @@
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center space-x-2">
-                                        <h4 class="font-medium text-gray-900 truncate">${notification.title}</h4>
+                                        <h4 class="font-medium text-gray-900 truncate">${this._escapeHtml(notification.title)}</h4>
                                         ${!notification.read ? 
                                             '<span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">Nueva</span>' : 
                                             ''
                                         }
                                     </div>
-                                    <p class="text-sm text-gray-600 mt-1">${notification.message}</p>
+                                    <p class="text-sm text-gray-600 mt-1">${this._escapeHtml(notification.message)}</p>
                                     <p class="text-xs text-gray-500 mt-2">
                                         ${this.formatNotificationDate(notification.createdAt)}
                                     </p>
@@ -4956,8 +5172,8 @@
                                 ${this.getNotificationIcon(notification.type)}
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium text-gray-900 truncate">${notification.title}</p>
-                                <p class="text-xs text-gray-600 truncate">${notification.message}</p>
+                                <p class="text-sm font-medium text-gray-900 truncate">${this._escapeHtml(notification.title)}</p>
+                                <p class="text-xs text-gray-600 truncate">${this._escapeHtml(notification.message)}</p>
                                 <p class="text-xs text-gray-500 mt-1">${this.formatNotificationDate(notification.createdAt)}</p>
                             </div>
                             ${!notification.read ? '<div class="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-2"></div>' : ''}
@@ -5443,7 +5659,7 @@
                                  style="background:${c.border};">
                                 <i class="fas ${ins.icon} text-xs" style="color:${c.icon};"></i>
                             </div>
-                            <p class="text-sm leading-snug" style="color:var(--text-primary);">${ins.text}</p>
+                            <p class="text-sm leading-snug" style="color:var(--text-primary);">${this._escapeHtml(ins.text)}</p>
                         </div>`;
                 }).join('');
 
@@ -5960,7 +6176,7 @@
                     return `
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-color);">
                             <div style="min-width:0;">
-                                <p style="font-size:13.5px;font-weight:600;color:var(--text-primary);margin:0;overflow:hidden;text-overflow:ellipsis;">${acc.nombre}</p>
+                                <p style="font-size:13.5px;font-weight:600;color:var(--text-primary);margin:0;overflow:hidden;text-overflow:ellipsis;">${this._escapeHtml(acc.nombre)}</p>
                                 <p style="font-size:11.5px;color:var(--text-secondary);margin:2px 0 0;">${fmtC(importe)}/mes${acc.fixed_due_day ? ` · vence el día ${acc.fixed_due_day}` : ''}</p>
                             </div>
                             <div style="text-align:right;flex-shrink:0;">${badge}</div>
@@ -5983,10 +6199,18 @@
             updatePremiumWidgets() {
                 const currentUser = Auth.getCurrentUser();
                 const premiumWidgets = document.getElementById('premium-saldo-real-widgets');
-                
+                // Bloques solo-Premium que se ocultan por completo a los free (mismo patrón
+                // 'hidden'). Sus títulos van dentro del contenedor, así que no queda ningún
+                // título huérfano, y al ser display:none tampoco dejan hueco en el layout.
+                const premiumBlocks = [
+                    document.getElementById('insights-panel'),       // Resumen inteligente
+                    document.getElementById('financial-health-card') // Salud financiera (Índice Flow)
+                ];
+
                 if (currentUser && Auth.isPremium()) {
                     // Mostrar widgets Premium
                     premiumWidgets.classList.remove('hidden');
+                    premiumBlocks.forEach(el => el && el.classList.remove('hidden'));
                     
                     // Calcular datos de Saldo Real
                     const saldoRealData = this.accountingManager.calculateSaldoReal();
@@ -6006,6 +6230,7 @@
                 } else {
                     // Ocultar widgets Premium
                     premiumWidgets.classList.add('hidden');
+                    premiumBlocks.forEach(el => el && el.classList.add('hidden'));
                 }
             }
 
@@ -6165,7 +6390,7 @@
                                 <i class="fas ${this.getMovementIcon(movement.tipo)} text-sm"></i>
                             </div>
                             <div class="ml-3">
-                                <p class="text-sm font-medium text-gray-900">${movement.descripcion}</p>
+                                <p class="text-sm font-medium text-gray-900">${this._escapeHtml(movement.descripcion)}</p>
                                 <p class="text-xs text-gray-500">${this.formatDate(movement.fecha)}</p>
                             </div>
                         </div>
@@ -6326,11 +6551,11 @@
                                                     <a href="javascript:void(0)"
                                                        onclick="dashboard.showAccountDetail('${account.id}', {})"
                                                        class="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer">
-                                                        ${account.nombre}
+                                                        ${this._escapeHtml(account.nombre)}
                                                     </a>
                                                     ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h4>
-                                                <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
+                                                <p class="text-sm text-gray-500">${this._escapeHtml(account.descripcion || 'Sin descripción')}</p>
                                                 ${account.is_fixed_cost ? `<p class="text-xs text-red-600">${this.formatCurrency(account.fixed_monthly_amount)}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                         </div>
@@ -6447,7 +6672,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${this._escapeHtml(movement.descripcion)}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6564,7 +6789,7 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            ${movement.descripcion}
+                            ${this._escapeHtml(movement.descripcion)}
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium ${this.getAmountColor(movement.tipo)}">
                             ${this.formatMovementAmount(movement)}
@@ -6673,11 +6898,14 @@
                 const period = document.getElementById('report-period-filter').value;
                 const dateFrom = document.getElementById('report-date-from').value;
                 const dateTo = document.getElementById('report-date-to').value;
-                
+                // Tipo de movimiento (solo lo usa el Libro Diario). '' = Todos.
+                const type = document.getElementById('report-type-filter')?.value || '';
+
                 return {
                     period,
                     dateFrom,
-                    dateTo
+                    dateTo,
+                    type
                 };
             }
 
@@ -6960,7 +7188,13 @@
                 if (filters.dateFrom || filters.dateTo) {
                     movements = this.applyDateFiltersToMovements(movements, filters);
                 }
-                
+
+                // Filtro por tipo de movimiento ('ingreso' | 'gasto' | 'transferencia').
+                // Se combina con el rango de fechas activo; '' o ausente = Todos.
+                if (filters.type) {
+                    movements = movements.filter(mov => mov.tipo === filters.type);
+                }
+
                 if (movements.length === 0) {
                     return `
                         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -7026,7 +7260,7 @@
                                                     ${this.formatDate(movement.fecha)}
                                                 </td>
                                                 <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    ${movement.descripcion}
+                                                    ${this._escapeHtml(movement.descripcion)}
                                                 </td>
                                                 <td class="px-4 py-4 whitespace-nowrap">
                                                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${this.getMovementTypeBadgeClass(movement.tipo)}">
@@ -7037,7 +7271,7 @@
                                                     ${this.formatCurrency(movement.cantidad)}
                                                 </td>
                                                 <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    ${sourceAcc?.nombre || 'N/A'} → ${destAcc?.nombre || 'N/A'}
+                                                    ${this._escapeHtml(sourceAcc?.nombre || 'N/A')} → ${this._escapeHtml(destAcc?.nombre || 'N/A')}
                                                 </td>
                                             </tr>
                                         `;
@@ -7161,10 +7395,10 @@
                                              onclick="dashboard.showAccountDetail('${account.id}', dashboard.getReportFilters())">
                                             <div>
                                                 <h5 class="font-medium text-gray-900 flex items-center">
-                                                    ${account.nombre}
+                                                    ${this._escapeHtml(account.nombre)}
                                                     ${account.is_fixed_cost ? '<i class="fas flow-fixed-cost text-red-500 ml-2" title="Coste fijo"></i>' : ''}
                                                 </h5>
-                                                <p class="text-sm text-gray-500">${account.descripcion || 'Sin descripción'}</p>
+                                                <p class="text-sm text-gray-500">${this._escapeHtml(account.descripcion || 'Sin descripción')}</p>
                                                 ${account.is_fixed_cost ? `<p class="text-xs text-red-600">${this.formatCurrency(account.fixed_monthly_amount)}/mes - Día ${account.fixed_due_day}</p>` : ''}
                                             </div>
                                             <div class="text-right">
@@ -7183,42 +7417,10 @@
             }
 
             renderBalance(filters = {}) {
-                const accounts = this.accountingManager.getAccounts();
-                const allMovements = this.accountingManager.getMovements();
-                
-                // Calcular saldo por fecha para cada cuenta
-                // Si hay filtro dateTo, calculamos el acumulado hasta esa fecha
-                // Si no hay filtro, usamos saldo_actual directamente
-                const calcSaldo = (account) => {
-                    if (!filters.dateTo) return account.saldo_actual;
-                    // Recalcular desde saldo inicial aplicando movimientos hasta dateTo
-                    let saldo = account.saldo_inicial || 0;
-                    const movs = allMovements.filter(m => 
-                        m.fecha <= filters.dateTo &&
-                        (m.cuenta_id === account.id || m.cuenta_destino_id === account.id)
-                    );
-                    movs.forEach(m => {
-                        if (m.tipo === 'ingreso') {
-                            if (m.cuenta_destino_id === account.id) saldo += m.cantidad; // activo sube
-                            if (m.cuenta_id === account.id) saldo += m.cantidad;         // ingreso acumulado
-                        } else if (m.tipo === 'gasto') {
-                            if (m.cuenta_id === account.id) saldo -= m.cantidad;         // activo baja
-                            if (m.cuenta_destino_id === account.id) saldo += m.cantidad; // gasto acumulado
-                        } else if (m.tipo === 'transferencia') {
-                            if (m.cuenta_id === account.id) saldo -= m.cantidad;
-                            if (m.cuenta_destino_id === account.id) saldo += m.cantidad;
-                        }
-                    });
-                    return saldo;
-                };
-
-                const activos = accounts.filter(acc => acc.tipo === 'activo').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
-                const pasivos = accounts.filter(acc => acc.tipo === 'pasivo').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
-                const patrimonio = accounts.filter(acc => acc.tipo === 'patrimonio').map(acc => ({...acc, saldo_calc: calcSaldo(acc)}));
-
-                const activos_total = activos.reduce((s, a) => s + a.saldo_calc, 0);
-                const pasivos_total = Math.abs(pasivos.reduce((s, a) => s + a.saldo_calc, 0));
-                const patrimonio_total = patrimonio.reduce((s, a) => s + a.saldo_calc, 0);
+                // Cálculo compartido con la exportación (AccountingManager.getBalanceData):
+                // mismos saldos y totales en pantalla y en el archivo exportado.
+                const { activos, pasivos, patrimonio, activos_total, pasivos_total, patrimonio_total } =
+                    this.accountingManager.getBalanceData(filters);
 
                 let periodoLabel = 'Saldos actuales';
                 if (filters.dateTo) periodoLabel = `Acumulado hasta ${filters.dateTo}`;
@@ -7235,8 +7437,8 @@
                                     ${activos.map(asset => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${asset.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${asset.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${asset.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(asset.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(asset.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-green-600">${this.formatCurrency(asset.saldo_calc)}</span>
                                         </div>
                                     `).join('')}
@@ -7253,8 +7455,8 @@
                                     ${pasivos.map(liability => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${liability.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${liability.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${liability.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(liability.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(liability.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-red-600">${this.formatCurrency(Math.abs(liability.saldo_calc))}</span>
                                         </div>
                                     `).join('')}
@@ -7273,8 +7475,8 @@
                                 ${patrimonio.map(equity => `
                                     <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                          onclick="dashboard.showAccountDetail('${equity.id}', dashboard.getReportFilters())"
-                                         title="Ver Libro Mayor de ${equity.nombre}">
-                                        <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${equity.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                         title="Ver Libro Mayor de ${this._escapeHtml(equity.nombre)}">
+                                        <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(equity.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                         <span class="font-medium text-blue-600">${this.formatCurrency(equity.saldo_calc)}</span>
                                     </div>
                                 `).join('')}
@@ -7298,43 +7500,10 @@
             }
 
             renderEstadoResultados(filters = {}) {
-                // Determinar rango efectivo de fechas
-                let dateFrom, dateTo;
-                if (filters.dateFrom || filters.dateTo) {
-                    dateFrom = filters.dateFrom || '';
-                    dateTo = filters.dateTo || '';
-                } else {
-                    const now = new Date();
-                    dateFrom = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth(), 1));
-                    dateTo = this._formatDateLocal(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-                }
-
-                // Calcular totales del período
-                const stats = this.accountingManager.calculateIncomeStatementForPeriod({ dateFrom, dateTo });
-
-                // Filtrar movimientos del período
-                let movements = this.accountingManager.getMovements();
-                if (dateFrom) movements = movements.filter(m => m.fecha >= dateFrom);
-                if (dateTo) movements = movements.filter(m => m.fecha <= dateTo);
-
-                const accounts = this.accountingManager.getAccounts();
-
-                // Calcular importe del período por cada cuenta de ingreso y gasto
-                const ingresos = accounts.filter(acc => acc.tipo === 'ingreso').map(acc => ({
-                    ...acc,
-                    saldo_periodo: movements
-                        .filter(m => m.tipo === 'ingreso' && m.cuenta_id === acc.id)
-                        .reduce((sum, m) => sum + m.cantidad, 0)
-                }));
-
-                const gastos = accounts.filter(acc => acc.tipo === 'gasto').map(acc => ({
-                    ...acc,
-                    saldo_periodo: movements
-                        .filter(m => m.tipo === 'gasto' && m.cuenta_destino_id === acc.id)
-                        .reduce((sum, m) => sum + m.cantidad, 0)
-                }));
-
-                const resultado = stats.ingresos_total - stats.gastos_total;
+                // Cálculo compartido con la exportación (AccountingManager.getIncomeStatementData):
+                // mismo periodo por defecto (mes actual, hora local), mismos totales por cuenta.
+                const { dateFrom, dateTo, stats, ingresos, gastos, resultado } =
+                    this.accountingManager.getIncomeStatementData(filters);
 
                 let periodoLabel = 'Mes actual';
                 if (filters.dateFrom || filters.dateTo) {
@@ -7355,8 +7524,8 @@
                                     ${ingresos.map(income => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${income.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${income.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${income.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(income.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(income.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-green-600">${this.formatCurrency(income.saldo_periodo)}</span>
                                         </div>
                                     `).join('')}
@@ -7373,8 +7542,8 @@
                                     ${gastos.map(expense => `
                                         <div class="flex justify-between items-center py-2 border-b border-gray-100 hover:bg-gray-50 rounded px-2 cursor-pointer transition-colors"
                                              onclick="dashboard.showAccountDetail('${expense.id}', dashboard.getReportFilters())"
-                                             title="Ver Libro Mayor de ${expense.nombre}">
-                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${expense.nombre} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
+                                             title="Ver Libro Mayor de ${this._escapeHtml(expense.nombre)}">
+                                            <span class="text-blue-600 hover:text-blue-800 hover:underline text-sm">${this._escapeHtml(expense.nombre)} <i class="fas fa-external-link-alt text-xs opacity-50"></i></span>
                                             <span class="font-medium text-red-600">${this.formatCurrency(expense.saldo_periodo)}</span>
                                         </div>
                                     `).join('')}
@@ -7425,23 +7594,60 @@
                 const modal = document.createElement('div');
                 modal.id = 'account-limit-modal';
                 modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:1rem;';
-                modal.innerHTML = `
-                    <div style="background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:1rem;max-width:26rem;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
-                        <div style="padding:1.5rem 1.5rem 0;display:flex;align-items:flex-start;gap:0.85rem;">
-                            <div style="flex-shrink:0;width:2.75rem;height:2.75rem;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(245,179,1,0.15);">
-                                <i class="fas fa-crown" style="color:var(--premium-accent, #F5B301);font-size:1.15rem;"></i>
+
+                if (Auth.isPremium()) {
+                    // El usuario ya es Premium: no tiene sentido ofrecerle mejorar de plan.
+                    // Se le ofrecen alternativas reales: reorganizar cuentas o pedir ampliación.
+                    const asunto = encodeURIComponent('Solicitud de ampliación de límite de cuentas');
+                    modal.innerHTML = `
+                        <div style="background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:1rem;max-width:28rem;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
+                            <div style="padding:1.5rem 1.5rem 0;display:flex;align-items:flex-start;gap:0.85rem;">
+                                <div style="flex-shrink:0;width:2.75rem;height:2.75rem;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(245,179,1,0.15);">
+                                    <i class="fas fa-crown" style="color:var(--premium-accent, #F5B301);font-size:1.15rem;"></i>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 0.35rem;">Límite de tu plan Premium</h3>
+                                    <p style="font-size:0.9rem;line-height:1.5;color:var(--text-secondary);margin:0;">Has alcanzado el máximo de <strong style="color:var(--text-primary);">${n} ${nombre}</strong> de tu plan Premium.</p>
+                                </div>
                             </div>
-                            <div style="flex:1;min-width:0;">
-                                <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 0.35rem;">Límite del plan gratuito</h3>
-                                <p style="font-size:0.9rem;line-height:1.5;color:var(--text-secondary);margin:0;">Has alcanzado el límite de <strong style="color:var(--text-primary);">${n} ${nombre}</strong> del plan gratuito. Para crear más cuentas necesitas el plan Premium.</p>
+                            <div style="padding:1.1rem 1.5rem 0;">
+                                <p style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin:0 0 0.6rem;">¿Qué puedes hacer?</p>
+                                <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:0.6rem;">
+                                    <li style="display:flex;gap:0.6rem;font-size:0.86rem;line-height:1.5;color:var(--text-secondary);">
+                                        <i class="fas fa-sliders" style="color:var(--brand-primary);margin-top:0.15rem;flex-shrink:0;"></i>
+                                        <span>Reorganiza o reutiliza las cuentas que ya tienes; por ejemplo, marcando cuentas de gasto como <strong style="color:var(--text-primary);">coste fijo</strong> para agruparlas mejor.</span>
+                                    </li>
+                                    <li style="display:flex;gap:0.6rem;font-size:0.86rem;line-height:1.5;color:var(--text-secondary);">
+                                        <i class="fas fa-envelope" style="color:var(--brand-primary);margin-top:0.15rem;flex-shrink:0;"></i>
+                                        <span>Solicita una <strong style="color:var(--text-primary);">ampliación del límite</strong> escribiéndonos por correo.</span>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div style="padding:1.25rem 1.5rem 1.5rem;display:flex;flex-direction:column;gap:0.6rem;">
+                                <a href="mailto:clientes@contabilidadpersonal.com?subject=${asunto}" onclick="dashboard.closeAccountLimitModal();" style="display:block;width:100%;box-sizing:border-box;text-align:center;text-decoration:none;padding:0.75rem;border-radius:0.6rem;font-weight:700;font-size:0.92rem;background:var(--premium-accent, #F5B301);color:#0B2A55;">Solicitar ampliación</a>
+                                <button type="button" onclick="dashboard.closeAccountLimitModal();" style="width:100%;padding:0.7rem;border:1px solid var(--border-color);border-radius:0.6rem;font-weight:600;font-size:0.9rem;cursor:pointer;background:transparent;color:var(--text-secondary);">Entendido</button>
                             </div>
                         </div>
-                        <div style="padding:1.25rem 1.5rem 1.5rem;display:flex;flex-direction:column;gap:0.6rem;">
-                            <button type="button" onclick="dashboard.closeAccountLimitModal(); dashboard.showPlanSelector();" style="width:100%;padding:0.75rem;border:none;border-radius:0.6rem;font-weight:700;font-size:0.92rem;cursor:pointer;background:var(--premium-accent, #F5B301);color:#0B2A55;">Mejorar a Premium</button>
-                            <button type="button" onclick="dashboard.closeAccountLimitModal();" style="width:100%;padding:0.7rem;border:1px solid var(--border-color);border-radius:0.6rem;font-weight:600;font-size:0.9rem;cursor:pointer;background:transparent;color:var(--text-secondary);">En otro momento</button>
+                    `;
+                } else {
+                    modal.innerHTML = `
+                        <div style="background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:1rem;max-width:26rem;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
+                            <div style="padding:1.5rem 1.5rem 0;display:flex;align-items:flex-start;gap:0.85rem;">
+                                <div style="flex-shrink:0;width:2.75rem;height:2.75rem;border-radius:9999px;display:flex;align-items:center;justify-content:center;background:rgba(245,179,1,0.15);">
+                                    <i class="fas fa-crown" style="color:var(--premium-accent, #F5B301);font-size:1.15rem;"></i>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                    <h3 style="font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 0.35rem;">Límite del plan gratuito</h3>
+                                    <p style="font-size:0.9rem;line-height:1.5;color:var(--text-secondary);margin:0;">Has alcanzado el límite de <strong style="color:var(--text-primary);">${n} ${nombre}</strong> del plan gratuito. Para crear más cuentas necesitas el plan Premium.</p>
+                                </div>
+                            </div>
+                            <div style="padding:1.25rem 1.5rem 1.5rem;display:flex;flex-direction:column;gap:0.6rem;">
+                                <button type="button" onclick="dashboard.closeAccountLimitModal(); dashboard.showPlanSelector();" style="width:100%;padding:0.75rem;border:none;border-radius:0.6rem;font-weight:700;font-size:0.92rem;cursor:pointer;background:var(--premium-accent, #F5B301);color:#0B2A55;">Mejorar a Premium</button>
+                                <button type="button" onclick="dashboard.closeAccountLimitModal();" style="width:100%;padding:0.7rem;border:1px solid var(--border-color);border-radius:0.6rem;font-weight:600;font-size:0.9rem;cursor:pointer;background:transparent;color:var(--text-secondary);">En otro momento</button>
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                }
                 modal.addEventListener('click', (e) => { if (e.target === modal) this.closeAccountLimitModal(); });
                 if (!this._accLimitEsc) this._accLimitEsc = (e) => { if (e.key === 'Escape') this.closeAccountLimitModal(); };
                 document.addEventListener('keydown', this._accLimitEsc);
@@ -7631,7 +7837,7 @@
                     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                         <div class="flex items-center justify-between mb-6">
                             <div>
-                                <h3 class="text-xl font-semibold text-gray-900">Libro Mayor - ${account.nombre}</h3>
+                                <h3 class="text-xl font-semibold text-gray-900">Libro Mayor - ${this._escapeHtml(account.nombre)}</h3>
                                 <p class="text-gray-600">${periodoLabel}</p>
                             </div>
                             <button onclick="dashboard.renderReportContent('libro-mayor')" class="text-blue-600 hover:text-blue-700 text-sm">
@@ -7705,7 +7911,7 @@
                                                     ${new Date(mov.fecha).toLocaleDateString('es-ES')}
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    ${mov.concepto}
+                                                    ${this._escapeHtml(mov.concepto)}
                                                     ${mov.esInicial ? '<span class="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Inicial</span>' : ''}
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium ${debeColor}">
@@ -7946,7 +8152,7 @@
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta de ingreso...</option>
                                     ${accounts.filter(acc => acc.tipo === 'ingreso').map(acc => 
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                        `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -7955,7 +8161,7 @@
                                 <select id="destination-account" name="destination_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta destino...</option>
                                     ${accounts.filter(acc => acc.tipo === 'activo').map(acc => 
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                        `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -7969,7 +8175,7 @@
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta origen...</option>
                                     ${accounts.filter(acc => ['activo', 'pasivo', 'patrimonio'].includes(acc.tipo)).map(acc =>
-                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${this._escapeHtml(acc.nombre)} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -7978,7 +8184,7 @@
                                 <select id="destination-account" name="destination_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required>
                                     <option value="">Seleccionar cuenta de gasto...</option>
                                     ${accounts.filter(acc => acc.tipo === 'gasto').map(acc => 
-                                        `<option value="${acc.id}">${acc.nombre}</option>`
+                                        `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -7996,7 +8202,7 @@
                                 <select id="source-account" name="source_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required onchange="dashboard._checkTransferDebtDesglose()">
                                     <option value="">Seleccionar cuenta origen...</option>
                                     ${activoPasivoAccounts.map(acc => 
-                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${this._escapeHtml(acc.nombre)} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8005,7 +8211,7 @@
                                 <select id="destination-account" name="destination_account" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2" required onchange="dashboard._checkTransferDebtDesglose()">
                                     <option value="">Seleccionar cuenta destino...</option>
                                     ${activoPasivoAccounts.map(acc => 
-                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${acc.nombre} (${acc.tipo})</option>`
+                                        `<option value="${acc.id}" data-tipo="${acc.tipo}">${this._escapeHtml(acc.nombre)} (${acc.tipo})</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -8036,7 +8242,7 @@
                                         <select id="cuenta-gasto-intereses" name="cuenta_gasto_intereses" class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
                                             <option value="">Seleccionar cuenta de gasto...</option>
                                             ${gastoAccounts.map(acc => 
-                                                `<option value="${acc.id}">${acc.nombre}</option>`
+                                                `<option value="${acc.id}">${this._escapeHtml(acc.nombre)}</option>`
                                             ).join('')}
                                         </select>
                                     </div>
@@ -8484,7 +8690,7 @@
                 const sourceAcc = accounts.find(acc => acc.id === movement.cuenta_id);
                 const destAcc = accounts.find(acc => acc.id === movement.cuenta_destino_id);
                 
-                return `${sourceAcc?.nombre || 'Desconocida'} → ${destAcc?.nombre || 'Desconocida'}`;
+                return `${this._escapeHtml(sourceAcc?.nombre || 'Desconocida')} → ${this._escapeHtml(destAcc?.nombre || 'Desconocida')}`;
             }
 
             // ===== PRUEBA PREMIUM =====
@@ -8528,7 +8734,7 @@
                 toast.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-check-circle mr-3"></i>
-                        <span>${message}</span>
+                        <span>${this._escapeHtml(message)}</span>
                     </div>
                 `;
                 
@@ -8552,7 +8758,7 @@
                 toast.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-exclamation-circle mr-3"></i>
-                        <span>${message}</span>
+                        <span>${this._escapeHtml(message)}</span>
                     </div>
                 `;
                 
@@ -8611,7 +8817,7 @@
                 
                 select.innerHTML = '<option value="">Seleccionar cuenta de ingresos...</option>';
                 accounts.forEach(account => {
-                    select.innerHTML += `<option value="${account.id}">${account.nombre}</option>`;
+                    select.innerHTML += `<option value="${account.id}">${this._escapeHtml(account.nombre)}</option>`;
                 });
             }
             
@@ -8748,7 +8954,7 @@
                                     <label class="flex items-center justify-between p-2 hover:bg-blue-50 rounded cursor-pointer border-l-4 border-transparent hover:border-blue-400">
                                         <div class="flex items-center">
                                             <input type="checkbox" value="${account.id}" class="account-checkbox mr-3 text-blue-600" data-category="${category}">
-                                            <span class="text-sm text-gray-900 font-medium">${account.nombre}</span>
+                                            <span class="text-sm text-gray-900 font-medium">${this._escapeHtml(account.nombre)}</span>
                                         </div>
                                         <span class="text-xs text-gray-600 font-semibold">${this.formatCurrency(saldo)}</span>
                                     </label>
@@ -8944,7 +9150,7 @@
                     tbody.innerHTML += `
                         <tr>
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                ${category.name}
+                                ${this._escapeHtml(category.name)}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 ${this.formatCurrency(targetAmount)}
@@ -9161,7 +9367,7 @@
                             <label class="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
                                 <div class="flex items-center">
                                     <input type="checkbox" value="${account.id}" class="mr-3 text-blue-600">
-                                    <span class="text-sm text-gray-900">${account.nombre}</span>
+                                    <span class="text-sm text-gray-900">${this._escapeHtml(account.nombre)}</span>
                                 </div>
                                 <span class="text-xs text-gray-500">${this.formatCurrency(saldo)}</span>
                             </label>
@@ -9241,7 +9447,7 @@
                                     <input 
                                         type="text" 
                                         id="profile-name" 
-                                        value="${userProfile.name}" 
+                                        value="${this._escapeHtml(userProfile.name)}" 
                                         class="w-full rounded-md form-input" 
                                         style="padding: var(--space-3); background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);"
                                         required
@@ -9277,7 +9483,7 @@
                                     <div class="grid grid-cols-2 gap-4">
                                         <div>
                                             <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Email</label>
-                                            <input type="email" value="${this.currentUser.email || ''}" class="w-full rounded-md" style="padding: var(--space-3); background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color);" readonly>
+                                            <input type="email" value="${this._escapeHtml(this.currentUser.email || '')}" class="w-full rounded-md" style="padding: var(--space-3); background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color);" readonly>
                                         </div>
                                         <div>
                                             <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Plan</label>
@@ -9498,7 +9704,7 @@
                 notification.innerHTML = `
                     <div class="flex items-center">
                         <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation-triangle' : 'info'} mr-2"></i>
-                        <span>${message}</span>
+                        <span>${this._escapeHtml(message)}</span>
                     </div>
                 `;
                 
@@ -9561,9 +9767,21 @@
                             </div>
                             
                             <hr style="border-color: var(--border-color);">
-                            
-                            <button 
-                                id="delete-account-btn" 
+
+                            <button
+                                id="change-password-btn"
+                                class="w-full text-left rounded-md transition-colors duration-200"
+                                style="padding: var(--space-3); color: var(--text-primary); border: 1px solid var(--border-color);"
+                                onmouseover="this.style.backgroundColor='var(--bg-secondary)'"
+                                onmouseout="this.style.backgroundColor='transparent'"
+                            >
+                                <i class="fas fa-key mr-2" style="color: var(--brand-primary);"></i>
+                                <span class="font-medium">Cambiar contraseña</span>
+                                <p class="small-text mt-1" style="color: var(--text-secondary);">Necesitarás tu contraseña actual</p>
+                            </button>
+
+                            <button
+                                id="delete-account-btn"
                                 class="w-full text-left rounded-md transition-colors duration-200" 
                                 style="padding: var(--space-3); color: #dc2626; border: 1px solid #f3c2c2;"
                                 onmouseover="this.style.backgroundColor='rgba(220,38,38,0.06)'" 
@@ -9600,6 +9818,10 @@
                 }
                 
                 // Botón cambiar contraseña
+                const changePasswordBtn = document.getElementById('change-password-btn');
+                if (changePasswordBtn) {
+                    changePasswordBtn.addEventListener('click', () => this.showChangePasswordModal());
+                }
                // Botón eliminar cuenta
                const deleteAccountBtn = document.getElementById('delete-account-btn');
                 if (deleteAccountBtn) {
@@ -9813,7 +10035,7 @@
                 });
             }
             
-            processPasswordChange() {
+            async processPasswordChange() {
                 try {
                     const currentPassword = document.getElementById('current-password').value;
                     const newPassword = document.getElementById('new-password').value;
@@ -9840,27 +10062,26 @@
                         return;
                     }
                     
-                    // Simulación de cambio de contraseña (en la vida real esto sería una llamada a API)
-                    // Por ahora solo simulamos el proceso
-                    const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-                    
-                    // En un sistema real verificarías currentPassword contra la base de datos
-                    // Aquí simulamos que es correcta para propósitos de demo
-                    
-                    // Guardar nueva contraseña (en la realidad esto iría a la base de datos)
-                    user.password = btoa(newPassword); // Encoding básico solo para demo
-                    user.passwordLastChanged = new Date().toISOString();
-                    localStorage.setItem('currentUser', JSON.stringify(user));
-                    
+                    // El servidor verifica la contraseña actual y guarda el nuevo hash
+                    const submitBtn = document.querySelector('#change-password-form button[type="submit"]');
+                    if (submitBtn) submitBtn.disabled = true;
+                    const result = await DataClient.changePassword(this.currentUser?.id, currentPassword, newPassword);
+                    if (!result.success) {
+                        if (submitBtn) submitBtn.disabled = false;
+                        this.showNotification(result.error || 'Error al cambiar la contraseña', 'error');
+                        return;
+                    }
+
                     // Cerrar modal
                     document.getElementById('change-password-modal').remove();
-                    
+
                     // Mostrar éxito
                     this.showNotification('Contraseña cambiada correctamente', 'success');
-                    
-                    // Simular logout automático después de 2 segundos
-                    setTimeout(() => {
+
+                    // Cerrar sesión por seguridad después de 2 segundos (como indica el modal)
+                    setTimeout(async () => {
                         this.showNotification('Cerrando sesión por seguridad...', 'info');
+                        await Auth.logout();
                         setTimeout(() => {
                             window.location.href = './login.html';
                         }, 1500);
@@ -9875,39 +10096,28 @@
             // ===== NAVEGACIÓN ESPECÍFICA =====
             
             openBankAccountMajorBook() {
-                // Buscar la primera cuenta bancaria (tipo activo)
-                const bankAccounts = this.accountingManager.getAccounts('activo');
-                
-                if (bankAccounts.length === 0) {
+                const activos = this.accountingManager.getAccounts('activo');
+                if (activos.length === 0) {
                     this.showErrorMessage('No tienes cuentas bancarias creadas');
                     return;
                 }
-                
-                // Usar la primera cuenta bancaria
-                const primaryBankAccount = bankAccounts[0];
-                
-                // Navegar a reportes
-                this.navigateToSection('reports', 'libro-mayor');
-                
-                // Después de un pequeño delay, filtrar por la cuenta específica
-                setTimeout(() => {
-                    // Activar el tab de Libro Mayor
-                    const libroMayorTab = document.querySelector('[data-report="libro-mayor"]');
-                    if (libroMayorTab) {
-                        libroMayorTab.click();
-                        
-                        // Después de activar el tab, aplicar filtro de cuenta
-                        setTimeout(() => {
-                            this.filterLibroMayorByAccount(primaryBankAccount.id);
-                        }, 200);
-                    }
-                }, 100);
-            }
-            
-            filterLibroMayorByAccount(accountId) {
-                // Esta función filtrará el Libro Mayor por una cuenta específica
-                // Se implementará cuando tengamos los filtros de reportes listos
-                console.log('Filtrar Libro Mayor por cuenta:', accountId);
+
+                // Cuenta bancaria principal: la marcada como tal. Se aceptan true y 1
+                // (D1 devuelve enteros), misma comprobación que calculateBankBalance().
+                const bankAccounts = activos.filter(acc => acc.is_bank_account === true || acc.is_bank_account === 1);
+
+                // Reportes → Libro Mayor reutilizando la navegación y los tabs existentes:
+                // handleReportTab marca el tab activo y renderiza el listado del mayor.
+                if (this.currentSection !== 'reports') {
+                    this.handleNavigation('reports');
+                }
+                this.handleReportTab('libro-mayor');
+
+                // Si hay cuenta bancaria marcada, abrir directamente su detalle (mayor).
+                // Si no hay ninguna marcada, se queda en el listado del Libro Mayor.
+                if (bankAccounts.length > 0) {
+                    this.showAccountDetail(bankAccounts[0].id, this.getReportFilters());
+                }
             }
         }
 
@@ -10714,7 +10924,7 @@
                                 <ul style="list-style: none; font-size: 0.85rem;">
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>10 cuentas activo</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>8 cuentas de ingresos</li>
-                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>15 cuentas de gastos</li>
+                                    <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>25 cuentas de gastos</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Registro automático de movimientos: importa tus extractos (CSV/Excel) y clasifícalos automáticamente</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Plan Autocontrol 50/30/20</li>
                                     <li style="margin-bottom: var(--space-2);"><i class="fas fa-check mr-2" style="color: var(--premium-accent, #F5B301);"></i>Reglas de registro automático</li>

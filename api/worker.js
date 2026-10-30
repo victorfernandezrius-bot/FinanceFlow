@@ -41,10 +41,20 @@ import { aggregate, positionFrom, openPositions, openQty, computeClose, buildJou
 import { alignedReturns, beta, classifyBeta, annualizedVolatility, covarianceMatrix,
     portfolioVolatility, portfolioBeta, bondDuration, RISK_WINDOW, MIN_SESSIONS } from './cartera-logic.js';
 
+// Cabeceras de seguridad de todas las respuestas JSON de la API. no-store: son
+// datos personales y financieros, que no deben quedarse en cachés intermedias.
+const API_SECURITY_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer'
+};
+
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
         status,
-        headers: { 'Content-Type': 'application/json', ...extraHeaders }
+        headers: { 'Content-Type': 'application/json', ...API_SECURITY_HEADERS, ...extraHeaders }
     });
 
 function corsHeaders(request, env) {
@@ -56,7 +66,9 @@ function corsHeaders(request, env) {
         'Access-Control-Allow-Origin': allowOrigin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Credentials': 'true'
+        'Access-Control-Allow-Credentials': 'true',
+        // El cliente necesita leer el token renovado (ver issueToken / authenticate)
+        'Access-Control-Expose-Headers': 'X-Refresh-Token'
     };
 }
 
@@ -142,13 +154,86 @@ function webauthnConfig(env) {
     return { rpName: 'FinanceFlow', rpID, expectedOrigin: (env.APP_URL || '').replace(/\/$/, '') };
 }
 
-async function getAuthUser(request, env) {
+// ---------- Respuestas con columnas explícitas ----------
+// Nunca SELECT * hacia el cliente: así una columna nueva (o interna) no se expone
+// por accidente. Las listas son las columnas que escribe este Worker.
+const PUBLIC_USER_FIELDS = ['id', 'email', 'name', 'picture', 'auth_provider', 'plan', 'plan_expires_at',
+    'currency', 'created_at', 'updated_at'];
+function publicUser(u) {
+    const out = {};
+    for (const k of PUBLIC_USER_FIELDS) if (u && u[k] !== undefined) out[k] = u[k];
+    return out;
+}
+const ACCOUNT_COLUMNS = 'id, user_id, nombre, tipo, descripcion, saldo_inicial, saldo_actual, is_fixed_cost, ' +
+    'fixed_monthly_amount, fixed_due_day, is_bank_account, auto_created_by_rule, created_at, updated_at';
+const MOVEMENT_COLUMNS = 'id, user_id, tipo, cantidad, descripcion, fecha, cuenta_id, cuenta_destino_id, categoria, ' +
+    'origen, auto_categorized, applied_rule, rule_name, manually_categorized, bank_reference, created_at, updated_at';
+const NOTIFICATION_COLUMNS = 'id, user_id, type, title, message, data, read, created_at';
+const BANK_CONNECTION_COLUMNS = 'id, user_id, bank_code, bank_name, institution_id, requisition_id, ' +
+    'gocardless_account_id, linked_account_id, status, is_active, last_sync_at, created_at';
+const IMPORT_INFO_COLUMNS = 'user_id, bank_code, last_import_at, last_import_count, total_imported';
+
+// ---------- Sesiones ----------
+// JWT HS256 con jti, iat y caducidad de 7 días que se renueva sola mientras se usa:
+// si el token tiene más de un día, la respuesta lleva uno nuevo en X-Refresh-Token y
+// authFetch (data-client.js) lo guarda. Los tokens antiguos (30 días, sin jti) siguen
+// valiendo hasta su caducidad y la renovación nunca acorta la vida de un token.
+const SESSION_TTL = 7 * 86400;
+const SESSION_REFRESH_AFTER = 86400;
+async function issueToken(env, user, minExp = 0) {
+    const now = Math.floor(Date.now() / 1000);
+    return signJWT({ sub: user.id, iat: now, jti: crypto.randomUUID(), tv: Number(user.token_version) || 0,
+        exp: Math.max(now + SESSION_TTL, minExp) }, env.JWT_SECRET);
+}
+const needsRefresh = (payload) =>
+    !payload.jti || !payload.iat || Date.now() / 1000 - payload.iat > SESSION_REFRESH_AFTER;
+
+// Revocación (logout): KV `revoked:<id>` hasta la caducidad del token. El id es el jti
+// o, en los tokens antiguos sin jti, el SHA-256 del token. Fail-open si KV falla.
+async function revocationId(payload, token) {
+    if (payload.jti) return payload.jti;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function isRevoked(env, payload, token) {
+    try { return !!(await env.CACHE.get('revoked:' + await revocationId(payload, token))); }
+    catch (e) { console.error('isRevoked:', e); return false; }
+}
+async function revokeToken(env, payload, token) {
+    const ttl = Math.max(60, Math.ceil((payload.exp || 0) - Date.now() / 1000));
+    await env.CACHE.put('revoked:' + await revocationId(payload, token), '1', { expirationTtl: ttl });
+}
+
+// Devuelve { user, payload, token } si el Bearer token es válido y no está revocado, o null.
+async function authenticate(request, env) {
     const auth = request.headers.get('Authorization') || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     if (!token) return null;
     const payload = await verifyJWT(token, env.JWT_SECRET);
     if (!payload) return null;
-    return env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
+    if (await isRevoked(env, payload, token)) return null;
+    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(payload.sub).first();
+    if (!user) return null;
+    // Cambio/restablecimiento de contraseña: los tokens con tv anterior ya no valen.
+    // Sin la columna (migración 0001 sin aplicar) no se comprueba.
+    if (typeof user.token_version === 'number' && (Number(payload.tv) || 0) < user.token_version) return null;
+    return { user, payload, token };
+}
+
+// Invalida todas las sesiones del usuario (incrementa token_version). Si la migración
+// 0001 no está aplicada, no hace nada (solo lo registra) para no romper el cambio de clave.
+async function bumpTokenVersion(env, userId) {
+    try {
+        await env.DB.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id=?')
+            .bind(userId).run();
+    } catch (e) {
+        console.error('bumpTokenVersion (¿migración 0001 aplicada?):', e && e.message);
+    }
+}
+
+async function getAuthUser(request, env) {
+    const auth = await authenticate(request, env);
+    return auth ? auth.user : null;
 }
 
 // Rate limit sencillo con KV (env.CACHE). Devuelve true si se SUPERA el límite.
@@ -165,6 +250,121 @@ async function rateLimited(env, key, max, ttlSeconds) {
         console.error('rateLimited:', e);
         return false;
     }
+}
+
+// ---------- Validación de entrada ----------
+// Comprobaciones de tipo, longitud, enum y rango para todo lo que escribe el cliente.
+// Los importes aceptan número o string numérico (como hasta ahora los guardaba D1).
+const MAX_BODY_BYTES = 1000000;
+const MAX_AMOUNT = 1e12;
+const ACCOUNT_TYPES = ['activo', 'pasivo', 'patrimonio', 'ingreso', 'gasto'];
+const MOVEMENT_TYPES = ['ingreso', 'gasto', 'transferencia'];
+const isNil = (x) => x === undefined || x === null;
+const V = {
+    str: (x, max, min = 0) => typeof x === 'string' && x.length >= min && x.length <= max,
+    optStr: (x, max) => isNil(x) || (typeof x === 'string' && x.length <= max),
+    amount: (x) => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) &&
+        Number.isFinite(Number(x)) && Math.abs(Number(x)) <= MAX_AMOUNT,
+    optAmount: (x) => isNil(x) || V.amount(x),
+    id: (x) => typeof x === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(x),
+    optId: (x) => isNil(x) || V.id(x),
+    // YYYY-MM-DD, opcionalmente con hora ISO (2026-10-20T21:07:34.694Z): nada más detrás
+    date: (x) => typeof x === 'string' && x.length <= 40 &&
+        /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?)?$/.test(x),
+    optDate: (x) => isNil(x) || V.date(x),
+    email: (x) => typeof x === 'string' && x.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x),
+    obj: (x) => x !== null && typeof x === 'object' && !Array.isArray(x),
+    // JSON libre (plan de autocontrol, escenarios…): objeto y tamaño acotado
+    blob: (x, max) => V.obj(x) && JSON.stringify(x).length <= max,
+    dueDay: (x) => isNil(x) || (Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 31),
+};
+const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 400, cors);
+// Endpoint de Web Push: https y nombre de host (los servicios reales son FCM, Mozilla,
+// Apple y WNS); se rechazan IPs literales y localhost para no usar el Worker como proxy.
+function isPushEndpoint(u) {
+    if (!V.str(u, 2048)) return false;
+    try {
+        const { protocol, hostname } = new URL(u);
+        return protocol === 'https:' && hostname.includes('.') && !/^[\d.]+$/.test(hostname) &&
+            !hostname.startsWith('[') && hostname !== 'localhost' && !hostname.endsWith('.localhost');
+    } catch { return false; }
+}
+const validRule = (r) => V.obj(r) && V.id(r.id) && V.str(r.name, 120) &&
+    (isNil(r.keywords) || (Array.isArray(r.keywords) && r.keywords.length <= 100 && r.keywords.every(k => V.str(k, 100)))) &&
+    (isNil(r.accountType) || ACCOUNT_TYPES.includes(r.accountType)) &&
+    V.optId(r.accountId) && V.optStr(r.accountName, 120) && V.optDate(r.createdAt);
+
+// ---------- Registro de auditoría (eventos sensibles) ----------
+// Tabla audit_log (migración 0002). Nunca bloquea ni rompe la petición: si la tabla
+// no existe o falla la escritura, solo queda en el log del Worker.
+async function audit(env, request, event, userId, detail) {
+    try {
+        await env.DB.prepare(
+            'INSERT INTO audit_log (id, user_id, event, ip, user_agent, detail, created_at) VALUES (?,?,?,?,?,?,?)')
+            .bind(crypto.randomUUID(), userId || null, event,
+                request ? (request.headers.get('CF-Connecting-IP') || null) : null,
+                request ? ((request.headers.get('User-Agent') || '').slice(0, 200) || null) : null,
+                detail ? JSON.stringify(detail).slice(0, 1000) : null, new Date().toISOString()).run();
+    } catch (e) {
+        console.error('audit (¿migración 0002 aplicada?):', event, e && e.message);
+    }
+}
+
+// ---------- Cloudflare Turnstile (anti-bots) ----------
+// Solo se exige si existe el secreto TURNSTILE_SECRET_KEY (wrangler secret put):
+// sin él no cambia nada, para poder desplegar antes de crear el widget.
+async function turnstileOk(env, token, ip) {
+    if (!env.TURNSTILE_SECRET_KEY) return true;
+    if (typeof token !== 'string' || !token || token.length > 2048) return false;
+    try {
+        const body = new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token });
+        if (ip) body.append('remoteip', ip);
+        const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body });
+        const data = await r.json();
+        if (data.success !== true) console.error('Turnstile rechazado:', JSON.stringify(data['error-codes'] || []));
+        return data.success === true;
+    } catch (e) {
+        // Caída del servicio de verificación: no bloquear el acceso (fail-open, como el rate limit)
+        console.error('Turnstile siteverify:', e);
+        return true;
+    }
+}
+const TURNSTILE_ERROR = { error: 'Completa la verificación anti-bots e inténtalo de nuevo.' };
+
+// Fallos de login por email, además del límite por IP. Dos contadores en KV:
+//  - email+IP: desde el 5.º fallo, bloqueo con backoff exponencial (1, 2, 4… min,
+//    máx. 60). Solo afecta a esa IP: no sirve para dejar fuera al dueño de la cuenta.
+//  - email (cualquier IP): tope de 50 fallos por hora contra ataques distribuidos.
+// Un login correcto borra el contador email+IP. Fail-open si KV falla.
+const LOGIN_FAILS_BEFORE_BACKOFF = 5;
+const LOGIN_EMAIL_MAX_FAILS_PER_HOUR = 50;
+async function loginLockState(env, email, ip) {
+    try {
+        const [pairRaw, totalRaw] = await Promise.all([
+            env.CACHE.get(`lf:${email}:${ip}`), env.CACHE.get(`lf:${email}`)]);
+        const pair = pairRaw ? JSON.parse(pairRaw) : { n: 0 };
+        const total = parseInt(totalRaw, 10) || 0;
+        let wait = 0;
+        if (pair.until && pair.until > Date.now()) wait = Math.ceil((pair.until - Date.now()) / 1000);
+        else if (total >= LOGIN_EMAIL_MAX_FAILS_PER_HOUR) wait = 3600;
+        return { wait, pair, total };
+    } catch (e) {
+        console.error('loginLockState:', e);
+        return { wait: 0, pair: { n: 0 }, total: 0 };
+    }
+}
+async function loginFailed(env, email, ip, state) {
+    try {
+        const pair = { n: (state.pair.n || 0) + 1 };
+        if (pair.n >= LOGIN_FAILS_BEFORE_BACKOFF)
+            pair.until = Date.now() + Math.min(60, 2 ** (pair.n - LOGIN_FAILS_BEFORE_BACKOFF)) * 60000;
+        await env.CACHE.put(`lf:${email}:${ip}`, JSON.stringify(pair), { expirationTtl: 86400 });
+        await env.CACHE.put(`lf:${email}`, String(state.total + 1), { expirationTtl: 3600 });
+    } catch (e) { console.error('loginFailed:', e); }
+}
+async function loginSucceeded(env, email, ip, state) {
+    if (!state.pair.n) return;
+    try { await env.CACHE.delete(`lf:${email}:${ip}`); } catch (e) { console.error('loginSucceeded:', e); }
 }
 
 // ---------- Web Push (VAPID + RFC 8291 vía @block65/webcrypto-web-push) ----------
@@ -1132,8 +1332,15 @@ export default {
         const path = url.pathname;
         const method = request.method;
         const cors = corsHeaders(request, env);
+        // Id de petición: se devuelve en los 500 y se registra, para cruzar un error
+        // de un usuario con los logs (wrangler tail) sin exponerle detalles internos.
+        const requestId = crypto.randomUUID();
 
         if (method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+        // Ningún endpoint legítimo necesita más de 1 MB de body
+        if (Number(request.headers.get('Content-Length') || 0) > MAX_BODY_BYTES)
+            return json({ error: 'Petición demasiado grande' }, 413, cors);
 
         try {
             // ---------- HEALTH ----------
@@ -1152,9 +1359,16 @@ export default {
 
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
-                const { email, password, name } = await request.json();
+                // Máx. 10 altas por IP y hora (anti creación masiva de cuentas y de emails)
+                const regIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:register:${regIp}`, 10, 3600))
+                    return json({ error: 'Demasiados registros desde esta conexión. Inténtalo más tarde.' }, 429, cors);
+                const { email, password, name, turnstileToken } = await request.json();
+                if (!(await turnstileOk(env, turnstileToken, regIp))) return json(TURNSTILE_ERROR, 400, cors);
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
+                if (!V.email(email) || !V.str(password, 256) || !V.str(name, 100))
+                    return invalid('email válido, contraseña de hasta 256 caracteres y nombre de hasta 100', cors);
 
                 const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
                     .bind(email.toLowerCase()).first();
@@ -1173,7 +1387,7 @@ export default {
                      VALUES (?,?,?,?,?,?,?)`)
                     .bind(id, email.toLowerCase(), name, pwHash, plan, planExp, now).run();
 
-                const token = await signJWT({ sub: id, exp: Math.floor(Date.now() / 1e3) + 30 * 86400 }, env.JWT_SECRET);
+                const token = await issueToken(env, { id });
         const user = { id, email: email.toLowerCase(), name, plan, plan_expires_at: planExp, currency: 'EUR', created_at: now };
         // Enviar email de bienvenida (sin bloquear la respuesta)
         ctx.waitUntil(sendEmail(env, {
@@ -1189,21 +1403,36 @@ export default {
                 const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
-                const { email, password } = await request.json();
+                const { email, password, turnstileToken } = await request.json();
+                if (!V.str(email, 254) || !V.str(password, 1024)) return invalid('email o contraseña', cors);
+                if (!(await turnstileOk(env, turnstileToken, loginIp))) return json(TURNSTILE_ERROR, 400, cors);
+                const loginEmail = (email || '').toLowerCase();
+                const lock = await loginLockState(env, loginEmail, loginIp);
+                if (lock.wait > 0)
+                    return json({ error: 'Demasiados intentos fallidos. Inténtalo de nuevo en unos minutos.' }, 429,
+                        { ...cors, 'Retry-After': String(lock.wait) });
                 const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
-                    .bind((email || '').toLowerCase()).first();
-                if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash)))
+                    .bind(loginEmail).first();
+                if (!user || !user.password_hash || !(await verifyPassword(password, user.password_hash))) {
+                    await loginFailed(env, loginEmail, loginIp, lock);
+                    if (user) ctx.waitUntil(audit(env, request, 'login_failed', user.id, { method: 'password' }));
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
+                }
+                await loginSucceeded(env, loginEmail, loginIp, lock);
+                ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'password' }));
 
-                const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
-                return json({ success: true, token, currentUser: user }, 200, cors);
+                const token = await issueToken(env, user);
+                return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
 
             // ---------- WebAuthn: LOGIN (sin sesión previa) ----------
             // Flujo "usernameless"/discoverable: sin allowCredentials, el dispositivo
             // elige entre las passkeys guardadas. El reto se cachea por un id temporal.
             if (path === '/api/auth/webauthn/login-options' && method === 'POST') {
+                // Cada llamada escribe un reto en KV: máx. 30 por IP cada 15 min
+                const optIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:wa-opt:${optIp}`, 30, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { rpID } = webauthnConfig(env);
                 const options = await generateAuthenticationOptions({
                     rpID,
@@ -1222,6 +1451,8 @@ export default {
 
                 const { loginId, response } = await request.json();
                 if (!loginId || !response || !response.id)
+                    return json({ error: 'Solicitud inválida' }, 400, cors);
+                if (!V.str(loginId, 64) || !V.obj(response) || !V.str(response.id, 1024))
                     return json({ error: 'Solicitud inválida' }, 400, cors);
 
                 const expectedChallenge = await env.CACHE.get(`webauthn_login:${loginId}`);
@@ -1265,14 +1496,19 @@ export default {
                 if (!user) return json({ error: 'Usuario no encontrado' }, 404, cors);
 
                 // Mismo JWT y mismo shape de respuesta que /api/auth/login
-                const token = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
-                return json({ success: true, token, currentUser: user }, 200, cors);
+                ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'passkey' }));
+                const token = await issueToken(env, user);
+                return json({ success: true, token, currentUser: publicUser(user) }, 200, cors);
             }
 
             if (path === '/api/auth/google' && method === 'POST') {
+                // Cada llamada consulta a Google: máx. 20 por IP cada 15 min
+                const gIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                if (await rateLimited(env, `rl:google:${gIp}`, 20, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { credential } = await request.json();
                 if (!credential) return json({ error: 'Falta credential' }, 400, cors);
+                if (!V.str(credential, 4096)) return json({ error: 'Token de Google inválido' }, 400, cors);
 
                 // Verificación del id_token en servidor (obligatoria): nunca confiar
                 // en un JWT de Google decodificado solo en el navegador.
@@ -1337,23 +1573,27 @@ export default {
                     }
                 }
 
-                const gToken = await signJWT({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 30 * 86400 }, env.JWT_SECRET);
-                delete user.password_hash;
-                return json({ success: true, token: gToken, currentUser: user }, isNew ? 201 : 200, cors);
+                ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
+                const gToken = await issueToken(env, user);
+                return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
             }
 
             if (path === '/api/auth/session' && method === 'GET') {
                 const user = await getAuthUser(request, env);
                 if (!user) return json({ token: null, currentUser: null }, 200, cors);
-                delete user.password_hash;
-                return json({ token: 'valid', currentUser: user }, 200, cors);
+                return json({ token: 'valid', currentUser: publicUser(user) }, 200, cors);
             }
 
             if (path === '/api/auth/logout' && method === 'POST') {
+                // Invalida en servidor el token con el que se llama (hasta su caducidad)
+                const auth = await authenticate(request, env);
+                if (auth) await revokeToken(env, auth.payload, auth.token);
                 return json({ success: true }, 200, cors);
             }
             if (path === "/api/auth/forgot-password" && method === "POST") {
         const fp = await request.json();
+        // Email con tipo/longitud no válidos: misma respuesta que siempre (no revela nada)
+        if (!V.str(fp.email, 254)) return json({ success: true }, 200, cors);
         const fpEmail = (fp.email || "").toLowerCase();
         // B4: máx. 3 solicitudes por email/hora y 10 por IP/hora (anti bombardeo de emails).
         // Se responde igual que el flujo normal para no revelar el límite ni si el email existe.
@@ -1362,6 +1602,7 @@ export default {
             await rateLimited(env, `rl:reset-ip:${fpIp}`, 10, 3600)) {
           return json({ success: true }, 200, cors);
         }
+        if (!(await turnstileOk(env, fp.turnstileToken, fpIp))) return json(TURNSTILE_ERROR, 400, cors);
         const fpUser = await env.DB.prepare("SELECT id, name, email FROM users WHERE email=?")
           .bind(fpEmail).first();
         if (fpUser) {
@@ -1377,20 +1618,54 @@ export default {
         return json({ success: true }, 200, cors);
       }
       if (path === "/api/auth/reset-password" && method === "POST") {
+        // Máx. 10 intentos por IP cada 15 min (el token es aleatorio de 122 bits; esto evita abuso)
+        const rpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        if (await rateLimited(env, `rl:reset-pw:${rpIp}`, 10, 900))
+          return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
         const rp = await request.json();
         if (!rp.token || !rp.password || rp.password.length < 8)
           return json({ error: "Datos inválidos (contraseña mínima 8 caracteres)" }, 400, cors);
+        if (!V.str(rp.token, 100) || !V.str(rp.password, 256))
+          return json({ error: "Datos inválidos (contraseña de 8 a 256 caracteres)" }, 400, cors);
         const rpUserId = await env.CACHE.get("reset:" + rp.token);
         if (!rpUserId) return json({ error: "El enlace no es válido o ha caducado" }, 400, cors);
         const rpHash = await hashPassword(rp.password);
         await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
           .bind(rpHash, new Date().toISOString(), rpUserId).run();
+        await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
+        ctx.waitUntil(audit(env, request, 'password_reset', rpUserId));
         await env.CACHE.delete("reset:" + rp.token);
         return json({ success: true }, 200, cors);
       }
             // A partir de aquí, todo requiere autenticación
-            const authUser = await getAuthUser(request, env);
+            const auth = await authenticate(request, env);
+            const authUser = auth ? auth.user : null;
             const uid = authUser?.id;
+            // Renovación deslizante de la sesión (ver issueToken): todas las respuestas
+            // de esta petición llevan el token nuevo.
+            if (auth && needsRefresh(auth.payload))
+                cors['X-Refresh-Token'] = await issueToken(env, authUser, auth.payload.exp);
+
+            // ---------- CAMBIO DE CONTRASEÑA (requiere sesión y la contraseña actual) ----------
+            if (path === '/api/auth/change-password' && method === 'POST') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `rl:chpw:${authUser.id}`, 5, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+                const { currentPassword, newPassword } = await request.json();
+                if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' ||
+                    newPassword.length < 8 || newPassword.length > 256)
+                    return json({ error: 'Datos inválidos (contraseña nueva de 8 a 256 caracteres)' }, 400, cors);
+                if (!authUser.password_hash)
+                    return json({ error: 'Tu cuenta no tiene contraseña (entras con Google). Usa "¿Olvidaste tu contraseña?" para crear una.' }, 400, cors);
+                if (!(await verifyPassword(currentPassword, authUser.password_hash)))
+                    return json({ error: 'La contraseña actual no es correcta' }, 403, cors);
+                const newHash = await hashPassword(newPassword);
+                await env.DB.prepare('UPDATE users SET password_hash=?, updated_at=? WHERE id=?')
+                    .bind(newHash, new Date().toISOString(), authUser.id).run();
+                await bumpTokenVersion(env, authUser.id);   // cierra las sesiones abiertas
+                ctx.waitUntil(audit(env, request, 'password_changed', authUser.id));
+                return json({ success: true }, 200, cors);
+            }
 
             // ---------- WebAuthn: REGISTRO de credencial (requiere sesión activa) ----------
             if (path === '/api/auth/webauthn/register-options' && method === 'POST') {
@@ -1438,7 +1713,8 @@ export default {
                         requireUserVerification: true
                     });
                 } catch (e) {
-                    return json({ error: 'Verificación fallida: ' + e.message }, 400, cors);
+                    console.error('webauthn register-verify:', e && e.message);
+                    return json({ error: 'No se pudo verificar la credencial.' }, 400, cors);
                 }
                 if (!verification.verified || !verification.registrationInfo)
                     return json({ error: 'No se pudo verificar la credencial.' }, 400, cors);
@@ -1465,16 +1741,16 @@ export default {
             if (path === '/api/users' && method === 'GET') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
                 // Solo devuelve el propio usuario (privacidad)
-                delete authUser.password_hash;
-                return json([authUser], 200, cors);
+                return json([publicUser(authUser)], 200, cors);
             }
 
             const userMatch = path.match(/^\/api\/users\/(.+)$/);
             if (userMatch) {
                 if (!authUser || authUser.id !== userMatch[1]) return json({ error: 'No autorizado' }, 403, cors);
-                if (method === 'GET') {  delete authUser.password_hash; return json(authUser, 200, cors); }
+                if (method === 'GET') return json(publicUser(authUser), 200, cors);
                 if (method === 'PUT') {
                     const u = await request.json();
+                    if (!V.obj(u) || !V.optStr(u.name, 100)) return invalid('name (máx. 100 caracteres)', cors);
                     const now = new Date().toISOString();
                     // plan y plan_expires_at NUNCA se aceptan del cliente: solo el webhook
                     // de Stripe y verify-session pueden cambiarlos.
@@ -1491,8 +1767,7 @@ export default {
                     await env.DB.prepare(
                         `UPDATE users SET name=?, currency=?, updated_at=? WHERE id=?`)
                         .bind(newName, newCurrency, now, authUser.id).run();
-                    delete authUser.password_hash;
-                    return json({ ...authUser, name: newName, currency: newCurrency, updated_at: now }, 200, cors);
+                    return json(publicUser({ ...authUser, name: newName, currency: newCurrency, updated_at: now }), 200, cors);
                 }
                if (method === "DELETE") {
           const delId = authUser.id;
@@ -1507,8 +1782,15 @@ export default {
             env.DB.prepare("DELETE FROM bank_connections WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM import_info WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM webauthn_credentials WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM push_subscriptions WHERE user_id=?").bind(delId),
+            env.DB.prepare("DELETE FROM push_log WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM users WHERE id=?").bind(delId)
           ]);
+          // Auditoría: se borra el historial del usuario y queda solo el evento de borrado
+          // (sin IP ni user-agent). Fuera del batch para no depender de la migración 0002.
+          try { await env.DB.prepare("DELETE FROM audit_log WHERE user_id=?").bind(delId).run(); }
+          catch (e) { console.error('audit_log (borrado):', e && e.message); }
+          await audit(env, null, 'account_deleted', delId);
           return json({ success: true }, 200, cors);
         }
       }
@@ -1517,11 +1799,15 @@ export default {
             if (path === '/api/accounts') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM accounts WHERE user_id=?').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${ACCOUNT_COLUMNS} FROM accounts WHERE user_id=?`).bind(uid).all();
                     return json(results, 200, cors);
                 }
                 if (method === 'POST') {
                     const a = await request.json();
+                    if (!V.obj(a) || !V.id(a.id) || !V.str(a.nombre, 120, 1) || !ACCOUNT_TYPES.includes(a.tipo) ||
+                        !V.optStr(a.descripcion, 500) || !V.optAmount(a.saldo_inicial) || !V.optAmount(a.saldo_actual) ||
+                        !V.optAmount(a.fixed_monthly_amount) || !V.dueDay(a.fixed_due_day) || !V.optDate(a.created_at))
+                        return invalid('cuenta', cors);
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO accounts (id,user_id,nombre,tipo,descripcion,saldo_inicial,saldo_actual,
@@ -1551,11 +1837,16 @@ export default {
             if (path === '/api/movements') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM movements WHERE user_id=?').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${MOVEMENT_COLUMNS} FROM movements WHERE user_id=?`).bind(uid).all();
                     return json(results, 200, cors);
                 }
                 if (method === 'POST') {
                     const m = await request.json();
+                    if (!V.obj(m) || !V.id(m.id) || !MOVEMENT_TYPES.includes(m.tipo) || !V.amount(m.cantidad) ||
+                        !V.str(m.descripcion, 1000) || !V.date(m.fecha) || !V.optId(m.cuenta_id) || !V.optId(m.cuenta_destino_id) ||
+                        !V.optStr(m.categoria, 100) || !V.optStr(m.origen, 30) || !V.optStr(m.applied_rule, 128) ||
+                        !V.optStr(m.rule_name, 200) || !V.optStr(m.bank_reference, 200) || !V.optDate(m.created_at))
+                        return invalid('movimiento', cors);
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO movements (id,user_id,tipo,cantidad,descripcion,fecha,cuenta_id,
@@ -1603,6 +1894,7 @@ export default {
                 }
                 if (method === 'POST') {
                     const r = await request.json();
+                    if (!validRule(r)) return invalid('regla', cors);
                     await env.DB.prepare(
                         `INSERT INTO categorization_rules (id,user_id,name,keywords,account_type,account_id,account_name,enabled,is_default,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -1619,6 +1911,7 @@ export default {
             if (path === '/api/rules/bulk' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 const { rules } = await request.json();
+                if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
                 await env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid).run();
                 for (const r of rules) {
                     await env.DB.prepare(
@@ -1647,6 +1940,7 @@ export default {
                 }
                 if (method === 'POST') {
                     const plan = await request.json();
+                    if (!V.blob(plan, 100000)) return invalid('plan de autocontrol', cors);
                     await env.DB.prepare(
                         `INSERT INTO autocontrol_plan (user_id,plan_data,updated_at) VALUES (?,?,?)
                          ON CONFLICT(user_id) DO UPDATE SET plan_data=excluded.plan_data, updated_at=excluded.updated_at`)
@@ -1664,6 +1958,7 @@ export default {
                 }
                 if (method === 'POST') {
                     const assoc = await request.json();
+                    if (!V.blob(assoc, 100000)) return invalid('asociaciones', cors);
                     await env.DB.prepare(
                         `INSERT INTO autocontrol_associations (user_id,associations_data,updated_at) VALUES (?,?,?)
                          ON CONFLICT(user_id) DO UPDATE SET associations_data=excluded.associations_data, updated_at=excluded.updated_at`)
@@ -1681,6 +1976,9 @@ export default {
                 }
                 if (method === 'POST') {
                     const { scenarios } = await request.json();
+                    if (!isNil(scenarios) && (!Array.isArray(scenarios) || scenarios.length > 100 ||
+                        !scenarios.every(s => V.blob(s, 200000) && V.optId(s.id))))
+                        return invalid('escenarios', cors);
                     await env.DB.prepare('DELETE FROM scenarios WHERE user_id=?').bind(uid).run();
                     for (const s of (scenarios || [])) {
                         await env.DB.prepare('INSERT INTO scenarios (id,user_id,scenario_data,created_at) VALUES (?,?,?,?)')
@@ -1706,11 +2004,15 @@ export default {
             if (path === '/api/notifications') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${NOTIFICATION_COLUMNS} FROM notifications WHERE user_id=? ORDER BY created_at DESC`).bind(uid).all();
                     return json(results.map(n => ({ ...n, read: !!n.read, data: n.data ? JSON.parse(n.data) : {} })), 200, cors);
                 }
                 if (method === 'POST') {
                     const { notifications } = await request.json();
+                    if (!isNil(notifications) && (!Array.isArray(notifications) || notifications.length > 200 ||
+                        !notifications.every(n => V.obj(n) && V.id(n.id) && V.optStr(n.type, 50) && V.optStr(n.title, 300) &&
+                            V.optStr(n.message, 2000) && (isNil(n.data) || V.blob(n.data, 10000)) && V.optDate(n.createdAt))))
+                        return invalid('notificaciones', cors);
                     await env.DB.prepare('DELETE FROM notifications WHERE user_id=?').bind(uid).run();
                     for (const n of (notifications || [])) {
                         await env.DB.prepare(
@@ -1731,6 +2033,10 @@ export default {
                     const sub = await request.json();
                     if (!sub || !sub.endpoint || !sub.keys?.p256dh || !sub.keys?.auth)
                         return json({ error: 'Suscripción inválida' }, 400, cors);
+                    // El Worker hará fetch a este endpoint (cron y /push/test): solo URLs
+                    // https a un host con nombre (no IPs ni localhost) y claves de tamaño acotado.
+                    if (!isPushEndpoint(sub.endpoint) || !V.str(sub.keys.p256dh, 200) || !V.str(sub.keys.auth, 100))
+                        return json({ error: 'Suscripción inválida' }, 400, cors);
                     // device_id: identificador estable del dispositivo (localStorage del
                     // cliente). Permite reconciliar suscripciones muertas del MISMO
                     // dispositivo sin tocar las de otros dispositivos del usuario.
@@ -1746,6 +2052,7 @@ export default {
                 }
                 if (method === 'DELETE') {
                     const { endpoint } = await request.json();
+                    if (!V.optStr(endpoint, 2048)) return invalid('endpoint', cors);
                     await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?')
                         .bind(uid, endpoint || '').run();
                     return json({ success: true }, 200, cors);
@@ -1812,17 +2119,23 @@ export default {
             if (path === '/api/bank-connections') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
-                    const { results } = await env.DB.prepare('SELECT * FROM bank_connections WHERE user_id=?').bind(uid).all();
+                    const { results } = await env.DB.prepare(`SELECT ${BANK_CONNECTION_COLUMNS} FROM bank_connections WHERE user_id=?`).bind(uid).all();
                     return json(results, 200, cors);
                 }
                 if (method === 'POST') {
                     const c = await request.json();
+                    if (!V.obj(c) || !V.id(c.id) || !V.optStr(c.bankCode, 128) || !V.optStr(c.bankName, 128) ||
+                        !V.optStr(c.institutionId, 128) || !V.optStr(c.requisitionId, 128) ||
+                        !V.optStr(c.gocardlessAccountId, 128) || !V.optStr(c.linkedAccountId, 128) ||
+                        !V.optStr(c.status, 30) || !V.optDate(c.lastSyncAt) || !V.optDate(c.createdAt))
+                        return invalid('conexión bancaria', cors);
                     await env.DB.prepare(
                         `INSERT INTO bank_connections (id,user_id,bank_code,bank_name,institution_id,requisition_id,
                             gocardless_account_id,linked_account_id,status,is_active,last_sync_at,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                          ON CONFLICT(id) DO UPDATE SET status=excluded.status, is_active=excluded.is_active,
-                            gocardless_account_id=excluded.gocardless_account_id, last_sync_at=excluded.last_sync_at`)
+                            gocardless_account_id=excluded.gocardless_account_id, last_sync_at=excluded.last_sync_at
+                         WHERE bank_connections.user_id = excluded.user_id`)
                         .bind(c.id, uid, c.bankCode ?? null, c.bankName ?? null, c.institutionId ?? null,
                               c.requisitionId ?? null, c.gocardlessAccountId ?? null, c.linkedAccountId ?? null,
                               c.status || 'pending', c.isActive ? 1 : 0, c.lastSyncAt ?? null,
@@ -1843,11 +2156,15 @@ export default {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
                 if (method === 'GET') {
                     const bankCode = url.searchParams.get('bankCode');
-                    const row = await env.DB.prepare('SELECT * FROM import_info WHERE user_id=? AND bank_code=?').bind(uid, bankCode).first();
+                    if (!V.str(bankCode, 50)) return invalid('bankCode', cors);
+                    const row = await env.DB.prepare(`SELECT ${IMPORT_INFO_COLUMNS} FROM import_info WHERE user_id=? AND bank_code=?`).bind(uid, bankCode).first();
                     return json(row || null, 200, cors);
                 }
                 if (method === 'POST') {
                     const { bankCode, importInfo } = await request.json();
+                    if (!V.str(bankCode, 50) || !V.obj(importInfo) || !V.optDate(importInfo.lastImportDate) ||
+                        !V.optAmount(importInfo.lastImportCount) || !V.optAmount(importInfo.totalImported))
+                        return invalid('importInfo', cors);
                     await env.DB.prepare(
                         `INSERT INTO import_info (user_id,bank_code,last_import_at,last_import_count,total_imported)
                          VALUES (?,?,?,?,?)
@@ -1862,6 +2179,9 @@ export default {
             // ---------- STRIPE ----------
             if (path === '/api/stripe/create-checkout' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                // Cada llamada crea una Checkout Session en Stripe: máx. 10 por usuario cada 15 min
+                if (await rateLimited(env, `rl:checkout:${uid}`, 10, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const body = await request.json();
                 // Aceptar tanto plan_type como planType; normalizar 'annual'/'yearly'
                 const planRaw = body.plan_type || body.planType || 'monthly';
@@ -1890,7 +2210,10 @@ export default {
                     body: params
                 });
                 const session = await resp.json();
-                if (!resp.ok) return json({ error: session.error?.message || 'Error Stripe' }, 500, cors);
+                if (!resp.ok) {
+                    console.error('Stripe create-checkout:', resp.status, session.error?.message);
+                    return json({ error: 'No se pudo iniciar el pago. Inténtalo de nuevo.' }, 502, cors);
+                }
                 return json({ checkout_url: session.url, session_id: session.id }, 200, cors);
             }
 
@@ -1912,7 +2235,10 @@ export default {
                     body: params
                 });
                 const session = await resp.json();
-                if (!resp.ok) return json({ error: session.error?.message || 'No se pudo abrir el portal de gestión' }, 500, cors);
+                if (!resp.ok) {
+                    console.error('Stripe customer-portal:', resp.status, session.error?.message);
+                    return json({ error: 'No se pudo abrir el portal de gestión' }, 502, cors);
+                }
                 return json({ portal_url: session.url }, 200, cors);
             }
 
@@ -1939,6 +2265,7 @@ export default {
                         await env.DB.prepare(
                             `UPDATE users SET plan='premium', plan_expires_at=?, stripe_customer_id=?, stripe_subscription_id=?, updated_at=? WHERE id=?`)
                             .bind(exp, s.customer || null, s.subscription || null, new Date().toISOString(), userId).run();
+                        ctx.waitUntil(audit(env, null, 'plan_changed', userId, { plan: 'premium', planType, stripe_event: event.id }));
                         const u = await env.DB.prepare('SELECT email, name FROM users WHERE id=?').bind(userId).first();
                         if (u && u.email) {
                             ctx.waitUntil(sendEmail(env, {
@@ -1952,20 +2279,33 @@ export default {
 
                 if (event.type === 'customer.subscription.deleted') {
                     const sub = event.data.object;
+                    const subUser = await env.DB.prepare('SELECT id FROM users WHERE stripe_subscription_id=?').bind(sub.id).first();
                     await env.DB.prepare(
                         `UPDATE users SET plan='free', plan_expires_at=NULL WHERE stripe_subscription_id=?`)
                         .bind(sub.id).run();
+                    if (subUser) ctx.waitUntil(audit(env, null, 'plan_changed', subUser.id, { plan: 'free', stripe_event: event.id }));
                 }
                 return json({ received: true }, 200, cors);
             }
 
             if (path === '/api/stripe/verify-session' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (await rateLimited(env, `rl:verify:${uid}`, 20, 900))
+                    return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { session_id } = await request.json();
+                // Solo IDs de Checkout Session: el valor va en la URL de la API de Stripe
+                // con la clave secreta, así que no puede apuntar a otro recurso.
+                if (typeof session_id !== 'string' || !/^cs_(test|live)_[A-Za-z0-9]+$/.test(session_id))
+                    return json({ error: 'Sesión de pago inválida' }, 400, cors);
                 const resp = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session_id}`, {
                     headers: { 'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}` }
                 });
                 const session = await resp.json();
+                // La sesión tiene que ser del usuario autenticado (create-checkout fija
+                // client_reference_id y metadata.user_id con su id).
+                const owner = session.client_reference_id || session.metadata?.user_id;
+                if (!resp.ok || owner !== uid)
+                    return json({ error: 'La sesión de pago no pertenece a este usuario' }, 403, cors);
                 const paid = session.payment_status === 'paid';
                 return json({ paid, plan: paid ? 'premium' : 'free' }, 200, cors);
             }
@@ -1974,18 +2314,29 @@ export default {
             // Token de acceso cacheado en KV (caduca a las 24h)
             if (path.startsWith('/api/banking/')) {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                // Conexión bancaria = función Premium (getPlanLimits: 'bank_connection') y
+                // cada requisición tiene coste en GoCardless: se exige en servidor, con el plan de D1.
+                if (authUser.plan !== 'premium')
+                    return json({ error: 'La conexión bancaria requiere Premium' }, 403, cors);
+                // Cada llamada usa la cuenta de GoCardless de la app: máx. 60 por usuario y hora
+                if (await rateLimited(env, `rl:banking:${uid}`, 60, 3600))
+                    return json({ error: 'Demasiadas peticiones bancarias. Inténtalo más tarde.' }, 429, cors);
                 const gcToken = await getGoCardlessToken(env);
 
                 if (path === '/api/banking/institutions' && method === 'POST') {
                     const { country = 'ES' } = await request.json();
+                    if (!/^[A-Z]{2}$/.test(String(country))) return json({ error: 'País inválido' }, 400, cors);
                     const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/institutions/?country=${country}`, {
                         headers: { 'Authorization': `Bearer ${gcToken}`, 'Accept': 'application/json' }
                     });
+                    if (!r.ok) return gcError('institutions', r, cors);
                     return json(await r.json(), 200, cors);
                 }
 
                 if (path === '/api/banking/requisition' && method === 'POST') {
                     const { institution_id } = await request.json();
+                    if (typeof institution_id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(institution_id))
+                        return json({ error: 'Banco inválido' }, 400, cors);
                     const r = await fetch('https://bankaccountdata.gocardless.com/api/v2/requisitions/', {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${gcToken}`, 'Content-Type': 'application/json' },
@@ -1996,23 +2347,28 @@ export default {
                             user_language: 'ES'
                         })
                     });
+                    if (!r.ok) return gcError('requisition', r, cors);
                     const req = await r.json();
                     return json(req, 200, cors); // contiene { id, link } -> redirige al usuario a req.link
                 }
 
                 if (path === '/api/banking/accounts' && method === 'GET') {
                     const requisitionId = url.searchParams.get('requisition_id');
-                    const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/requisitions/${requisitionId}/`, {
-                        headers: { 'Authorization': `Bearer ${gcToken}` }
-                    });
-                    return json(await r.json(), 200, cors);
+                    if (!isUuid(requisitionId)) return json({ error: 'Requisición inválida' }, 400, cors);
+                    const req = await getOwnedRequisition(gcToken, requisitionId, uid);
+                    if (!req) return json({ error: 'No encontrado' }, 404, cors);
+                    return json(req, 200, cors);
                 }
 
                 if (path === '/api/banking/sync' && method === 'POST') {
                     const { account_id } = await request.json();
+                    if (!isUuid(account_id)) return json({ error: 'Cuenta inválida' }, 400, cors);
+                    if (!(await gcAccountOwnedBy(env, gcToken, account_id, uid)))
+                        return json({ error: 'No encontrado' }, 404, cors);
                     const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/accounts/${account_id}/transactions/`, {
                         headers: { 'Authorization': `Bearer ${gcToken}` }
                     });
+                    if (!r.ok) return gcError('sync', r, cors);
                     const data = await r.json();
                     return json(data, 200, cors); // el frontend mapea a movimientos contables
                 }
@@ -2422,8 +2778,8 @@ export default {
 
         } catch (err) {
             // No filtrar detalles internos al cliente; registrar el detalle en el servidor.
-            console.error('Error 500:', err && err.stack ? err.stack : err);
-            return json({ error: 'Server error' }, 500, cors);
+            console.error('Error 500', requestId, err && err.stack ? err.stack : err);
+            return json({ error: 'Server error', requestId }, 500, { ...cors, 'X-Request-Id': requestId });
         }
     },
 
@@ -2535,6 +2891,14 @@ export default {
             console.error('Cron riesgo:', e);
         }
 
+        // ── Retención del registro de auditoría: 365 días ──
+        try {
+            await env.DB.prepare('DELETE FROM audit_log WHERE created_at < ?')
+                .bind(new Date(Date.now() - 365 * 86400000).toISOString()).run();
+        } catch (e) {
+            console.error('Cron audit_log (¿migración 0002 aplicada?):', e && e.message);
+        }
+
         // ── Solicitud de valoración al mes de registro (email, una sola vez) ──
         try {
             const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -2578,21 +2942,64 @@ async function getGoCardlessToken(env) {
     return data.access;
 }
 
+// Error del proveedor bancario: el detalle va al log, al cliente solo un mensaje genérico.
+async function gcError(op, r, cors) {
+    console.error('GoCardless', op, r.status, (await r.text().catch(() => '')).slice(0, 500));
+    return json({ error: 'Error del proveedor bancario. Inténtalo más tarde.' }, 502, cors);
+}
+
+// Los IDs de requisiciones y cuentas de GoCardless son UUID. Validarlos impide
+// que el valor del cliente salga del recurso previsto en la URL de la API.
+function isUuid(v) {
+    return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+}
+
+// Una requisición es del usuario si su `reference` la generó este Worker para él
+// (`${uid}_${timestamp}` en /api/banking/requisition). Es la única prueba de
+// propiedad que el cliente no puede escribir (bank_connections sí la escribe él).
+async function getOwnedRequisition(gcToken, requisitionId, uid) {
+    const r = await fetch(`https://bankaccountdata.gocardless.com/api/v2/requisitions/${requisitionId}/`, {
+        headers: { 'Authorization': `Bearer ${gcToken}` }
+    });
+    if (!r.ok) return null;
+    const req = await r.json();
+    return (typeof req.reference === 'string' && req.reference.startsWith(`${uid}_`)) ? req : null;
+}
+
+// Una cuenta de GoCardless es del usuario si aparece en una requisición SUYA.
+// bank_connections solo aporta las requisiciones candidatas; la propiedad se
+// comprueba siempre contra GoCardless (máx. 10 para acotar llamadas).
+async function gcAccountOwnedBy(env, gcToken, accountId, uid) {
+    const { results } = await env.DB.prepare(
+        'SELECT DISTINCT requisition_id FROM bank_connections WHERE user_id=? AND requisition_id IS NOT NULL LIMIT 10')
+        .bind(uid).all();
+    for (const row of results || []) {
+        if (!isUuid(row.requisition_id)) continue;
+        const req = await getOwnedRequisition(gcToken, row.requisition_id, uid);
+        if (req && Array.isArray(req.accounts) && req.accounts.includes(accountId)) return true;
+    }
+    return false;
+}
+
 // ---------- Verificación firma Stripe ----------
 async function verifyStripeSignature(payload, sigHeader, secret) {
     if (!sigHeader || !secret) return false;
     try {
-        const parts = Object.fromEntries(sigHeader.split(',').map(kv => kv.split('=')));
-        const signedPayload = `${parts.t}.${payload}`;
+        const items = sigHeader.split(',').map(kv => kv.trim().split('='));
+        const t = (items.find(([k]) => k === 't') || [])[1];
+        // Stripe envía una firma v1 por cada secreto activo (p. ej. al rotar el
+        // secreto del webhook): basta con que coincida una.
+        const v1s = items.filter(([k]) => k === 'v1').map(([, v]) => v || '');
+        const signedPayload = `${t}.${payload}`;
         const enc = new TextEncoder();
         const key = await crypto.subtle.importKey('raw', enc.encode(secret),
             { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
         const sig = await crypto.subtle.sign('HMAC', key, enc.encode(signedPayload));
         const expected = [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
         // B6: comparación en tiempo constante
-        if (!timingSafeEqual(expected, parts.v1 || '')) return false;
+        if (!v1s.some(v1 => timingSafeEqual(expected, v1))) return false;
         // B3: anti-replay — rechazar eventos fuera de una tolerancia de 5 minutos
-        const ts = Number(parts.t);
+        const ts = Number(t);
         if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) return false;
         return true;
     } catch { return false; }
@@ -2628,7 +3035,15 @@ async function sendEmail(env, { to, subject, html }) {
     return false;
   }
 }
+// El nombre lo escribe el usuario (o quien se registra con un email ajeno):
+// se escapa antes de meterlo en el HTML de los emails.
+function escapeHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function welcomeEmailHTML(name) {
+  name = escapeHtml(name);
   return `
   <!DOCTYPE html>
   <html lang="es">
@@ -2672,6 +3087,7 @@ function welcomeEmailHTML(name) {
   </html>`;
 }
 function premiumActivatedEmailHTML(name, planType) {
+    name = escapeHtml(name);
     const planLabel = planType === 'annual' ? 'anual' : 'mensual';
     return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
@@ -2686,6 +3102,7 @@ function premiumActivatedEmailHTML(name, planType) {
     </table></td></tr></table></body></html>`;
 }
                 function resetPasswordEmailHTML(name, link) {
+    name = escapeHtml(name);
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
@@ -2705,6 +3122,7 @@ function premiumActivatedEmailHTML(name, planType) {
     </table></td></tr></table></body></html>`;
 }
 function feedbackRequestEmailHTML(name, link) {
+    name = escapeHtml(name);
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
