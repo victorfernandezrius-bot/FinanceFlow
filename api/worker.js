@@ -777,18 +777,38 @@ export default {
                 let user = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?')
                     .bind(payload.sub).first();
                 let isNew = false;
+                let passwordRemoved = false;
                 if (!user) {
                     user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
                         .bind(gEmail).first();
                     if (user) {
-                        // Cuenta existente por email: vincular con Google
-                        await env.DB.prepare(
-                            `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
-                                picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
-                            .bind(payload.sub, payload.picture ?? null, now, user.id).run();
+                        // Cuenta existente por email: vincular con Google. El alta con contraseña
+                        // no verifica el email, así que esa cuenta pudo crearla otra persona con
+                        // el email de este usuario. Google acaba de demostrar quién controla el
+                        // email: todo acceso creado antes deja de valer (contraseña, sesiones,
+                        // passkeys y suscripciones push). Todo en un batch: o se aplica entero o nada.
+                        // El dueño legítimo puede crear otra contraseña con "¿Olvidaste tu contraseña?".
+                        passwordRemoved = !!user.password_hash;
+                        const linkStmts = [
+                            env.DB.prepare('DELETE FROM webauthn_credentials WHERE user_id=?').bind(user.id),
+                            env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id=?').bind(user.id),
+                            env.DB.prepare(
+                                `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
+                                    picture=COALESCE(?, picture), password_hash=NULL, updated_at=? WHERE id=?`)
+                                .bind(payload.sub, payload.picture ?? null, now, user.id)
+                        ];
+                        // Sin la migración 0001 no hay token_version (y authenticate no lo comprueba)
+                        const hasTokenVersion = typeof user.token_version === 'number';
+                        if (hasTokenVersion)
+                            linkStmts.push(env.DB.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?')
+                                .bind(user.id));
+                        await env.DB.batch(linkStmts);
+                        if (hasTokenVersion) user.token_version += 1;
+                        user.password_hash = null;
                         user.google_sub = payload.sub;
                         user.auth_provider = user.auth_provider || 'google';
                         user.picture = payload.picture ?? user.picture;
+                        ctx.waitUntil(audit(env, request, 'google_linked', user.id, { password_removed: passwordRemoved }));
                     } else {
                         // Usuario nuevo
                         isNew = true;
@@ -821,7 +841,8 @@ export default {
 
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
                 const gToken = await issueToken(env, user);
-                return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
+                return json({ success: true, token: gToken, currentUser: publicUser(user), passwordRemoved },
+                    isNew ? 201 : 200, cors);
             }
 
             if (path === '/api/auth/session' && method === 'GET') {

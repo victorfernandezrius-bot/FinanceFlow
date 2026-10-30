@@ -164,7 +164,10 @@ class AuthSystem {
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
                 try { await this.refreshPremiumTrial(); } catch (e) { /* no bloquear el acceso */ }
-                return { success: true, user: this.currentUser, message: 'Acceso con Google exitoso' };
+                // passwordRemoved: la cuenta existía con contraseña y, al vincularla con Google,
+                // el servidor la ha anulado (ver /api/auth/google). La página lo explica al usuario.
+                return { success: true, user: this.currentUser, message: 'Acceso con Google exitoso',
+                         passwordRemoved: !!data.passwordRemoved };
             }
 
             const payload = JSON.parse(atob(googleCredential.split('.')[1]));
@@ -225,7 +228,8 @@ class AuthSystem {
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
                 try { await this.refreshPremiumTrial(); } catch (e) { /* no bloquear el registro */ }
-                return { success: true, user: this.currentUser, message: 'Registro con Google exitoso' };
+                return { success: true, user: this.currentUser, message: 'Registro con Google exitoso',
+                         passwordRemoved: !!data.passwordRemoved };
             }
 
             const payload = JSON.parse(atob(googleCredential.split('.')[1]));

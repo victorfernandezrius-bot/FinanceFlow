@@ -689,8 +689,13 @@
                     if (result.success) {
                         // Usar el patrón de mensajes propio de esta página (success-alert/success-message):
                         // los ids success-text/error-text no existen aquí y rompían el flujo tras guardar la sesión.
-                        registerPage.showSuccess('¡Registro con Google exitoso! Redirigiendo...');
-                        setTimeout(() => { window.location.href = './dashboard.html'; }, 1000);
+                        // passwordRemoved: el email ya tenía una cuenta con contraseña; al vincularla
+                        // con Google el servidor la anula (ver /api/auth/google)
+                        registerPage.showSuccess(result.passwordRemoved
+                            ? 'Ya tenías una cuenta con este email y la hemos vinculado con Google. Por seguridad, ' +
+                              'la contraseña anterior ya no vale: entra con Google o crea una nueva con «¿Olvidaste tu contraseña?». Redirigiendo...'
+                            : '¡Registro con Google exitoso! Redirigiendo...');
+                        setTimeout(() => { window.location.href = './dashboard.html'; }, result.passwordRemoved ? 6000 : 1000);
                     } else {
                         registerPage.showError(result.error || 'Error al registrarse con Google');
                     }

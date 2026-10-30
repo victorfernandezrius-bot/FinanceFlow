@@ -469,6 +469,10 @@
         });
 
         // ── Google OAuth ──────────────────────────────────────────────────────
+        // Si la cuenta ya existía con contraseña, al vincularla con Google el servidor la anula
+        // (cualquiera pudo registrar ese email sin verificarlo): hay que decírselo al usuario.
+        const GOOGLE_LINKED_MSG = 'Hemos vinculado tu cuenta con Google. Por seguridad, tu contraseña anterior ' +
+            'ya no vale: entra con Google o crea una nueva con «¿Olvidaste tu contraseña?». Redirigiendo...';
         window.addEventListener('load', () => {
             if (typeof google === 'undefined') return;
             google.accounts.id.initialize({
@@ -478,9 +482,10 @@
                     const result = await Auth.loginWithGoogle(response.credential);
                     document.getElementById('loading-overlay').classList.add('hidden');
                     if (result.success) {
-                        document.getElementById('success-text').textContent = '¡Acceso con Google correcto! Redirigiendo...';
+                        document.getElementById('success-text').textContent = result.passwordRemoved
+                            ? GOOGLE_LINKED_MSG : '¡Acceso con Google correcto! Redirigiendo...';
                         document.getElementById('success-message').classList.remove('hidden');
-                        setTimeout(() => { window.location.href = './dashboard.html'; }, 1000);
+                        setTimeout(() => { window.location.href = './dashboard.html'; }, result.passwordRemoved ? 6000 : 1000);
                     } else {
                         document.getElementById('error-text').textContent = result.error || 'Error al iniciar con Google';
                         document.getElementById('error-message').classList.remove('hidden');
