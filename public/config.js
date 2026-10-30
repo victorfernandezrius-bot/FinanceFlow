@@ -9,9 +9,16 @@ window.STRIPE_PUBLISHABLE_KEY = 'pk_live_51PhqUIRr7a5Py1C0O4KbbPtgPyrWs1kcoxLh9C
         window.API_URL = location.origin + '/api';
         window.APP_ENV = 'staging';
     } else {
-        window.APP_URL = 'https://financeflow-7nd.pages.dev';
+        window.APP_URL = 'https://app.contabilidadpersonal.com';
         window.API_URL = 'https://financeflow.victor-a97.workers.dev/api';
         window.APP_ENV = 'production';
+    }
+    // Dominio canónico: app.contabilidadpersonal.com. La API solo acepta peticiones de
+    // *.contabilidadpersonal.com (CORS), así que por el dominio por defecto de Pages no se
+    // puede entrar: quien llegue a él va a la misma página en el dominio bueno. Solo ese host
+    // exacto; las vistas previas de Pages (<rama>.financeflow-7nd.pages.dev) no se tocan.
+    if (host === 'financeflow-7nd.pages.dev') {
+        location.replace(window.APP_URL + location.pathname + location.search + location.hash);
     }
 })();
 window.DATA_MODE = 'remote';
