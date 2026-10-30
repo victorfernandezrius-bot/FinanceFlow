@@ -279,6 +279,19 @@ const V = {
     dueDay: (x) => isNil(x) || (Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 31),
 };
 const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 400, cors);
+
+// ---------- Plan Premium y límites (fuente de verdad: D1) ----------
+// Igual que Auth.isPremium() en el cliente (js/auth.js): plan de pago o prueba antigua aún vigente.
+const isPremiumUser = (u) => !!u && (u.plan === 'premium' ||
+    (!!u.premium_trial_expires_at && new Date(u.premium_trial_expires_at) > new Date()));
+const premiumRequired = (que, cors) => json({ error: `${que} requiere el plan Premium` }, 403, cors);
+// Cuentas por tipo y plan: los mismos números que getPlanLimits() en js/auth.js (si cambian
+// allí, cambiarlos aquí). Solo se aplican al crear una cuenta nueva, no al editarla: quien ya
+// los supera (p. ej. al dejar Premium) conserva sus cuentas.
+const ACCOUNT_LIMITS = {
+    free:    { activo: 1,  ingreso: 2, gasto: 8,  pasivo: 2,  patrimonio: 1 },
+    premium: { activo: 10, ingreso: 8, gasto: 25, pasivo: 10, patrimonio: 3 }
+};
 // Endpoint de Web Push: https y nombre de host (los servicios reales son FCM, Mozilla,
 // Apple y WNS); se rechazan IPs literales y localhost para no usar el Worker como proxy.
 function isPushEndpoint(u) {
@@ -1137,6 +1150,14 @@ export default {
                         !V.optStr(a.descripcion, 500) || !V.optAmount(a.saldo_inicial) || !V.optAmount(a.saldo_actual) ||
                         !V.optAmount(a.fixed_monthly_amount) || !V.dueDay(a.fixed_due_day) || !V.optDate(a.created_at))
                         return invalid('cuenta', cors);
+                    const isNewAccount = !(await env.DB.prepare('SELECT 1 FROM accounts WHERE id=? AND user_id=?').bind(a.id, uid).first());
+                    if (isNewAccount) {
+                        const limit = ACCOUNT_LIMITS[isPremiumUser(authUser) ? 'premium' : 'free'][a.tipo];
+                        const { n } = await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE user_id=? AND tipo=?')
+                            .bind(uid, a.tipo).first();
+                        if (n >= limit)
+                            return json({ error: `Has alcanzado el límite de cuentas de tipo ${a.tipo} de tu plan` }, 403, cors);
+                    }
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO accounts (id,user_id,nombre,tipo,descripcion,saldo_inicial,saldo_actual,
@@ -1222,6 +1243,7 @@ export default {
                     })), 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('Las reglas de registro automático', cors);
                     const r = await request.json();
                     if (!validRule(r)) return invalid('regla', cors);
                     await env.DB.prepare(
@@ -1239,6 +1261,7 @@ export default {
             }
             if (path === '/api/rules/bulk' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (!isPremiumUser(authUser)) return premiumRequired('Las reglas de registro automático', cors);
                 const { rules } = await request.json();
                 if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
                 // Atómico (batch = transacción en D1): si un INSERT falla, por ejemplo por un id
@@ -1271,6 +1294,7 @@ export default {
                     return json(row ? JSON.parse(row.plan_data) : null, 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('El plan de autocontrol', cors);
                     const plan = await request.json();
                     if (!V.blob(plan, 100000)) return invalid('plan de autocontrol', cors);
                     await env.DB.prepare(
@@ -1289,6 +1313,7 @@ export default {
                     return json(row ? JSON.parse(row.associations_data) : null, 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('El plan de autocontrol', cors);
                     const assoc = await request.json();
                     if (!V.blob(assoc, 100000)) return invalid('asociaciones', cors);
                     await env.DB.prepare(
