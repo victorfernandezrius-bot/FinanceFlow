@@ -144,8 +144,8 @@ class AccountingManager {
             let currentBalance = 0;
             
             if (accountTypeInfo.hasInitialBalance) {
-                initialBalance = saldo_inicial || 0;
-                currentBalance = saldo_inicial || 0;
+                initialBalance = Number(saldo_inicial) || 0;
+                currentBalance = Number(saldo_inicial) || 0;
                 
                 // Para pasivos, convertir a negativo si es positivo (lógica contable)
                 if (tipo === 'pasivo' && initialBalance > 0) {
@@ -289,12 +289,14 @@ class AccountingManager {
             // Aplicar reglas de categorización automática (solo Premium)
             let processedMovementData = {
                 tipo,
-                cantidad: parseFloat(cantidad),
                 descripcion: descripcion.trim(),
                 fecha: fecha,
                 cuenta_id,
                 cuenta_destino_id,
-                ...movementData // Incluir campos adicionales como auto_imported, etc.
+                ...movementData, // Incluir campos adicionales como auto_imported, etc.
+                // Después del spread: si la cantidad llegara como texto ("12.34"), el spread la
+                // sobrescribiría y los saldos se concatenarían ("0" + "12.34" → "012.34").
+                cantidad: parseFloat(cantidad)
             };
             
             // Solo aplicar reglas si no es un movimiento editado manualmente
@@ -376,7 +378,8 @@ class AccountingManager {
     }
 
     async updateAccountBalances(movement) {
-        const { tipo, cantidad, cuenta_id, cuenta_destino_id } = movement;
+        const { tipo, cuenta_id, cuenta_destino_id } = movement;
+        const cantidad = Number(movement.cantidad) || 0;   // nunca sumar texto a un saldo
         
         const cuentaOrigen = this.getAccount(cuenta_id);
         const cuentaDestino = this.getAccount(cuenta_destino_id);
@@ -434,7 +437,7 @@ class AccountingManager {
         const accounts = this._accounts || [];
         const byId = {};
         for (const acc of accounts) {
-            acc.saldo_actual = acc.saldo_inicial || 0;
+            acc.saldo_actual = Number(acc.saldo_inicial) || 0;
             byId[acc.id] = acc;
         }
 
@@ -443,7 +446,8 @@ class AccountingManager {
             .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
 
         for (const mov of movimientos) {
-            const { tipo, cantidad, cuenta_id, cuenta_destino_id } = mov;
+            const { tipo, cuenta_id, cuenta_destino_id } = mov;
+            const cantidad = Number(mov.cantidad) || 0;   // nunca sumar texto a un saldo
             const origen = byId[cuenta_id];
             const destino = byId[cuenta_destino_id];
             if (!origen || !destino) continue;
