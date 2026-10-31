@@ -569,7 +569,7 @@
 
                 // Si es Free, registrar directamente
                 const turnstileToken = this.turnstile ? this.turnstile.token() : null;
-                if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
+                if (this.turnstile && this.turnstile.mustWait()) {
                     this.showError('Completa la verificación anti-bots');
                     return;
                 }

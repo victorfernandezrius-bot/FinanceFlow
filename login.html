@@ -316,7 +316,7 @@
                 }
 
                 const turnstileToken = this.turnstile ? this.turnstile.token() : null;
-                if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
+                if (this.turnstile && this.turnstile.mustWait()) {
                     this.showError('Completa la verificación anti-bots');
                     return;
                 }
@@ -419,7 +419,7 @@
             
             const email = document.getElementById('reset-email').value;
             const turnstileToken = forgotTurnstile ? forgotTurnstile.token() : null;
-            if (window.FFTurnstile && window.FFTurnstile.enabled() && !turnstileToken) {
+            if (forgotTurnstile && forgotTurnstile.mustWait()) {
                 alert('Completa la verificación anti-bots');
                 return;
             }
