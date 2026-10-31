@@ -26,7 +26,7 @@ window.BANK_SIMULATOR_ENABLED = false;
 // Cloudflare Turnstile (anti-bots en login/registro/recuperación). Clave PÚBLICA del
 // widget (site key). Vacía = desactivado. El servidor solo lo exige si existe el
 // secreto TURNSTILE_SECRET_KEY: configura primero esta clave y después el secreto.
-window.TURNSTILE_SITE_KEY = '';
+window.TURNSTILE_SITE_KEY = '0x4AAAAAAFuJKD3L2fV8TGxl';
 // Clave pública VAPID para Web Push (misma que en wrangler.toml [vars])
 window.VAPID_PUBLIC_KEY = 'BP6sAnJPgQWmT4963pl7rWZBLt55TP3NX1m0VKc_jf9rDI8tfOhmYuOT8CmAZsxxJHTO2jHuYh31sS3hVzihFUc';
 
