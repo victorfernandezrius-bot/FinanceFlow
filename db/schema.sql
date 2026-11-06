@@ -267,6 +267,19 @@ CREATE TABLE IF NOT EXISTS cartera_riesgo_cache (
   FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Cuestionario de perfil opcional tras el registro (migración 0005 en BD existentes).
+-- Una fila por usuario; los valores permitidos los valida el Worker (PROFILE_SURVEY_OPTIONS).
+CREATE TABLE IF NOT EXISTS user_profile_survey (
+    user_id TEXT PRIMARY KEY,
+    age_range TEXT,
+    life_situation TEXT,
+    main_goal TEXT,
+    monthly_income_range TEXT,
+    current_method TEXT,
+    completed_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Registro de auditoría de eventos sensibles (migración 0002 en BD existentes)
 CREATE TABLE IF NOT EXISTS audit_log (
     id TEXT PRIMARY KEY,
