@@ -269,8 +269,9 @@
                     });
                     const data = await verRes.json();
                     if (verRes.status === 403 && data.needsVerification) {
+                        // El código se verifica junto con la contraseña: hay que entrar con ella
                         this.showLoading(false);
-                        this.showVerifyStep(data.email, true);
+                        this.showError('Tienes que verificar tu email: entra con tu email y contraseña y te enviaremos un código.');
                         return;
                     }
                     if (!verRes.ok || !data.success) {
@@ -345,7 +346,7 @@
                         }, 1000);
                         
                     } else if (result.needsVerification) {
-                        this.showVerifyStep(result.email, true);
+                        this.showVerifyStep(result.email, true, password);
                     } else {
                         this.showError(result.error || 'Error al iniciar sesión');
                     }
@@ -361,7 +362,7 @@
 
             // Email sin verificar: se sustituye el formulario por el paso del código. Al
             // verificar, la sesión ya está creada y se sigue igual que tras un login normal.
-            showVerifyStep(email, autoResend) {
+            showVerifyStep(email, autoResend, password) {
                 this.hideMessages();
                 const bio = document.getElementById('biometric-section');
                 this.bioWasVisible = !bio.classList.contains('hidden');
@@ -370,6 +371,7 @@
                 box.classList.remove('hidden');
                 this.verifyStep = mountVerifyStep(box, {
                     email,
+                    password,
                     autoResend,
                     onVerified: (step) => {
                         step.showSuccess('¡Login exitoso! Redirigiendo...');
@@ -474,11 +476,18 @@
             
          try {
                 const API = window.API_URL || 'https://financeflow.victor-a97.workers.dev/api';
-                await fetch(`${API}/auth/forgot-password`, {
+                const r = await fetch(`${API}/auth/forgot-password`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: (email || '').trim().toLowerCase(), turnstileToken })
                 });
+                // El servidor responde igual exista o no el email (no lo revela); solo hay error
+                // cuando rechaza la petición (anti-bots, datos no válidos…) y eso sí hay que decirlo.
+                if (!r.ok) {
+                    const data = await r.json().catch(() => ({}));
+                    alert(data.error || 'No se ha podido enviar el enlace. Inténtalo de nuevo.');
+                    return;
+                }
                 alert('Si ese email está registrado, recibirás un enlace para restablecer tu contraseña. Revisa tu bandeja de entrada y la carpeta de spam.');
                 document.getElementById('forgot-password-modal').classList.add('hidden');
                 document.getElementById('forgot-password-form').reset();

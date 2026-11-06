@@ -1506,9 +1506,12 @@ export default {
                 const vIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:verify:${vIp}`, 20, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
-                const { email, code } = await request.json();
+                const { email, code, password } = await request.json();
                 if (!V.email(email) || typeof code !== 'string' || !/^\d{6}$/.test(code))
                     return json({ error: 'Introduce el código de 6 dígitos que te hemos enviado.' }, 400, cors);
+                // El código solo vale junto con la contraseña actual de la cuenta (ver abajo)
+                if (!V.str(password, 1024, 1))
+                    return json({ error: 'Para verificar el código hace falta tu contraseña. Recarga la página y vuelve a entrar con tu email y contraseña.' }, 400, cors);
 
                 // Consume un intento de forma atómica: el UPDATE solo suma si quedan intentos,
                 // así que ni con peticiones en paralelo se pasa de 5 por código.
@@ -1516,7 +1519,7 @@ export default {
                     `UPDATE users SET verify_attempts = verify_attempts + 1
                      WHERE email = ? AND email_verified_at IS NULL AND verify_code_hash IS NOT NULL
                        AND verify_attempts < ?
-                     RETURNING id, verify_code_hash, verify_code_expires_at, verify_attempts`)
+                     RETURNING id, verify_code_hash, verify_code_expires_at, verify_attempts, password_hash`)
                     .bind(email.toLowerCase(), VERIFY_MAX_ATTEMPTS).first();
                 if (!row)
                     return json({ error: 'El código ha caducado o se ha bloqueado. Pide uno nuevo.', expired: true }, 400, cors);
@@ -1530,16 +1533,26 @@ export default {
                         expired: left <= 0
                     }, 400, cors);
                 }
+                // Mientras no se verifica, cualquiera puede repetir el alta con este email y otra
+                // contraseña (se reenvía el código al dueño). Exigir la contraseña actual impide que
+                // el dueño, al meter ese código, active sin saberlo la contraseña de otro.
+                if (!row.password_hash || !(await verifyPassword(password, row.password_hash)))
+                    return json({
+                        error: 'La contraseña no coincide con la del último registro de este email. ' +
+                            'Vuelve a registrarte con tu contraseña y te enviaremos un código nuevo.',
+                        passwordMismatch: true
+                    }, 400, cors);
 
-                // Solo marca si el código sigue siendo el mismo (no se ha reenviado otro entre medias)
+                // Solo marca si el código y la contraseña siguen siendo los mismos (no se ha
+                // reenviado otro código ni repetido el alta entre medias)
                 const vNow = new Date().toISOString();
                 const marked = await env.DB.prepare(
                     `UPDATE users SET email_verified_at=?, verify_code_hash=NULL, verify_code_expires_at=NULL,
                         verify_attempts=0, updated_at=?
-                     WHERE id=? AND email_verified_at IS NULL AND verify_code_hash=?`)
-                    .bind(vNow, vNow, row.id, row.verify_code_hash).run();
+                     WHERE id=? AND email_verified_at IS NULL AND verify_code_hash=? AND password_hash=?`)
+                    .bind(vNow, vNow, row.id, row.verify_code_hash, row.password_hash).run();
                 const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.id).first();
-                // changes=0 y sigue sin verificar: se reenvió un código nuevo mientras tanto
+                // changes=0 y sigue sin verificar: se reenvió un código o se repitió el alta mientras tanto
                 if (!user || user.email_verified_at === null)
                     return json({ error: 'El código ha caducado. Pide uno nuevo.', expired: true }, 400, cors);
                 // changes=0 y ya verificado: doble envío simultáneo; sesión sí, bienvenida no
