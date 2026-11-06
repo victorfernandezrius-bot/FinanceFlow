@@ -346,9 +346,9 @@ class AuthSystem {
 
     // Verificación del email con el código de 6 dígitos. Si es correcto, la sesión se
     // crea EXACTAMENTE igual que en el login. Devuelve { success, user } o { success:false, error, expired }.
-    async verifyEmail(email, code) {
+    async verifyEmail(email, code, password) {
         try {
-            const data = await DataClient.verifyEmail(email, code);
+            const data = await DataClient.verifyEmail(email, code, password);
             if (!data.success) return { success: false, error: data.error, expired: !!data.expired };
             if (this.isRemote && data.token) {
                 this.currentUser = data.currentUser;

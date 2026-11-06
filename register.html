@@ -613,7 +613,7 @@
 
                 if (result.success && result.needsVerification) {
                     // Sin sesión hasta verificar el email: nada que dependa de ella (panel, pago) antes
-                    this.showVerifyStep(result.email);
+                    this.showVerifyStep(result.email, password);
                 } else if (result.success) {
                     // Worker anterior a la verificación: la sesión ya está creada
                     // El Premium solo lo concede el servidor (webhook de Stripe), nunca esta página
@@ -631,13 +631,14 @@
                 }
             }
 
-            showVerifyStep(email) {
+            showVerifyStep(email, password) {
                 document.getElementById('plan-selection').classList.add('hidden');
                 document.getElementById('register-form-container').classList.add('hidden');
                 const box = document.getElementById('verify-step-container');
                 box.classList.remove('hidden');
                 this.verifyStep = mountVerifyStep(box, {
                     email,
+                    password,
                     onVerified: (step) => {
                         // Igual que tras un login normal; si eligió Premium, ahora sí al pago
                         if (this.pendingPlanType) {

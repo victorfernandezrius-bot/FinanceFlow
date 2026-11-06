@@ -1,5 +1,7 @@
 // Paso "Introduce el código" de la verificación de email (registro y login).
-// mountVerifyStep(container, { email, autoResend, onVerified, onChangeEmail })
+// mountVerifyStep(container, { email, password, autoResend, onVerified, onChangeEmail })
+//  - password: la que el usuario acaba de escribir en el registro o el login. El servidor solo
+//    acepta el código junto con la contraseña actual de la cuenta. Solo vive en memoria.
 //  - autoResend: pide un código nuevo al abrir (se llega desde un login con 403).
 //  - onVerified(step): la sesión ya está creada (Auth.verifyEmail); la página sigue igual
 //    que tras un login normal.
@@ -62,7 +64,7 @@ function el(tag, attrs = {}, text) {
     return n;
 }
 
-export function mountVerifyStep(container, { email, autoResend = false, onVerified, onChangeEmail }) {
+export function mountVerifyStep(container, { email, password, autoResend = false, onVerified, onChangeEmail }) {
     injectStyle();
     container.textContent = '';
     const root = el('div', { class: 'ffv' });
@@ -176,7 +178,7 @@ export function mountVerifyStep(container, { email, autoResend = false, onVerifi
         busy = true;
         verifyBtn.disabled = true;
         verifyBtn.textContent = 'Verificando...';
-        const r = await Auth.verifyEmail(email, code);
+        const r = await Auth.verifyEmail(email, code, password);
         busy = false;
         if (r.success) {
             done = true;

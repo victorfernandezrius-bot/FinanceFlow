@@ -193,15 +193,16 @@ const DataClient = {
     // ===== VERIFICACIÓN DE EMAIL (código de 6 dígitos tras el registro) =====
     // Si el código es correcto devuelve lo mismo que el login ({ success, token, currentUser });
     // si no, { success:false, error, expired }. No guarda la sesión: lo hace Auth.verifyEmail.
+    // password: la que el usuario acaba de escribir (el servidor exige la actual de la cuenta).
     // En modo local no hay verificación: éxito sin más.
-    async verifyEmail(email, code) {
+    async verifyEmail(email, code, password) {
         if (MODE === 'local') return { success: true };
         try {
             const r = await fetch(`${window.API_URL}/auth/verify-email`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ email, code })
+                body: JSON.stringify({ email, code, password })
             });
             const data = await r.json().catch(() => ({}));
             if (r.ok && data.success) return data;
