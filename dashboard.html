@@ -2426,6 +2426,9 @@
 
                 this.showSection('dashboard');
 
+                // Cuestionario de perfil: una sola vez tras el registro (no bloquea el arranque)
+                this.maybeShowProfileSurvey().catch(e => console.error('maybeShowProfileSurvey:', e));
+
                 // Migración push /public/ -> / y luego reconciliación de huérfanas
                 // (no bloquean el arranque; se autorreintentan en la siguiente carga).
                 this.migratePushSubscription().then(() => this.reconcilePushSubscription());
@@ -5284,6 +5287,26 @@
                 try { this.renderFinancialHealth(); } catch (e) { console.error('renderFinancialHealth:', e); }
                 try { await this.runNotificationChecks(); } catch (e) { console.error('runNotificationChecks:', e); }
                 try { await this.checkFeedbackRequest(); } catch (e) { console.error('checkFeedbackRequest:', e); }
+            }
+
+            // ── Cuestionario de perfil (opcional, una sola vez tras el registro) ──
+            // Auth deja una marca al terminar el registro y aquí se consume: sale una vez,
+            // tanto si responde como si pulsa «Saltar» (que no guarda nada). Si el estado no se
+            // puede consultar (sin conexión), la marca se queda para la siguiente carga. Al
+            // cerrarse, o si no procede, arranca el tutorial de bienvenida, que espera a esto.
+            async maybeShowProfileSurvey() {
+                const uid = this.currentUser?.id;
+                try {
+                    if (!uid || !DataClient.isProfileSurveyPending(uid)) return;
+                    const status = await DataClient.getProfileSurveyStatus(uid);
+                    if (!status) return;
+                    const { showProfileSurvey } = await import('./js/profile-survey.js');
+                    DataClient.clearProfileSurveyPending(uid);
+                    if (status.completed) return;
+                    await showProfileSurvey({ save: (answers) => DataClient.saveProfileSurvey(uid, answers) });
+                } finally {
+                    if (window.tutorialManager) window.tutorialManager.showDeferred();
+                }
             }
 
             // ── Solicitud de valoración al mes de uso ────────────────────────
@@ -10224,12 +10247,19 @@
 
             init() {
                 this.setupEventListeners();
+                this._deferredAutoShow = false;
                 
                 // Mostrar tutorial automáticamente SOLO la primera vez (al crear la cuenta).
                 if (!this.hasSeenTutorial()) {
                     // Marcar como visto inmediatamente: así no reaparece aunque se cierre
                     // con la X, Escape o clic fuera (no solo al "saltar"/"finalizar").
                     this.markTutorialAsSeen();
+                    // Recién registrado: primero el cuestionario de perfil. El dashboard llama a
+                    // showDeferred() al cerrarlo (o si al final no procede mostrarlo).
+                    if (DataClient.isProfileSurveyPending(this._sessionUserId())) {
+                        this._deferredAutoShow = true;
+                        return;
+                    }
                     setTimeout(() => {
                         this.showTutorial();
                     }, 1000); // Pequeño delay para que cargue la interfaz
@@ -10285,6 +10315,18 @@
                         this.closeTutorial();
                     }
                 });
+            }
+
+            // Id del usuario de la sesión guardada (la misma que lee DashboardApp al arrancar)
+            _sessionUserId() {
+                try { return JSON.parse(localStorage.getItem('currentUser') || 'null')?.id || null; }
+                catch (_) { return null; }
+            }
+
+            showDeferred() {
+                if (!this._deferredAutoShow) return;
+                this._deferredAutoShow = false;
+                setTimeout(() => this.showTutorial(), 400);
             }
 
             _tutorialKey() {
@@ -10415,6 +10457,7 @@
         
         // Inicializar gestor de tutorial
         const tutorialManager = new TutorialManager();
+        window.tutorialManager = tutorialManager; // el cuestionario de perfil lo lanza al cerrarse
 
         // Inicializar aplicación
         const dashboard = new DashboardApp();

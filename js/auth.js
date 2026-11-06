@@ -108,6 +108,7 @@ class AuthSystem {
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                DataClient.markProfileSurveyPending(data.currentUser && data.currentUser.id);
                 await this.refreshPremiumTrial();
                 return { success: true, user: this.currentUser, message: 'Registro exitoso' };
             }
@@ -149,6 +150,7 @@ class AuthSystem {
                 token: this.token,
                 currentUser: newUser
             });
+            DataClient.markProfileSurveyPending(newUser.id);
 
             return {
                 success: true,
@@ -174,6 +176,8 @@ class AuthSystem {
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                // Alta nueva con Google: ofrecer el cuestionario de perfil una vez en el dashboard
+                if (data.isNew) DataClient.markProfileSurveyPending(data.currentUser && data.currentUser.id);
                 try { await this.refreshPremiumTrial(); } catch (e) { /* no bloquear el acceso */ }
                 // passwordRemoved: la cuenta existía con contraseña y, al vincularla con Google,
                 // el servidor la ha anulado (ver /api/auth/google). La página lo explica al usuario.
@@ -215,6 +219,7 @@ class AuthSystem {
                     created_at:      new Date().toISOString()
                 };
                 await DataClient.saveUser(user);
+                DataClient.markProfileSurveyPending(user.id);
             }
 
             this.currentUser = user;
@@ -238,6 +243,8 @@ class AuthSystem {
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                // Alta nueva con Google: ofrecer el cuestionario de perfil una vez en el dashboard
+                if (data.isNew) DataClient.markProfileSurveyPending(data.currentUser && data.currentUser.id);
                 try { await this.refreshPremiumTrial(); } catch (e) { /* no bloquear el registro */ }
                 return { success: true, user: this.currentUser, message: 'Registro con Google exitoso',
                          passwordRemoved: !!data.passwordRemoved };
@@ -270,6 +277,7 @@ class AuthSystem {
                 created_at:      new Date().toISOString()
             };
             await DataClient.saveUser(user);
+            DataClient.markProfileSurveyPending(user.id);
 
             this.currentUser = user;
             this.token = 'token_' + user.id;
@@ -355,6 +363,8 @@ class AuthSystem {
                 this.token = data.token;
                 DataClient.setAuthToken(data.token);
                 await DataClient.saveSession({ token: data.token, currentUser: data.currentUser });
+                // Fin del registro con email: ofrecer el cuestionario de perfil una vez en el dashboard
+                DataClient.markProfileSurveyPending(data.currentUser && data.currentUser.id);
                 await this.refreshPremiumTrial();
             }
             return { success: true, user: this.currentUser, message: 'Email verificado' };
