@@ -90,8 +90,11 @@ export function mountVerifyStep(container, { email, autoResend = false, onVerifi
     root.appendChild(actions);
     container.appendChild(root);
 
-    // Turnstile solo hace falta para reenviar (si está activo en config.js)
+    // Turnstile solo hace falta para reenviar (si está activo en config.js). Como en el resto de
+    // formularios, solo se espera si el widget funciona y aún no se ha completado (mustWait):
+    // si el widget falla, se envía igual y decide el servidor.
     const turnstile = (window.FFTurnstile && window.FFTurnstile.enabled()) ? window.FFTurnstile.mount(tsBox) : null;
+    const mustWait = () => !!turnstile && (turnstile.mustWait ? turnstile.mustWait() : !turnstile.token());
 
     let timer = null;
     let busy = false;
@@ -121,13 +124,12 @@ export function mountVerifyStep(container, { email, autoResend = false, onVerifi
         tick();
         timer = setInterval(tick, 1000);
     }
-    // Espera a que Turnstile entregue un token (modo Managed suele resolverse solo)
+    // Espera a que Turnstile esté listo (modo Managed suele resolverse solo) o falle
     function waitTurnstile(timeoutMs) {
         return new Promise((resolve) => {
             const t0 = Date.now();
             (function poll() {
-                const tok = turnstile.token();
-                if (tok || done || Date.now() - t0 > timeoutMs) return resolve(tok);
+                if (!mustWait() || done || Date.now() - t0 > timeoutMs) return resolve();
                 setTimeout(poll, 300);
             })();
         });
@@ -135,18 +137,17 @@ export function mountVerifyStep(container, { email, autoResend = false, onVerifi
 
     async function resend(auto) {
         if (busy) return;
-        let token = null;
-        if (turnstile) {
-            token = auto ? await waitTurnstile(20000) : turnstile.token();
-            if (!token) {
-                resendBtn.disabled = false;
-                resendBtn.textContent = 'Reenviar código';
-                show(auto ? 'info' : 'err', auto
-                    ? 'Completa la verificación anti-bots y pulsa «Reenviar código» para recibir un código nuevo.'
-                    : 'Completa la verificación anti-bots para reenviar el código.');
-                return;
-            }
+        if (auto) await waitTurnstile(20000);
+        if (done) return;
+        if (mustWait()) {
+            resendBtn.disabled = false;
+            resendBtn.textContent = 'Reenviar código';
+            show(auto ? 'info' : 'err', auto
+                ? 'Completa la verificación anti-bots y pulsa «Reenviar código» para recibir un código nuevo.'
+                : 'Completa la verificación anti-bots para reenviar el código.');
+            return;
         }
+        const token = turnstile ? turnstile.token() : null;
         busy = true;
         resendBtn.disabled = true;
         const r = await DataClient.resendCode(email, token);

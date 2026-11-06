@@ -133,6 +133,25 @@ const DataClient = {
         return r.ok ? { success: true } : { success: false, error: data.error || 'No se pudo cambiar la contraseña' };
     },
 
+    // ===== PASSKEYS (Face ID / Touch ID) =====
+    // Solo existen en modo remoto (las registra el Worker); en local no hay ninguna.
+    // listPasskeys devuelve null si la petición falla, para no confundirlo con "no hay".
+    async listPasskeys() {
+        if (MODE === 'local') return [];
+        const r = await authFetch(`${window.API_URL}/auth/webauthn/credentials`);
+        if (!r.ok) return null;
+        const data = await r.json().catch(() => ({}));
+        return Array.isArray(data.credentials) ? data.credentials : null;
+    },
+
+    async deletePasskey(passkeyId) {
+        if (MODE === 'local') return true;
+        const r = await authFetch(`${window.API_URL}/auth/webauthn/credentials/${encodeURIComponent(passkeyId)}`, {
+            method: 'DELETE'
+        });
+        return r.ok;
+    },
+
     // ===== SESSION =====
     async getSession() {
         // La sesión vive en localStorage en ambos modos (el token se envía

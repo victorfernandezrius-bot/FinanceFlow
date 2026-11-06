@@ -25,7 +25,7 @@ Las reglas generales (idioma, estilo de trabajo, seguridad) están en el CLAUDE.
 | `db/schema.sql` | Schema D1 (idempotente, `CREATE ... IF NOT EXISTS`). |
 
 ## Entornos
-- **Producción**: frontend en Cloudflare Pages `financeflow-7nd.pages.dev` y API en `financeflow.victor-a97.workers.dev/api` (orígenes distintos → ver trampa 7).
+- **Producción**: frontend en Cloudflare Pages (proyecto `financeflow-7nd`) servido en el dominio propio `app.contabilidadpersonal.com` (`financeflow-7nd.pages.dev` redirige allí desde `public/config.js`) y API en `financeflow.victor-a97.workers.dev/api` (orígenes distintos → ver trampa 7).
 - **Staging**: `wrangler deploy --env staging` publica el frontend y la API en el mismo origen (`financeflow-staging...workers.dev`), con su propia D1 y KV. Se usa para probar passkeys y cualquier cambio arriesgado.
 - **Local**: `npm run dev` (wrangler dev) con los secrets en `.dev.vars`.
 
@@ -75,4 +75,4 @@ Regla general: haz tú todo lo que puedas. Si no puedes, dame los pasos exactos 
 4. `deploy:pages` sube la carpeta entera (`.`). Comprueba que `api/`, `db/`, `wrangler.toml` y `README.md` no quedan públicos en la web.
 5. `.dev.vars.example` no incluye `RESEND_API_KEY` ni `VAPID_PRIVATE_KEY`.
 6. La cuenta demo (`auth.js`) solo se desactiva si `APP_ENV === 'production'`; en staging y en local sí existe.
-7. **CORS vs URLs**: `corsHeaders()` solo acepta `APP_URL` (`app.contabilidadpersonal.com` en `wrangler.toml`) o `*.contabilidadpersonal.com`, pero `config.js` define `APP_URL = financeflow-7nd.pages.dev`. Si aparecen errores de CORS o de redirecciones (Stripe, GoCardless, emails de reset), el origen es este. Hay que unificar el dominio.
+7. **CORS y dominio**: `corsHeaders()` solo acepta `APP_URL` (`app.contabilidadpersonal.com` en `wrangler.toml`) o `*.contabilidadpersonal.com`, así que la app solo funciona entrando por `app.contabilidadpersonal.com`; `financeflow-7nd.pages.dev` redirige allí (`public/config.js`). La API sigue en otro origen (`workers.dev`): para usar cookies HttpOnly habría que servirla en `app.contabilidadpersonal.com/api` con una ruta del Worker.

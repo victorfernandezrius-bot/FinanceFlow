@@ -240,6 +240,20 @@ async function getAuthUser(request, env) {
     return auth ? auth.user : null;
 }
 
+// IP del cliente para las claves de rate limit. IPv6 se agrupa por /64: un cliente suele
+// tener un /64 entero y, contando cada dirección por separado, tendría intentos casi
+// ilimitados. IPv4 (y IPv6 con IPv4 incrustada) se usa tal cual.
+function rateLimitIp(request) {
+    const ip = (request.headers.get('CF-Connecting-IP') || 'unknown').toLowerCase();
+    if (!ip.includes(':')) return ip;
+    if (ip.includes('.')) return ip.slice(ip.lastIndexOf(':') + 1);
+    const [head, tail] = ip.split('::');
+    const left = head ? head.split(':') : [];
+    const right = tail ? tail.split(':') : [];
+    const groups = tail === undefined ? left : [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+    return groups.slice(0, 4).map(g => parseInt(g || '0', 16).toString(16)).join(':') + '::/64';
+}
+
 // Rate limit sencillo con KV (env.CACHE). Devuelve true si se SUPERA el límite.
 // Ventana deslizante (el TTL se renueva en cada intento). No es transaccional
 // (posible sub-conteo con alta concurrencia), suficiente para frenar abuso.
@@ -283,6 +297,19 @@ const V = {
     dueDay: (x) => isNil(x) || (Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 31),
 };
 const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 400, cors);
+
+// ---------- Plan Premium y límites (fuente de verdad: D1) ----------
+// Igual que Auth.isPremium() en el cliente (js/auth.js): plan de pago o prueba antigua aún vigente.
+const isPremiumUser = (u) => !!u && (u.plan === 'premium' ||
+    (!!u.premium_trial_expires_at && new Date(u.premium_trial_expires_at) > new Date()));
+const premiumRequired = (que, cors) => json({ error: `${que} requiere el plan Premium` }, 403, cors);
+// Cuentas por tipo y plan: los mismos números que getPlanLimits() en js/auth.js (si cambian
+// allí, cambiarlos aquí). Solo se aplican al crear una cuenta nueva, no al editarla: quien ya
+// los supera (p. ej. al dejar Premium) conserva sus cuentas.
+const ACCOUNT_LIMITS = {
+    free:    { activo: 1,  ingreso: 2, gasto: 8,  pasivo: 2,  patrimonio: 1 },
+    premium: { activo: 10, ingreso: 8, gasto: 25, pasivo: 10, patrimonio: 3 }
+};
 // Endpoint de Web Push: https y nombre de host (los servicios reales son FCM, Mozilla,
 // Apple y WNS); se rechazan IPs literales y localhost para no usar el Worker como proxy.
 function isPushEndpoint(u) {
@@ -339,23 +366,32 @@ const TURNSTILE_ERROR = { error: 'Completa la verificación anti-bots e inténta
 //  - email+IP: desde el 5.º fallo, bloqueo con backoff exponencial (1, 2, 4… min,
 //    máx. 60). Solo afecta a esa IP: no sirve para dejar fuera al dueño de la cuenta.
 //  - email (cualquier IP): tope de 50 fallos por hora contra ataques distribuidos.
-// Un login correcto borra el contador email+IP. Fail-open si KV falla.
+//    No se aplica a las IPs de confianza de ese email (lok:<email>:<ip>, 90 días): las
+//    IPs desde las que ya entró con su contraseña o restableció la contraseña. Así un
+//    ataque repartido entre muchas IPs no deja fuera al dueño desde su red habitual.
+// Un login correcto borra el contador email+IP; un reset de contraseña borra los dos.
+// Las IPs son las de rateLimitIp (IPv6 agrupada por /64). Fail-open si KV falla.
 const LOGIN_FAILS_BEFORE_BACKOFF = 5;
 const LOGIN_EMAIL_MAX_FAILS_PER_HOUR = 50;
+const LOGIN_TRUSTED_IP_TTL = 90 * 86400;
 async function loginLockState(env, email, ip) {
     try {
-        const [pairRaw, totalRaw] = await Promise.all([
-            env.CACHE.get(`lf:${email}:${ip}`), env.CACHE.get(`lf:${email}`)]);
+        const [pairRaw, totalRaw, trusted] = await Promise.all([
+            env.CACHE.get(`lf:${email}:${ip}`), env.CACHE.get(`lf:${email}`), env.CACHE.get(`lok:${email}:${ip}`)]);
         const pair = pairRaw ? JSON.parse(pairRaw) : { n: 0 };
         const total = parseInt(totalRaw, 10) || 0;
         let wait = 0;
         if (pair.until && pair.until > Date.now()) wait = Math.ceil((pair.until - Date.now()) / 1000);
-        else if (total >= LOGIN_EMAIL_MAX_FAILS_PER_HOUR) wait = 3600;
-        return { wait, pair, total };
+        else if (total >= LOGIN_EMAIL_MAX_FAILS_PER_HOUR && !trusted) wait = 3600;
+        return { wait, pair, total, trusted: !!trusted };
     } catch (e) {
         console.error('loginLockState:', e);
-        return { wait: 0, pair: { n: 0 }, total: 0 };
+        return { wait: 0, pair: { n: 0 }, total: 0, trusted: false };
     }
+}
+async function trustLoginIp(env, email, ip) {
+    try { await env.CACHE.put(`lok:${email}:${ip}`, '1', { expirationTtl: LOGIN_TRUSTED_IP_TTL }); }
+    catch (e) { console.error('trustLoginIp:', e); }
 }
 async function loginFailed(env, email, ip, state) {
     try {
@@ -367,8 +403,17 @@ async function loginFailed(env, email, ip, state) {
     } catch (e) { console.error('loginFailed:', e); }
 }
 async function loginSucceeded(env, email, ip, state) {
+    if (!state.trusted) await trustLoginIp(env, email, ip);
     if (!state.pair.n) return;
     try { await env.CACHE.delete(`lf:${email}:${ip}`); } catch (e) { console.error('loginSucceeded:', e); }
+}
+// Restablecer la contraseña demuestra que controla el email: se levanta el bloqueo por
+// fallos (también el global) y esa IP pasa a ser de confianza.
+async function clearLoginLock(env, email, ip) {
+    try {
+        await Promise.all([env.CACHE.delete(`lf:${email}`), env.CACHE.delete(`lf:${email}:${ip}`)]);
+    } catch (e) { console.error('clearLoginLock:', e); }
+    await trustLoginIp(env, email, ip);
 }
 
 // ---------- Verificación de email (código de 6 dígitos, migración 0003) ----------
@@ -413,7 +458,7 @@ async function sendVerifyCode(env, ctx, user) {
     ctx.waitUntil(sendEmail(env, {
         to: user.email,
         subject: 'Tu código de verificación - Finance Flow',
-        html: verifyCodeEmailHTML(user.name || '', code)
+        html: verifyCodeEmailHTML(code)
     }));
     return true;
 }
@@ -1411,11 +1456,11 @@ export default {
             // ---------- AUTH ----------
             if (path === '/api/auth/register' && method === 'POST') {
                 // Máx. 10 altas por IP y hora (anti creación masiva de cuentas y de emails)
-                const regIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const regIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:register:${regIp}`, 10, 3600))
                     return json({ error: 'Demasiados registros desde esta conexión. Inténtalo más tarde.' }, 429, cors);
                 const { email, password, name, turnstileToken } = await request.json();
-                if (!(await turnstileOk(env, turnstileToken, regIp))) return json(TURNSTILE_ERROR, 400, cors);
+                if (!(await turnstileOk(env, turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
                 if (!email || !password || !name) return json({ error: 'Faltan campos' }, 400, cors);
                 if (password.length < 8) return json({ error: 'Contraseña mínima 8 caracteres' }, 400, cors);
                 if (!V.email(email) || !V.str(password, 256) || !V.str(name, 100))
@@ -1433,7 +1478,7 @@ export default {
                         return json({ error: 'Email ya registrado' }, 409, cors);
                     await env.DB.prepare('UPDATE users SET name=?, password_hash=?, updated_at=? WHERE id=?')
                         .bind(name, await hashPassword(password), new Date().toISOString(), exists.id).run();
-                    await sendVerifyCode(env, ctx, { id: exists.id, email: regEmail, name });
+                    await sendVerifyCode(env, ctx, { id: exists.id, email: regEmail });
                     return json({ success: true, needsVerification: true, email: regEmail }, 201, cors);
                 }
 
@@ -1451,14 +1496,14 @@ export default {
                     `INSERT INTO users (id,email,name,password_hash,plan,plan_expires_at,created_at)
                      VALUES (?,?,?,?,?,?,?)`)
                     .bind(id, regEmail, name, pwHash, plan, planExp, now).run();
-                await sendVerifyCode(env, ctx, { id, email: regEmail, name });
+                await sendVerifyCode(env, ctx, { id, email: regEmail });
                 return json({ success: true, needsVerification: true, email: regEmail }, 201, cors);
             }
 
             // Verificación del email con el código de 6 dígitos. Si es correcto, responde
             // igual que /api/auth/login (token + currentUser).
             if (path === '/api/auth/verify-email' && method === 'POST') {
-                const vIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const vIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:verify:${vIp}`, 20, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { email, code } = await request.json();
@@ -1502,7 +1547,7 @@ export default {
                     ctx.waitUntil(sendEmail(env, {
                         to: user.email,
                         subject: '¡Bienvenido a Finance Flow!',
-                        html: welcomeEmailHTML(user.name)
+                        html: welcomeEmailHTML()
                     }));
                     ctx.waitUntil(audit(env, request, 'email_verified', user.id));
                 }
@@ -1513,15 +1558,15 @@ export default {
             // Reenvío del código. Respuesta siempre genérica (no revela si el email existe ni
             // si se ha enviado): solo envía a cuentas de email existentes y sin verificar.
             if (path === '/api/auth/resend-code' && method === 'POST') {
-                const rcIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const rcIp = rateLimitIp(request);
                 const generic = { success: true };
                 if (await rateLimited(env, `rl:vresend-ip:${rcIp}`, 10, 3600)) return json(generic, 200, cors);
                 const { email, turnstileToken } = await request.json();
                 if (!V.email(email)) return json(generic, 200, cors);
-                if (!(await turnstileOk(env, turnstileToken, rcIp))) return json(TURNSTILE_ERROR, 400, cors);
+                if (!(await turnstileOk(env, turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
                 const rcEmail = email.toLowerCase();
                 const rcUser = await env.DB.prepare(
-                    'SELECT id, name, email, auth_provider, email_verified_at FROM users WHERE email = ?')
+                    'SELECT id, email, auth_provider, email_verified_at FROM users WHERE email = ?')
                     .bind(rcEmail).first();
                 // El límite de 5/h por email se aplica dentro de sendVerifyCode, solo a cuentas
                 // pendientes: así nadie puede agotarlo antes de que el dueño se registre.
@@ -1532,12 +1577,12 @@ export default {
 
             if (path === '/api/auth/login' && method === 'POST') {
                 // B4: máx. 10 intentos por IP cada 15 min (anti fuerza bruta)
-                const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const loginIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { email, password, turnstileToken } = await request.json();
                 if (!V.str(email, 254) || !V.str(password, 1024)) return invalid('email o contraseña', cors);
-                if (!(await turnstileOk(env, turnstileToken, loginIp))) return json(TURNSTILE_ERROR, 400, cors);
+                if (!(await turnstileOk(env, turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
                 const loginEmail = (email || '').toLowerCase();
                 const lock = await loginLockState(env, loginEmail, loginIp);
                 if (lock.wait > 0)
@@ -1550,11 +1595,12 @@ export default {
                     if (user) ctx.waitUntil(audit(env, request, 'login_failed', user.id, { method: 'password' }));
                     return json({ error: 'Credenciales inválidas' }, 401, cors);
                 }
-                await loginSucceeded(env, loginEmail, loginIp, lock);
                 // Modo estricto: sin email verificado no hay token. Va DESPUÉS de comprobar la
-                // contraseña para no revelar a cualquiera qué cuentas están pendientes.
+                // contraseña (no revela a cualquiera qué cuentas están pendientes) y ANTES de
+                // loginSucceeded, para que una cuenta sin verificar no haga de confianza su IP.
                 if (user.email_verified_at === null)
                     return json({ error: NEEDS_VERIFICATION_ERROR, needsVerification: true, email: user.email }, 403, cors);
+                await loginSucceeded(env, loginEmail, loginIp, lock);
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'password' }));
 
                 const token = await issueToken(env, user);
@@ -1566,7 +1612,7 @@ export default {
             // elige entre las passkeys guardadas. El reto se cachea por un id temporal.
             if (path === '/api/auth/webauthn/login-options' && method === 'POST') {
                 // Cada llamada escribe un reto en KV: máx. 30 por IP cada 15 min
-                const optIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const optIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:wa-opt:${optIp}`, 30, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { rpID } = webauthnConfig(env);
@@ -1581,7 +1627,7 @@ export default {
 
             if (path === '/api/auth/webauthn/login-verify' && method === 'POST') {
                 // Mismo rate limit por IP que /api/auth/login (anti fuerza bruta)
-                const loginIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const loginIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:login:${loginIp}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
 
@@ -1642,7 +1688,7 @@ export default {
 
             if (path === '/api/auth/google' && method === 'POST') {
                 // Cada llamada consulta a Google: máx. 20 por IP cada 15 min
-                const gIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+                const gIp = rateLimitIp(request);
                 if (await rateLimited(env, `rl:google:${gIp}`, 20, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
                 const { credential } = await request.json();
@@ -1670,19 +1716,39 @@ export default {
                 let user = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?')
                     .bind(payload.sub).first();
                 let isNew = false;
+                let passwordRemoved = false;
                 if (!user) {
                     user = await env.DB.prepare('SELECT * FROM users WHERE email = ?')
                         .bind(gEmail).first();
-                    if (user && user.email_verified_at !== null) {
-                        // Cuenta existente (y verificada) por email: vincular con Google
-                        await env.DB.prepare(
-                            `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
-                                picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
-                            .bind(payload.sub, payload.picture ?? null, now, user.id).run();
+                    if (user) {
+                        // Cuenta existente por email: vincular con Google. El alta con contraseña
+                        // no verifica el email, así que esa cuenta pudo crearla otra persona con
+                        // el email de este usuario. Google acaba de demostrar quién controla el
+                        // email: todo acceso creado antes deja de valer (contraseña, sesiones,
+                        // passkeys y suscripciones push). Todo en un batch: o se aplica entero o nada.
+                        // El dueño legítimo puede crear otra contraseña con "¿Olvidaste tu contraseña?".
+                        passwordRemoved = !!user.password_hash;
+                        const linkStmts = [
+                            env.DB.prepare('DELETE FROM webauthn_credentials WHERE user_id=?').bind(user.id),
+                            env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id=?').bind(user.id),
+                            env.DB.prepare(
+                                `UPDATE users SET google_sub=?, auth_provider=COALESCE(auth_provider,'google'),
+                                    picture=COALESCE(?, picture), password_hash=NULL, updated_at=? WHERE id=?`)
+                                .bind(payload.sub, payload.picture ?? null, now, user.id)
+                        ];
+                        // Sin la migración 0001 no hay token_version (y authenticate no lo comprueba)
+                        const hasTokenVersion = typeof user.token_version === 'number';
+                        if (hasTokenVersion)
+                            linkStmts.push(env.DB.prepare('UPDATE users SET token_version = token_version + 1 WHERE id=?')
+                                .bind(user.id));
+                        await env.DB.batch(linkStmts);
+                        if (hasTokenVersion) user.token_version += 1;
+                        user.password_hash = null;
                         user.google_sub = payload.sub;
                         user.auth_provider = user.auth_provider || 'google';
                         user.picture = payload.picture ?? user.picture;
-                    } else if (!user) {
+                        ctx.waitUntil(audit(env, request, 'google_linked', user.id, { password_removed: passwordRemoved }));
+                    } else {
                         // Usuario nuevo (Google ya acredita el email: nace verificado)
                         isNew = true;
                         const gName = payload.name || gEmail.split('@')[0];
@@ -1708,34 +1774,34 @@ export default {
                         ctx.waitUntil(sendEmail(env, {
                             to: gEmail,
                             subject: '¡Bienvenido a Finance Flow!',
-                            html: welcomeEmailHTML(gName)
+                            html: welcomeEmailHTML()
                         }));
                     }
                 }
 
-                // A3 (pre-account takeover): cuenta con el email SIN verificar, que pudo crear un
-                // tercero con contraseña. Google acredita el email: se marca verificada, se vincula,
-                // se anula esa contraseña y se cierran sus sesiones (sube token_version).
+                // A3: cuenta con el email SIN verificar (alta con contraseña que nunca confirmó el
+                // código; pudo hacerla un tercero). La vinculación de arriba ya ha anulado sus
+                // accesos previos (contraseña, sesiones, passkeys, push); como Google acredita el
+                // email, además queda verificada.
                 if (!isNew && user.email_verified_at === null) {
                     await env.DB.prepare(
-                        `UPDATE users SET google_sub=?, auth_provider='google', password_hash=NULL,
-                            email_verified_at=?, verify_code_hash=NULL, verify_code_expires_at=NULL,
-                            verify_attempts=0, picture=COALESCE(?, picture), updated_at=? WHERE id=?`)
-                        .bind(payload.sub, now, payload.picture ?? null, now, user.id).run();
-                    await bumpTokenVersion(env, user.id);
-                    ctx.waitUntil(audit(env, request, 'email_verified', user.id, { method: 'google', password_cleared: !!user.password_hash }));
+                        `UPDATE users SET email_verified_at=?, verify_code_hash=NULL, verify_code_expires_at=NULL,
+                            verify_attempts=0, updated_at=? WHERE id=?`)
+                        .bind(now, now, user.id).run();
+                    user.email_verified_at = now;
+                    ctx.waitUntil(audit(env, request, 'email_verified', user.id, { method: 'google' }));
                     // Es su primera entrada real: la bienvenida no se envió al registrarse
                     ctx.waitUntil(sendEmail(env, {
                         to: gEmail,
                         subject: '¡Bienvenido a Finance Flow!',
-                        html: welcomeEmailHTML(user.name || payload.name || gEmail.split('@')[0])
+                        html: welcomeEmailHTML()
                     }));
-                    user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
                 }
 
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
                 const gToken = await issueToken(env, user);
-                return json({ success: true, token: gToken, currentUser: publicUser(user) }, isNew ? 201 : 200, cors);
+                return json({ success: true, token: gToken, currentUser: publicUser(user), passwordRemoved },
+                    isNew ? 201 : 200, cors);
             }
 
             if (path === '/api/auth/session' && method === 'GET') {
@@ -1757,12 +1823,12 @@ export default {
         const fpEmail = (fp.email || "").toLowerCase();
         // B4: máx. 3 solicitudes por email/hora y 10 por IP/hora (anti bombardeo de emails).
         // Se responde igual que el flujo normal para no revelar el límite ni si el email existe.
-        const fpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        const fpIp = rateLimitIp(request);
         if (await rateLimited(env, `rl:reset:${fpEmail}`, 3, 3600) ||
             await rateLimited(env, `rl:reset-ip:${fpIp}`, 10, 3600)) {
           return json({ success: true }, 200, cors);
         }
-        if (!(await turnstileOk(env, fp.turnstileToken, fpIp))) return json(TURNSTILE_ERROR, 400, cors);
+        if (!(await turnstileOk(env, fp.turnstileToken, request.headers.get('CF-Connecting-IP')))) return json(TURNSTILE_ERROR, 400, cors);
         const fpUser = await env.DB.prepare("SELECT id, name, email FROM users WHERE email=?")
           .bind(fpEmail).first();
         if (fpUser) {
@@ -1772,14 +1838,14 @@ export default {
           ctx.waitUntil(sendEmail(env, {
             to: fpUser.email,
             subject: "Recupera tu contraseña - Finance Flow",
-            html: resetPasswordEmailHTML(fpUser.name || "", link)
+            html: resetPasswordEmailHTML(link)
           }));
         }
         return json({ success: true }, 200, cors);
       }
       if (path === "/api/auth/reset-password" && method === "POST") {
         // Máx. 10 intentos por IP cada 15 min (el token es aleatorio de 122 bits; esto evita abuso)
-        const rpIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+        const rpIp = rateLimitIp(request);
         if (await rateLimited(env, `rl:reset-pw:${rpIp}`, 10, 900))
           return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
         const rp = await request.json();
@@ -1790,9 +1856,19 @@ export default {
         const rpUserId = await env.CACHE.get("reset:" + rp.token);
         if (!rpUserId) return json({ error: "El enlace no es válido o ha caducado" }, 400, cors);
         const rpHash = await hashPassword(rp.password);
-        await env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
-          .bind(rpHash, new Date().toISOString(), rpUserId).run();
+        // Restablecer es la vía para recuperar una cuenta robada: además de las sesiones
+        // (bumpTokenVersion), se revocan las passkeys y las suscripciones push, que no
+        // dependen de la contraseña. Los dispositivos legítimos vuelven a suscribirse solos
+        // al abrir el dashboard (reconcilePushSubscription).
+        await env.DB.batch([
+          env.DB.prepare("UPDATE users SET password_hash=?, updated_at=? WHERE id=?")
+            .bind(rpHash, new Date().toISOString(), rpUserId),
+          env.DB.prepare("DELETE FROM webauthn_credentials WHERE user_id=?").bind(rpUserId),
+          env.DB.prepare("DELETE FROM push_subscriptions WHERE user_id=?").bind(rpUserId)
+        ]);
         await bumpTokenVersion(env, rpUserId);   // cierra las sesiones abiertas (p. ej. de quien robó la cuenta)
+        const rpUser = await env.DB.prepare("SELECT email FROM users WHERE id=?").bind(rpUserId).first();
+        if (rpUser) ctx.waitUntil(clearLoginLock(env, rpUser.email, rpIp));
         ctx.waitUntil(audit(env, request, 'password_reset', rpUserId));
         await env.CACHE.delete("reset:" + rp.token);
         return json({ success: true }, 200, cors);
@@ -1897,6 +1973,26 @@ export default {
                 return json({ success: true }, 200, cors);
             }
 
+            // ---------- WebAuthn: passkeys del usuario (listar / quitar) ----------
+            // Sin credential_id ni clave pública: solo lo que el usuario necesita para
+            // reconocer sus dispositivos y quitar los que no son suyos.
+            if (path === '/api/auth/webauthn/credentials' && method === 'GET') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                const { results } = await env.DB.prepare(
+                    'SELECT id, device_name, created_at, last_used_at FROM webauthn_credentials WHERE user_id=? ORDER BY created_at DESC')
+                    .bind(authUser.id).all();
+                return json({ credentials: results || [] }, 200, cors);
+            }
+            const waCredMatch = path.match(/^\/api\/auth\/webauthn\/credentials\/([^/]+)$/);
+            if (waCredMatch && method === 'DELETE') {
+                if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
+                if (!V.id(waCredMatch[1])) return invalid('passkey', cors);
+                const del = await env.DB.prepare('DELETE FROM webauthn_credentials WHERE id=? AND user_id=?')
+                    .bind(waCredMatch[1], authUser.id).run();
+                if (del.meta?.changes) ctx.waitUntil(audit(env, request, 'passkey_removed', authUser.id));
+                return json({ success: true }, 200, cors);
+            }
+
             // ---------- USERS ----------
             if (path === '/api/users' && method === 'GET') {
                 if (!authUser) return json({ error: 'No autorizado' }, 401, cors);
@@ -1931,6 +2027,10 @@ export default {
                 }
                if (method === "DELETE") {
           const delId = authUser.id;
+          // Antes de borrar nada: cancelar sus suscripciones de Stripe (si no, se le seguiría
+          // cobrando una cuenta que ya no existe). Si Stripe falla, no se borra la cuenta.
+          if (!(await cancelUserSubscriptions(env, authUser)))
+            return json({ error: 'No hemos podido cancelar tu suscripción Premium, así que tu cuenta no se ha borrado. Inténtalo de nuevo en unos minutos.' }, 502, cors);
           await env.DB.batch([
             env.DB.prepare("DELETE FROM movements WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM accounts WHERE user_id=?").bind(delId),
@@ -1968,6 +2068,14 @@ export default {
                         !V.optStr(a.descripcion, 500) || !V.optAmount(a.saldo_inicial) || !V.optAmount(a.saldo_actual) ||
                         !V.optAmount(a.fixed_monthly_amount) || !V.dueDay(a.fixed_due_day) || !V.optDate(a.created_at))
                         return invalid('cuenta', cors);
+                    const isNewAccount = !(await env.DB.prepare('SELECT 1 FROM accounts WHERE id=? AND user_id=?').bind(a.id, uid).first());
+                    if (isNewAccount) {
+                        const limit = ACCOUNT_LIMITS[isPremiumUser(authUser) ? 'premium' : 'free'][a.tipo];
+                        const { n } = await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts WHERE user_id=? AND tipo=?')
+                            .bind(uid, a.tipo).first();
+                        if (n >= limit)
+                            return json({ error: `Has alcanzado el límite de cuentas de tipo ${a.tipo} de tu plan` }, 403, cors);
+                    }
                     const now = new Date().toISOString();
                     await env.DB.prepare(
                         `INSERT INTO accounts (id,user_id,nombre,tipo,descripcion,saldo_inicial,saldo_actual,
@@ -2053,6 +2161,7 @@ export default {
                     })), 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('Las reglas de registro automático', cors);
                     const r = await request.json();
                     if (!validRule(r)) return invalid('regla', cors);
                     await env.DB.prepare(
@@ -2070,17 +2179,21 @@ export default {
             }
             if (path === '/api/rules/bulk' && method === 'POST') {
                 if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                if (!isPremiumUser(authUser)) return premiumRequired('Las reglas de registro automático', cors);
                 const { rules } = await request.json();
                 if (!Array.isArray(rules) || rules.length > 500 || !rules.every(validRule)) return invalid('reglas', cors);
-                await env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid).run();
-                for (const r of rules) {
-                    await env.DB.prepare(
+                // Atómico (batch = transacción en D1): si un INSERT falla, por ejemplo por un id
+                // que ya usa otro usuario (la PK es global), se deshace también el DELETE y el
+                // usuario conserva las reglas que tenía.
+                await env.DB.batch([
+                    env.DB.prepare('DELETE FROM categorization_rules WHERE user_id=?').bind(uid),
+                    ...rules.map(r => env.DB.prepare(
                         `INSERT INTO categorization_rules (id,user_id,name,keywords,account_type,account_id,account_name,enabled,is_default,created_at)
                          VALUES (?,?,?,?,?,?,?,?,?,?)`)
                         .bind(r.id, uid, r.name, JSON.stringify(r.keywords || []), r.accountType ?? null,
                               r.accountId ?? null, r.accountName ?? null, r.enabled ? 1 : 0,
-                              r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()).run();
-                }
+                              r.isDefault ? 1 : 0, r.createdAt || new Date().toISOString()))
+                ]);
                 return json({ success: true, count: rules.length }, 200, cors);
             }
             const ruleMatch = path.match(/^\/api\/rules\/(.+)$/);
@@ -2099,6 +2212,7 @@ export default {
                     return json(row ? JSON.parse(row.plan_data) : null, 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('El plan de autocontrol', cors);
                     const plan = await request.json();
                     if (!V.blob(plan, 100000)) return invalid('plan de autocontrol', cors);
                     await env.DB.prepare(
@@ -2117,6 +2231,7 @@ export default {
                     return json(row ? JSON.parse(row.associations_data) : null, 200, cors);
                 }
                 if (method === 'POST') {
+                    if (!isPremiumUser(authUser)) return premiumRequired('El plan de autocontrol', cors);
                     const assoc = await request.json();
                     if (!V.blob(assoc, 100000)) return invalid('asociaciones', cors);
                     await env.DB.prepare(
@@ -2342,6 +2457,10 @@ export default {
                 // Cada llamada crea una Checkout Session en Stripe: máx. 10 por usuario cada 15 min
                 if (await rateLimited(env, `rl:checkout:${uid}`, 10, 900))
                     return json({ error: 'Demasiados intentos. Inténtalo de nuevo en unos minutos.' }, 429, cors);
+                // Una sola suscripción por usuario: si ya es Premium, el cambio de plan o la baja se
+                // hacen en el portal de Stripe. Así se evita pagar dos veces (pasó en mayo).
+                if (authUser.plan === 'premium')
+                    return json({ error: 'Ya tienes Premium. Para cambiar de plan o cancelar, usa «Gestionar suscripción».' }, 409, cors);
                 const body = await request.json();
                 // Aceptar tanto plan_type como planType; normalizar 'annual'/'yearly'
                 const planRaw = body.plan_type || body.planType || 'monthly';
@@ -2409,19 +2528,31 @@ export default {
                 if (!verified) return json({ error: 'Firma inválida' }, 400, cors);
 
                 const event = JSON.parse(body);
-                // Idempotencia
+                // Idempotencia: un evento ya procesado se ignora. Se marca como procesado AL
+                // TERMINAR (abajo): si algo falla antes, el 500 hace que Stripe lo reintente y se
+                // procesa de nuevo (los UPDATE de aquí dan el mismo resultado si se repiten).
                 const seen = await env.DB.prepare('SELECT event_id FROM stripe_events WHERE event_id=?').bind(event.id).first();
                 if (seen) return json({ received: true, duplicate: true }, 200, cors);
-                await env.DB.prepare('INSERT INTO stripe_events (event_id,type,processed_at,payload) VALUES (?,?,?,?)')
-                    .bind(event.id, event.type, new Date().toISOString(), body.slice(0, 5000)).run();
 
-                if (event.type === 'checkout.session.completed') {
+                // Premium solo para pagos iniciados por /api/stripe/create-checkout: es la única vía
+                // que fija metadata.user_id (y client_reference_id) con el uid, y metadata solo se
+                // escribe con la clave secreta. La cuenta de Stripe tiene más productos y Payment
+                // Links que también llegan a este webhook, y un Payment Link acepta
+                // ?client_reference_id=<lo que sea> en la URL: nunca deben dar Premium.
+                // Además, el pago tiene que estar hecho: 'paid', o 'no_payment_required' (cupón del
+                // 100 %). Con métodos de pago diferidos (SEPA…) la sesión se completa sin cobrar y
+                // el Premium llega con checkout.session.async_payment_succeeded.
+                if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
                     const s = event.data.object;
-                    const userId = s.metadata?.user_id || s.client_reference_id;
+                    const userId = s.metadata?.user_id;
+                    const fromApp = !!userId && s.client_reference_id === userId && s.mode === 'subscription';
+                    const paid = s.payment_status === 'paid' || s.payment_status === 'no_payment_required';
+                    if (!fromApp || !paid)
+                        console.log('Stripe: sesión ignorada', event.id, event.type, s.mode, s.payment_status, fromApp ? 'app' : 'otro producto');
                     const planType = s.metadata?.plan_type || 'monthly';
                     const expDays = planType === 'annual' ? 365 : 30;
                     const exp = new Date(Date.now() + expDays * 864e5).toISOString();
-                    if (userId) {
+                    if (fromApp && paid) {
                         await env.DB.prepare(
                             `UPDATE users SET plan='premium', plan_expires_at=?, stripe_customer_id=?, stripe_subscription_id=?, updated_at=? WHERE id=?`)
                             .bind(exp, s.customer || null, s.subscription || null, new Date().toISOString(), userId).run();
@@ -2445,6 +2576,9 @@ export default {
                         .bind(sub.id).run();
                     if (subUser) ctx.waitUntil(audit(env, null, 'plan_changed', subUser.id, { plan: 'free', stripe_event: event.id }));
                 }
+                // OR IGNORE: si Stripe entregó el mismo evento dos veces a la vez, no es un error
+                await env.DB.prepare('INSERT OR IGNORE INTO stripe_events (event_id,type,processed_at,payload) VALUES (?,?,?,?)')
+                    .bind(event.id, event.type, new Date().toISOString(), body.slice(0, 5000)).run();
                 return json({ received: true }, 200, cors);
             }
 
@@ -3075,7 +3209,7 @@ export default {
                     await sendEmail(env, {
                         to: u.email,
                         subject: '¿Nos ayudas a mejorar Finance Flow?',
-                        html: feedbackRequestEmailHTML(u.name || '', 'https://www.contabilidadpersonal.com/valoracion-finance-flow/')
+                        html: feedbackRequestEmailHTML('https://www.contabilidadpersonal.com/valoracion-finance-flow/')
                     });
                 } catch (e) {
                     console.error('Cron feedback, usuario', u.id, ':', e);
@@ -3141,6 +3275,36 @@ async function gcAccountOwnedBy(env, gcToken, accountId, uid) {
     return false;
 }
 
+// ---------- Cancelar las suscripciones de un usuario (al borrar la cuenta) ----------
+// Todas las de FinanceFlow: la guardada en users y las de pagos anteriores registrados en
+// stripe_events (alguien pudo pagar dos veces y solo se guarda la última). Cancelación inmediata,
+// sin prorrateo. Devuelve false si alguna no se pudo cancelar.
+async function cancelUserSubscriptions(env, user) {
+    const ids = new Set();
+    if (user.stripe_subscription_id) ids.add(user.stripe_subscription_id);
+    const { results } = await env.DB.prepare(
+        `SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.data.object.subscription') END AS sub
+         FROM stripe_events
+         WHERE type IN ('checkout.session.completed', 'checkout.session.async_payment_succeeded')
+           AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.data.object.metadata.user_id') END = ?`)
+        .bind(user.id).all();
+    for (const r of results || []) if (typeof r.sub === 'string') ids.add(r.sub);
+    const subs = [...ids].filter(id => /^sub_[A-Za-z0-9]+$/.test(id));
+    if (!subs.length) return true;
+    if (!env.STRIPE_SECRET_KEY) { console.error('cancelUserSubscriptions: falta STRIPE_SECRET_KEY'); return false; }
+    const headers = { 'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}` };
+    for (const id of subs) {
+        const got = await fetch(`https://api.stripe.com/v1/subscriptions/${id}`, { headers });
+        if (got.status === 404) continue;   // ya no existe
+        if (!got.ok) { console.error('Stripe leer suscripción:', id, got.status); return false; }
+        const sub = await got.json();
+        if (sub.status === 'canceled' || sub.status === 'incomplete_expired') continue;
+        const del = await fetch(`https://api.stripe.com/v1/subscriptions/${id}`, { method: 'DELETE', headers });
+        if (!del.ok) { console.error('Stripe cancelar suscripción:', id, del.status); return false; }
+    }
+    return true;
+}
+
 // ---------- Verificación firma Stripe ----------
 async function verifyStripeSignature(payload, sigHeader, secret) {
     if (!sigHeader || !secret) return false;
@@ -3195,15 +3359,16 @@ async function sendEmail(env, { to, subject, html }) {
     return false;
   }
 }
-// El nombre lo escribe el usuario (o quien se registra con un email ajeno):
-// se escapa antes de meterlo en el HTML de los emails.
+// El nombre lo escribe el usuario (o quien se registra con un email ajeno): se escapa antes
+// de meterlo en el HTML. Los emails que salen sin que nadie haya demostrado ser el dueño del
+// email (bienvenida, recuperación, valoración, código de verificación) no lo llevan: si no, cualquiera podría mandar
+// a cualquier dirección un email de la marca con su propio texto (p. ej. un enlace de phishing).
 function escapeHtml(str) {
     return String(str == null ? '' : str)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function welcomeEmailHTML(name) {
-  name = escapeHtml(name);
+function welcomeEmailHTML() {
   return `
   <!DOCTYPE html>
   <html lang="es">
@@ -3218,7 +3383,7 @@ function welcomeEmailHTML(name) {
             </tr></table>
           </td></tr>
           <tr><td style="padding:32px;">
-            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido, ${name}! 👋</h2>
+            <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¡Bienvenido a Finance Flow! 👋</h2>
             <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
               Gracias por unirte a Finance Flow. Ya puedes empezar a controlar tus finanzas con precisión:
               crea tus cuentas, registra movimientos y descubre tu situación financiera real.
@@ -3261,8 +3426,7 @@ function premiumActivatedEmailHTML(name, planType) {
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Contabilidad Personal · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-                function resetPasswordEmailHTML(name, link) {
-    name = escapeHtml(name);
+function resetPasswordEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
@@ -3274,15 +3438,14 @@ function premiumActivatedEmailHTML(name, planType) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Recupera tu contraseña</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, hemos recibido una solicitud para restablecer tu contraseña. Pulsa el botón para crear una nueva. Este enlace caduca en 1 hora.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Restablecer contraseña</a>
     <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has solicitado esto, ignora este correo. Tu contraseña no cambiará.</p>
     </td></tr>
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-function verifyCodeEmailHTML(name, code) {
-    name = escapeHtml(name);
+function verifyCodeEmailHTML(code) {
     code = escapeHtml(code);
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
@@ -3295,7 +3458,7 @@ function verifyCodeEmailHTML(name, code) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">Verifica tu email</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, introduce este código en Finance Flow para activar tu cuenta:</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, introduce este código en Finance Flow para activar tu cuenta:</p>
     <p style="margin:0 0 16px;padding:16px;background:#f4f6f9;border-radius:8px;text-align:center;color:#0158C9;font-size:34px;font-weight:700;letter-spacing:10px;font-family:'Courier New',Courier,monospace;">${code}</p>
     <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">El código caduca en 10 minutos.</p>
     <p style="margin:24px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si no has sido tú, ignora este correo: sin este código nadie puede activar la cuenta.</p>
@@ -3303,8 +3466,7 @@ function verifyCodeEmailHTML(name, code) {
     <tr><td style="background:#f4f6f9;padding:20px 32px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">© 2026 Finance Flow · contabilidadpersonal.com</p></td></tr>
     </table></td></tr></table></body></html>`;
 }
-function feedbackRequestEmailHTML(name, link) {
-    name = escapeHtml(name);
+function feedbackRequestEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
@@ -3316,7 +3478,7 @@ function feedbackRequestEmailHTML(name, link) {
     </td></tr>
     <tr><td style="padding:32px;">
     <h2 style="margin:0 0 16px;color:#111827;font-size:20px;">¿Nos ayudas a mejorar?</h2>
-    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola ${name}, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">Hola, ya llevas un mes usando Finance Flow. ¡Gracias por confiar en nosotros para poner orden en tus finanzas!</p>
     <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.6;">Nos encantaría conocer tu opinión: qué te está funcionando y qué podríamos hacer mejor. Son solo 2 minutos y nos ayuda muchísimo.</p>
     <a href="${link}" style="display:inline-block;background:#0158C9;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:15px;">Dar mi opinión</a>
     <p style="margin:28px 0 0;color:#9ca3af;font-size:13px;line-height:1.5;">Si ahora no es buen momento, no pasa nada: no volveremos a insistir.</p>
