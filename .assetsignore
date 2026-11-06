@@ -14,3 +14,10 @@ package-lock.json
 .assetsignore
 README.md
 _routes.json
+# No publicar: estado local de `wrangler dev` (D1/KV locales con datos de prueba) ni
+# documentación interna (la auditoría de seguridad describe vulnerabilidades).
+.wrangler
+.claude
+CLAUDE.md
+SECURITY_AUDIT.md
+.gitleaks.toml
