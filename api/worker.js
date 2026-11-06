@@ -14,6 +14,7 @@
 //              POST /api/stripe/verify-session, POST /api/stripe/customer-portal
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
+//   Perfil:    POST /api/profile-survey, GET /api/profile-survey/status (cuestionario opcional)
 //
 // Bindings (wrangler.toml): DB (D1), CACHE (KV)
 // Secrets: JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
@@ -283,6 +284,16 @@ const V = {
     dueDay: (x) => isNil(x) || (Number.isInteger(Number(x)) && Number(x) >= 1 && Number(x) <= 31),
 };
 const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 400, cors);
+
+// Cuestionario de perfil (tabla user_profile_survey): valores permitidos por columna.
+// Las etiquetas visibles están en js/profile-survey.js: si cambias una opción, cambia ambos.
+const PROFILE_SURVEY_OPTIONS = {
+    age_range: ['18_24', '25_34', '35_44', '45_54', '55_64', '65_mas'],
+    life_situation: ['estudiante', 'cuenta_ajena', 'autonomo', 'empresario', 'desempleado', 'jubilado'],
+    main_goal: ['controlar_gastos', 'ahorrar', 'salir_deudas', 'objetivo_concreto', 'invertir', 'finanzas_negocio'],
+    monthly_income_range: ['menos_1000', '1000_1500', '1500_2500', '2500_4000', 'mas_4000', 'prefiero_no_decirlo'],
+    current_method: ['nada', 'de_cabeza', 'papel', 'hoja_calculo', 'app_banco', 'otra_app']
+};
 
 // ---------- Plan Premium y límites (fuente de verdad: D1) ----------
 // Igual que Auth.isPremium() en el cliente (js/auth.js): plan de pago o prueba antigua aún vigente.
@@ -1059,7 +1070,7 @@ export default {
 
                 ctx.waitUntil(audit(env, request, 'login', user.id, { method: 'google', nuevo: isNew }));
                 const gToken = await issueToken(env, user);
-                return json({ success: true, token: gToken, currentUser: publicUser(user), passwordRemoved },
+                return json({ success: true, token: gToken, currentUser: publicUser(user), passwordRemoved, isNew },
                     isNew ? 201 : 200, cors);
             }
 
@@ -1290,6 +1301,11 @@ export default {
           // cobrando una cuenta que ya no existe). Si Stripe falla, no se borra la cuenta.
           if (!(await cancelUserSubscriptions(env, authUser)))
             return json({ error: 'No hemos podido cancelar tu suscripción Premium, así que tu cuenta no se ha borrado. Inténtalo de nuevo en unos minutos.' }, 502, cors);
+          // Cuestionario de perfil: fuera del batch para no depender de la migración 0005 (si la
+          // tabla no existe, el batch entero fallaría y no se podría borrar la cuenta). Si este
+          // DELETE fallara, ON DELETE CASCADE la borra igualmente al borrar el usuario.
+          try { await env.DB.prepare("DELETE FROM user_profile_survey WHERE user_id=?").bind(delId).run(); }
+          catch (e) { console.error('user_profile_survey (borrado, ¿migración 0005 aplicada?):', e && e.message); }
           await env.DB.batch([
             env.DB.prepare("DELETE FROM movements WHERE user_id=?").bind(delId),
             env.DB.prepare("DELETE FROM accounts WHERE user_id=?").bind(delId),
@@ -1647,6 +1663,36 @@ export default {
                 await env.DB.prepare('UPDATE users SET feedback_requested_at=? WHERE id=?')
                     .bind(new Date().toISOString(), uid).run();
                 return json({ success: true }, 200, cors);
+            }
+
+            // ---------- CUESTIONARIO DE PERFIL (opcional, una vez tras el registro) ----------
+            // Solo D1: sin analítica ni terceros. "Saltar" no llama a nada (no se guarda fila).
+            if (path === '/api/profile-survey/status' && method === 'GET') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const row = await env.DB.prepare('SELECT completed_at FROM user_profile_survey WHERE user_id=?')
+                    .bind(uid).first();
+                return json({ completed: !!row, completedAt: row ? row.completed_at : null }, 200, cors);
+            }
+            if (path === '/api/profile-survey' && method === 'POST') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const body = await request.json().catch(() => null);
+                if (!V.obj(body)) return invalid('cuestionario', cors);
+                // Las cinco respuestas son obligatorias y deben ser una de las opciones permitidas
+                for (const [campo, permitidos] of Object.entries(PROFILE_SURVEY_OPTIONS))
+                    if (!permitidos.includes(body[campo])) return invalid(campo, cors);
+                const completedAt = new Date().toISOString();
+                // Upsert por user_id (clave primaria): una sola fila por usuario
+                await env.DB.prepare(
+                    `INSERT INTO user_profile_survey
+                        (user_id, age_range, life_situation, main_goal, monthly_income_range, current_method, completed_at)
+                     VALUES (?,?,?,?,?,?,?)
+                     ON CONFLICT(user_id) DO UPDATE SET age_range=excluded.age_range,
+                        life_situation=excluded.life_situation, main_goal=excluded.main_goal,
+                        monthly_income_range=excluded.monthly_income_range,
+                        current_method=excluded.current_method, completed_at=excluded.completed_at`)
+                    .bind(uid, body.age_range, body.life_situation, body.main_goal,
+                        body.monthly_income_range, body.current_method, completedAt).run();
+                return json({ success: true, completed: true, completedAt }, 200, cors);
             }
 
             // ---------- BANK CONNECTIONS ----------

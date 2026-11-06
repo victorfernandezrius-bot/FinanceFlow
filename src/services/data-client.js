@@ -21,6 +21,10 @@ const KEYS = {
     premiumTrial: (u) => `premium_trial_${u}`,
     importInfo:   (u, b) => `import_info_${u}_${b}`,
     notifications:(u) => `notifications_${u}`,
+    // Cuestionario de perfil: respuestas (solo modo local; en remoto van a D1) y marca de
+    // "pendiente de mostrar" (se pone al terminar el registro y se consume al mostrarlo).
+    profileSurvey:        (u) => `profile_survey_${u}`,
+    profileSurveyPending: (u) => `profile_survey_pending_${u}`,
 };
 
 // Helpers localStorage
@@ -495,6 +499,54 @@ const DataClient = {
             body: JSON.stringify({ userId, notifications })
         });
         return r.ok;
+    },
+
+    // ===== CUESTIONARIO DE PERFIL (opcional, una sola vez tras el registro) =====
+    // La marca "pendiente" es local y de un solo uso: la pone Auth al terminar un registro
+    // (email verificado o alta nueva con Google) y el dashboard la borra al mostrar el
+    // cuestionario. Así sale una vez, aunque el usuario lo salte (saltar no guarda nada).
+    markProfileSurveyPending(userId) {
+        try { if (userId) localStorage.setItem(KEYS.profileSurveyPending(userId), '1'); } catch (_) {}
+    },
+    isProfileSurveyPending(userId) {
+        try { return !!userId && localStorage.getItem(KEYS.profileSurveyPending(userId)) === '1'; } catch (_) { return false; }
+    },
+    clearProfileSurveyPending(userId) {
+        try { if (userId) localStorage.removeItem(KEYS.profileSurveyPending(userId)); } catch (_) {}
+    },
+
+    // { completed, completedAt } o null si no se ha podido consultar (red, servidor).
+    async getProfileSurveyStatus(userId) {
+        if (MODE === 'local') {
+            const row = lsGet(KEYS.profileSurvey(userId));
+            return { completed: !!row, completedAt: row ? row.completed_at : null };
+        }
+        try {
+            const r = await authFetch(`${window.API_URL}/profile-survey/status`);
+            return r.ok ? r.json() : null;
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // answers: { age_range, life_situation, main_goal, monthly_income_range, current_method }.
+    // Devuelve { success } o { success: false, error }.
+    async saveProfileSurvey(userId, answers) {
+        if (MODE === 'local') {
+            lsSet(KEYS.profileSurvey(userId), { ...answers, completed_at: new Date().toISOString() });
+            return { success: true };
+        }
+        try {
+            const r = await authFetch(`${window.API_URL}/profile-survey`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(answers)
+            });
+            const data = await r.json().catch(() => ({}));
+            return r.ok ? { success: true } : { success: false, error: data.error || 'No se han podido guardar tus respuestas' };
+        } catch (e) {
+            return { success: false, error: 'Sin conexión. Inténtalo de nuevo o pulsa «Saltar».' };
+        }
     }
 };
 
