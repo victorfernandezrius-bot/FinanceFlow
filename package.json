@@ -8,7 +8,8 @@
     "deploy:worker": "wrangler deploy",
     "deploy:pages": "wrangler pages deploy . --project-name=cp-app",
     "db:schema": "wrangler d1 execute cp-db --remote --file=db/schema.sql",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node --test \"api/**/*.test.js\""
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "^0.3.0",

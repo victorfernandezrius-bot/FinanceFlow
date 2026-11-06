@@ -4,3 +4,5 @@ STRIPE_SECRET_KEY="sk_live_..."
 STRIPE_WEBHOOK_SECRET="whsec_..."
 GOCARDLESS_SECRET_ID="tu-secret-id"
 GOCARDLESS_SECRET_KEY="tu-secret-key"
+# API de precios de mercado para la Cartera de Inversión (registro gratuito en twelvedata.com)
+TWELVE_DATA_API_KEY="tu-api-key-de-twelvedata"
