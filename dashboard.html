@@ -595,6 +595,65 @@
             .t-digit-group .t-digit { animation: none !important; }
         }
 
+        /* ── Notification badge (transitions.dev/detail.html?t=notification-badge) ──
+           Badge de no leídas sobre la campana del header. Se abre/cierra con
+           data-open="true|false" en .t-badge (ver DashboardApp.updateNotificationsBadge). */
+        :root {
+            --badge-slide-dur: 260ms;
+            --badge-pop-dur: 500ms;
+            --badge-pop-close-dur: 180ms;
+            --badge-fade-dur: 400ms;
+            --badge-fade-close-dur: 180ms;
+            --badge-blur: 2px;
+            --badge-offset-x: -8.2px;
+            --badge-offset-y: 12.4px;
+            --badge-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+            --badge-pop-ease: cubic-bezier(0.34, 1.36, 0.64, 1);
+            --badge-close-ease: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        @keyframes t-badge-slide-in {
+            from { transform: translate(var(--badge-offset-x), var(--badge-offset-y)); }
+            to   { transform: translate(0, 0); }
+        }
+        .t-badge {
+            position: absolute;
+            top: -6px;
+            right: -8px;
+            pointer-events: none;
+            will-change: transform;
+        }
+        .t-badge[data-open="true"] {
+            animation: t-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);
+        }
+        .t-badge-dot {
+            display: block;
+            transform-origin: center;
+            transform: scale(1);
+            opacity: 1;
+            filter: blur(0);
+            transition:
+                transform var(--badge-pop-dur)  var(--badge-pop-ease),
+                opacity   var(--badge-fade-dur) var(--badge-pop-ease),
+                filter    var(--badge-pop-dur)  var(--badge-pop-ease);
+            will-change: transform, opacity, filter;
+        }
+        .t-badge[data-open="false"] .t-badge-dot {
+            transform: scale(0);
+            opacity: 0;
+            filter: blur(var(--badge-blur));
+            transition:
+                transform var(--badge-pop-close-dur)  var(--badge-close-ease),
+                opacity   var(--badge-fade-close-dur) var(--badge-close-ease),
+                filter    var(--badge-pop-close-dur)  var(--badge-close-ease);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .t-badge, .t-badge-dot { animation: none !important; transition: none !important; }
+        }
+        /* Ajuste a la campana: misma posición que tenía el badge (-top-1 -right-1)
+           y número centrado dentro del círculo. */
+        #notifications-btn .t-badge { top: -0.25rem; right: -0.25rem; }
+        #notifications-btn .t-badge-dot { display: flex; align-items: center; justify-content: center; }
+
         /* Sombra única de tarjeta desde token (sustituye la de Tailwind) */
         .shadow-sm { box-shadow: var(--shadow-card) !important; }
 
@@ -729,7 +788,9 @@
                     <div class="relative" id="notifications-container" style="display: none;">
                         <button id="notifications-btn" class="p-2 text-gray-600 hover:text-gray-900 relative">
                             <i class="fas fa-bell text-xl"></i>
-                            <span id="notifications-badge" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center hidden">0</span>
+                            <span id="notifications-badge-wrap" class="t-badge" data-open="false" aria-hidden="true">
+                                <span id="notifications-badge" class="t-badge-dot bg-red-500 text-white text-xs rounded-full h-5 w-5">0</span>
+                            </span>
                         </button>
                         
                         <!-- Menú de notificaciones -->
@@ -5319,16 +5380,27 @@
                 
                 // Actualizar badge del header
                 const headerBadge = document.getElementById('notifications-badge');
+                const headerBadgeWrap = document.getElementById('notifications-badge-wrap');
                 const sidebarBadge = document.getElementById('sidebar-notifications-badge');
-                
-                if (unreadCount > 0) {
-                    headerBadge.textContent = unreadCount;
-                    headerBadge.classList.remove('hidden');
-                    
+                const open = unreadCount > 0;
+
+                // Header: transición "Notification badge" (entra en diagonal + pop del punto).
+                // Solo anima al pasar de cerrado a abierto; si el número cambia con el badge
+                // ya visible, solo se actualiza el texto.
+                if (headerBadgeWrap) {
+                    if (open) headerBadge.textContent = unreadCount;
+                    if (open && headerBadgeWrap.dataset.open !== 'true') {
+                        void headerBadgeWrap.offsetWidth; // fija el estado cerrado para que el pop se vea
+                    }
+                    headerBadgeWrap.dataset.open = open ? 'true' : 'false';
+                    // Cerrado sigue en el DOM (escala 0): ocultarlo también a lectores de pantalla
+                    headerBadgeWrap.setAttribute('aria-hidden', open ? 'false' : 'true');
+                }
+
+                if (open) {
                     sidebarBadge.textContent = unreadCount;
                     sidebarBadge.classList.remove('hidden');
                 } else {
-                    headerBadge.classList.add('hidden');
                     sidebarBadge.classList.add('hidden');
                 }
             }
