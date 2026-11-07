@@ -527,16 +527,24 @@
             validatePassword() {
                 const password = document.getElementById('password').value;
                 const lengthCheck = document.getElementById('length-check');
-                const icon = lengthCheck.querySelector('i');
+                if (!lengthCheck) return;
+                // flow-icons.js sustituye el <i> por un <svg>: buscamos cualquiera de los dos.
+                const icon = lengthCheck.querySelector('svg, i');
                 const text = lengthCheck.querySelector('span');
+                const ok = password.length >= 8;
+                const iconClass = ok ? 'text-green-400 mr-2' : 'text-red-400 mr-2';
 
-                if (password.length >= 8) {
-                    icon.className = 'fas fa-check text-green-400 mr-2';
-                    text.className = 'text-green-600';
-                } else {
-                    icon.className = 'fas fa-times text-red-400 mr-2';
-                    text.className = 'text-red-500';
+                if (icon) {
+                    if (window.FlowIcons) {
+                        // En un <svg> className es de solo lectura y además hay que cambiar la
+                        // forma (check / cruz), así que se reemplaza el icono entero.
+                        const svg = FlowIcons.icon(ok ? 'flow-check' : 'flow-close', iconClass);
+                        if (svg) icon.outerHTML = svg;
+                    } else {
+                        icon.setAttribute('class', `fas ${ok ? 'fa-check' : 'fa-times'} ${iconClass}`);
+                    }
                 }
+                if (text) text.className = ok ? 'text-green-600' : 'text-red-500';
             }
 
             validatePasswordMatch() {
