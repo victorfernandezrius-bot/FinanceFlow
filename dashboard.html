@@ -654,6 +654,143 @@
         #notifications-btn .t-badge { top: -0.25rem; right: -0.25rem; }
         #notifications-btn .t-badge-dot { display: flex; align-items: center; justify-content: center; }
 
+        /* ── Banner stacking (transitions.dev/detail.html?t=banner-stacking) ──────
+           Notificaciones flotantes de la app (DashboardApp._toast). La nueva entra
+           subiendo y las anteriores se van hacia atrás; al pasar el ratón se despliegan. */
+        :root {
+            --stack-open: 350ms;
+            --stack-close: 250ms;
+            --stack-rise: 60px;
+            --stack-blur: 2px;
+            --stack-scale: 0.97;
+            --stack-peek: 12px;
+            --stack-spread-gap: 8px;
+            --stack-depth-scale: 0.06;
+            --stack-depth-fade: 0.4;
+            --stack-depth1-blur: 1px;
+            --stack-depth2-blur: 2px;
+            --stack-ease: cubic-bezier(0.22, 1, 0.36, 1);
+            /* Colores de las notificaciones (los mismos que ya usaban) */
+            --toast-success: #16a34a;
+            --toast-error: #dc2626;
+            --toast-info: var(--brand-primary);
+        }
+        .t-stack { position: relative; }
+        .t-stack-banner {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            transform-origin: 50% 50%;
+            filter: blur(0);
+            will-change: transform, opacity, filter;
+            transition:
+                transform var(--stack-open) var(--stack-ease),
+                opacity var(--stack-open) var(--stack-ease),
+                filter var(--stack-open) var(--stack-ease);
+        }
+        .t-stack-banner[data-depth="0"] {
+            z-index: 3;
+            transform: translateY(0) scale(1);
+            opacity: 1;
+        }
+        .t-stack-banner[data-depth="1"] {
+            z-index: 2;
+            transform-origin: 50% 100%;
+            transform: translateY(calc(var(--stack-peek) * -1))
+                       scale(calc(1 - var(--stack-depth-scale)));
+            opacity: calc(1 - var(--stack-depth-fade));
+            filter: blur(var(--stack-depth1-blur));
+        }
+        .t-stack-banner[data-depth="2"] {
+            z-index: 1;
+            transform-origin: 50% 100%;
+            transform: translateY(calc(var(--stack-peek) * -2))
+                       scale(calc(1 - var(--stack-depth-scale) * 2));
+            opacity: calc(1 - var(--stack-depth-fade) * 1.6);
+            filter: blur(var(--stack-depth2-blur));
+        }
+        .t-stack.is-spread .t-stack-banner[data-depth="1"],
+        .t-stack.is-spread .t-stack-banner[data-depth="2"] { opacity: 1; filter: blur(0); }
+        .t-stack.is-spread .t-stack-banner[data-depth="1"] {
+            transform: translateY(calc((100% + var(--stack-spread-gap)) * -1)) scale(1);
+        }
+        .t-stack.is-spread .t-stack-banner[data-depth="2"] {
+            transform: translateY(calc((100% + var(--stack-spread-gap)) * -2)) scale(1);
+        }
+        .t-stack-banner.is-enter {
+            transition: none;
+            transform: translateY(var(--stack-rise)) scale(var(--stack-scale));
+            opacity: 0;
+            filter: blur(var(--stack-blur));
+        }
+        .t-stack-banner.is-leaving {
+            z-index: 0;
+            transform-origin: 50% 100%;
+            transform: translateY(calc(var(--stack-peek) * -3))
+                       scale(calc(1 - var(--stack-depth-scale) * 3));
+            opacity: 0;
+            filter: blur(var(--stack-blur));
+            transition:
+                transform var(--stack-close) var(--stack-ease),
+                opacity var(--stack-close) var(--stack-ease),
+                filter var(--stack-close) var(--stack-ease);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .t-stack-banner { transition: none !important; transform: none !important; filter: none !important; }
+        }
+
+        /* Adaptación a FinanceFlow (fuera del snippet):
+           - La de delante, al caducar, sale bajando (inverso de la entrada).
+           - Al desplegar se usan las alturas reales (--t-spread-y, calculado en JS),
+             porque los mensajes largos ocupan 2-3 líneas.
+           - Abajo a la derecha, a la izquierda del botón de ayuda (60px; 50px en móvil). */
+        .t-stack-banner.is-dismiss {
+            z-index: 3;
+            transform: translateY(var(--stack-rise)) scale(var(--stack-scale));
+            opacity: 0;
+            filter: blur(var(--stack-blur));
+            transition:
+                transform var(--stack-close) var(--stack-ease),
+                opacity var(--stack-close) var(--stack-ease),
+                filter var(--stack-close) var(--stack-ease);
+        }
+        #t-toast-region .t-stack.is-spread .t-stack-banner[data-depth="1"],
+        #t-toast-region .t-stack.is-spread .t-stack-banner[data-depth="2"] {
+            transform: translateY(calc(var(--t-spread-y, 0px) * -1)) scale(1);
+        }
+        #t-toast-region {
+            position: fixed;
+            z-index: 10000; /* por encima de los modales (9999) */
+            bottom: var(--space-6);
+            right: calc(var(--space-6) + 60px + var(--space-4));
+            width: min(360px, calc(100vw - var(--space-6) * 2 - 60px - var(--space-4)));
+            pointer-events: none;
+        }
+        #t-toast-region .t-stack-banner { right: 0; }
+        @media (max-width: 640px) {
+            #t-toast-region {
+                bottom: var(--space-4);
+                left: var(--space-4);
+                right: calc(var(--space-4) + 50px + 12px);
+                width: auto;
+            }
+        }
+        .t-toast {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            color: #fff;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.12), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+            pointer-events: auto;
+            overflow-wrap: anywhere;
+        }
+        .t-toast > i { flex-shrink: 0; }
+        .t-toast--success { background: var(--toast-success); }
+        .t-toast--error { background: var(--toast-error); }
+        .t-toast--info { background: var(--toast-info); }
+
         /* Sombra única de tarjeta desde token (sustituye la de Tailwind) */
         .shadow-sm { box-shadow: var(--shadow-card) !important; }
 
@@ -9003,51 +9140,118 @@
             }
 
             showSuccessMessage(message) {
-                // Crear toast de éxito
-                const toast = document.createElement('div');
-                toast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 opacity-0 transition-opacity duration-300';
-                toast.innerHTML = `
-                    <div class="flex items-center">
-                        <i class="fas fa-check-circle mr-3"></i>
-                        <span>${this._escapeHtml(message)}</span>
-                    </div>
-                `;
-                
-                document.body.appendChild(toast);
-                
-                requestAnimationFrame(() => {
-                    toast.classList.remove('opacity-0');
-                    toast.classList.add('opacity-100');
-                });
-                
-                setTimeout(() => {
-                    toast.classList.add('opacity-0');
-                    setTimeout(() => toast.remove(), 300);
-                }, 3000);
+                this._toast(message, 'success');
             }
 
             showErrorMessage(message) {
-                // Crear toast de error
-                const toast = document.createElement('div');
-                toast.className = 'fixed top-4 right-4 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 opacity-0 transition-opacity duration-300';
-                toast.innerHTML = `
-                    <div class="flex items-center">
-                        <i class="fas fa-exclamation-circle mr-3"></i>
-                        <span>${this._escapeHtml(message)}</span>
-                    </div>
-                `;
-                
-                document.body.appendChild(toast);
-                
-                requestAnimationFrame(() => {
-                    toast.classList.remove('opacity-0');
-                    toast.classList.add('opacity-100');
+                this._toast(message, 'error');
+            }
+
+            // ===== Notificaciones flotantes: "Banner stacking" (transitions.dev) =====
+            // Pila abajo a la derecha: la nueva entra subiendo con blur y las anteriores se
+            // van hacia atrás (más pequeñas, más arriba, más tenues). Máximo 3 visibles: la
+            // 4.ª empuja fuera la más antigua. Con el ratón encima la pila se despliega en
+            // lista y los temporizadores se pausan para poder leerlas. Duración: éxito e
+            // info 3s, error 5s (como antes). El CSS está en .t-stack / .t-toast.
+            _toast(message, type = 'success') {
+                const st = this._toastState || this._initToastStack();
+                const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
+                if (!icons[type]) type = 'info';
+                if (!st) return; // sin contenedor (no debería pasar)
+
+                const el = document.createElement('div');
+                el.className = `t-stack-banner t-toast t-toast--${type} is-enter`;
+                el.dataset.depth = '0';
+                el.innerHTML = `<i class="fas ${icons[type]}" aria-hidden="true"></i><span>${this._escapeHtml(message)}</span>`;
+                const item = { el, remaining: type === 'error' ? 5000 : 3000, timer: null, start: 0 };
+                st.items.unshift(item);
+                st.stack.appendChild(el);
+                this._toastLayout();
+                // Fija el estado de entrada y lo suelta en la misma tarea (sin rAF: si el
+                // navegador ralentiza los frames, la animación se perdería)
+                void el.offsetWidth;
+                el.classList.remove('is-enter');
+                if (!st.stack.classList.contains('is-spread')) this._toastStartTimer(item);
+            }
+
+            _initToastStack() {
+                const stack = document.querySelector('#t-toast-region .t-stack');
+                if (!stack) return null;
+                const st = this._toastState = { stack, items: [], spreadAbove: 0 };
+                // Despliegue por geometría, no :hover (los huecos entre banners desplegados
+                // no son de ningún elemento). Se recoge al salir de la columna desplegada.
+                document.addEventListener('pointermove', (e) => {
+                    if (!st.items.length) return;
+                    const r = stack.getBoundingClientRect();
+                    const within = (above) => e.clientX >= r.left && e.clientX <= r.right &&
+                        e.clientY <= r.bottom && e.clientY >= r.top - above;
+                    if (stack.classList.contains('is-spread')) {
+                        if (!within(st.spreadAbove)) this._toastSpread(false);
+                    } else if (within(0)) {
+                        this._toastSpread(true);
+                    }
                 });
-                
-                setTimeout(() => {
-                    toast.classList.add('opacity-0');
-                    setTimeout(() => toast.remove(), 300);
-                }, 5000);
+                document.documentElement.addEventListener('pointerleave', () => this._toastSpread(false));
+                return st;
+            }
+
+            _toastCssMs(name, fallback) {
+                const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+                return Number.isFinite(v) ? v : fallback;
+            }
+
+            // Profundidades, banner que sobra (4.º) y medidas para el despliegue
+            _toastLayout() {
+                const st = this._toastState;
+                st.items.slice(3).forEach(it => this._toastRemove(it, 'is-leaving'));
+                const gap = this._toastCssMs('--stack-spread-gap', 8);
+                let acc = 0;
+                st.items.forEach((it, i) => {
+                    it.el.dataset.depth = String(i);
+                    it.el.style.setProperty('--t-spread-y', acc + 'px');
+                    acc += it.el.offsetHeight + gap;
+                });
+                const frontH = st.items.length ? st.items[0].el.offsetHeight : 0;
+                st.stack.style.height = frontH + 'px';
+                st.spreadAbove = Math.max(0, acc - frontH - gap);
+                if (!st.items.length) st.stack.classList.remove('is-spread');
+            }
+
+            // 'is-leaving': sale por detrás (snippet). 'is-dismiss': la de delante sale bajando.
+            _toastRemove(item, cls) {
+                const st = this._toastState;
+                const i = st.items.indexOf(item);
+                if (i === -1) return;
+                st.items.splice(i, 1);
+                clearTimeout(item.timer);
+                item.el.removeAttribute('data-depth'); // que no le apliquen las reglas de profundidad/despliegue
+                item.el.classList.add(cls);
+                setTimeout(() => item.el.remove(), this._toastCssMs('--stack-close', 250) + 60);
+            }
+
+            _toastStartTimer(item) {
+                item.start = Date.now();
+                item.timer = setTimeout(() => {
+                    item.timer = null;
+                    const front = this._toastState.items[0] === item;
+                    this._toastRemove(item, front ? 'is-dismiss' : 'is-leaving');
+                    this._toastLayout();
+                }, Math.max(0, item.remaining));
+            }
+
+            _toastSpread(on) {
+                const st = this._toastState;
+                if (!st || st.stack.classList.contains('is-spread') === on) return;
+                st.stack.classList.toggle('is-spread', on);
+                st.items.forEach(it => {
+                    if (on && it.timer) {          // pausa
+                        clearTimeout(it.timer);
+                        it.timer = null;
+                        it.remaining -= Date.now() - it.start;
+                    } else if (!on && !it.timer) { // reanuda con el tiempo que le quedaba
+                        this._toastStartTimer(it);
+                    }
+                });
             }
             
             // ===== FUNCIONES PLAN DE AUTOCONTROL =====
@@ -10085,37 +10289,7 @@
             }
             
             showNotification(message, type = 'info') {
-                // Función simple para mostrar notificaciones
-                const notification = document.createElement('div');
-                notification.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg transition-all duration-300 transform translate-x-full`;
-                
-                const bgColor = type === 'success' ? 'var(--success-color)' : type === 'error' ? '#EF4444' : 'var(--brand-primary)';
-                
-                notification.style.backgroundColor = bgColor;
-                notification.style.color = 'white';
-                notification.innerHTML = `
-                    <div class="flex items-center">
-                        <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation-triangle' : 'info'} mr-2"></i>
-                        <span>${this._escapeHtml(message)}</span>
-                    </div>
-                `;
-                
-                document.body.appendChild(notification);
-                
-                // Animación de entrada
-                setTimeout(() => {
-                    notification.style.transform = 'translateX(0)';
-                }, 10);
-                
-                // Auto-remover después de 3 segundos
-                setTimeout(() => {
-                    notification.style.transform = 'translateX(100%)';
-                    setTimeout(() => {
-                        if (notification.parentNode) {
-                            notification.remove();
-                        }
-                    }, 300);
-                }, 3000);
+                this._toast(message, type);
             }
 
             showSettingsModal() {
@@ -11371,6 +11545,9 @@
     </div>
 
     <!-- Botón flotante Ver Tutorial -->
+    <!-- Notificaciones flotantes ("Banner stacking"): las crea DashboardApp._toast() -->
+    <div id="t-toast-region" aria-live="polite"><div class="t-stack"></div></div>
+
     <button id="show-tutorial-btn" class="tutorial-help-btn" title="Ver tutorial">
         <i class="fas fa-question"></i>
     </button>
