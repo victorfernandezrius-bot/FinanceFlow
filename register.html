@@ -270,10 +270,18 @@
                         >
                         <label for="terms" class="ml-2 block text-sm text-gray-700">
                             Acepto los 
-                            <span class="text-blue-600">términos y condiciones</span>
+                            <a id="terms-link" href="https://www.contabilidadpersonal.com/terminos-y-condiciones/" target="_blank" rel="noopener" class="text-blue-600 underline">términos y condiciones</a>
                             y la 
-                            <span class="text-blue-600">política de privacidad</span>
+                            <a id="privacy-link" href="https://www.contabilidadpersonal.com/politica-de-privacidad/finance-flow/" target="_blank" rel="noopener" class="text-blue-600 underline">política de privacidad</a>
                         </label>
+                        <script>
+                            // Mismas URL que el resto de la app (public/config.js)
+                            (function () {
+                                var c = window.APP_CONFIG || {};
+                                if (c.termsUrl) document.getElementById('terms-link').href = c.termsUrl;
+                                if (c.privacyUrl) document.getElementById('privacy-link').href = c.privacyUrl;
+                            })();
+                        </script>
                     </div>
 
                     <!-- Cloudflare Turnstile (solo si TURNSTILE_SITE_KEY está configurada) -->
