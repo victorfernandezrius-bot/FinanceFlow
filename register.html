@@ -29,6 +29,52 @@
         }
         
         body { font-family: 'Inter', sans-serif; }
+
+        /* ── Error state shake (transitions.dev/detail.html?t=error-state-shake) ──
+           El campo con error tiembla y su borde pasa a rojo. El texto del error sigue
+           en el aviso rojo de arriba. Aquí no hay auto-revert (--revert-hold): el aviso
+           se queda hasta el siguiente envío y el borde se limpia al escribir en el campo.
+           .t-input va en el contenedor del input para que los iconos tiemblen con él. */
+        :root {
+            --shake-distance: 6px;
+            --shake-overshoot: 4px;
+            --shake-dur-a: 80ms;
+            --shake-dur-b: 60ms;
+            --shake-ease: cubic-bezier(0.22, 1, 0.36, 1);
+            --revert-dur: 280ms;
+            --t-error-color: #ef4444;
+        }
+        .t-input {
+            transition: border-color 150ms ease-out;
+            will-change: transform;
+        }
+        .t-input.is-error {
+            transition: border-color var(--revert-dur, 280ms) ease-out;
+        }
+        .t-input.is-shaking {
+            animation: t-input-shake calc(
+                var(--shake-dur-a) * 2 + var(--shake-dur-b) * 2
+            ) linear;
+        }
+        @keyframes t-input-shake {
+            0%      { transform: translateX(0);                                 animation-timing-function: var(--shake-ease); }
+            28.57%  { transform: translateX(var(--shake-distance));             animation-timing-function: var(--shake-ease); }
+            57.14%  { transform: translateX(calc(var(--shake-distance) * -1)); animation-timing-function: var(--shake-ease); }
+            78.57%  { transform: translateX(var(--shake-overshoot));            animation-timing-function: var(--shake-ease); }
+            100%    { transform: translateX(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .t-input { animation: none !important; transform: none !important; }
+        }
+        /* El borde lo pinta el <input>, no el contenedor que tiembla */
+        .t-input > input { transition: border-color 150ms ease-out; }
+        .t-input.is-error > input {
+            border-color: var(--t-error-color);
+            transition: border-color var(--revert-dur, 280ms) ease-out;
+        }
+        .t-input.is-error > input:focus {
+            --tw-ring-color: color-mix(in srgb, var(--t-error-color) 50%, transparent);
+        }
         
         .plan-card.selected {
             border-color: var(--azul-oscuro);
@@ -183,7 +229,7 @@
                         <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
                             Email
                         </label>
-                        <div class="relative">
+                        <div class="relative t-input">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <i class="fas fa-envelope text-gray-400"></i>
                             </div>
@@ -203,7 +249,7 @@
                         <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
                             Contraseña
                         </label>
-                        <div class="relative">
+                        <div class="relative t-input">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <i class="fas fa-lock text-gray-400"></i>
                             </div>
@@ -236,7 +282,7 @@
                         <label for="password-confirm" class="block text-sm font-medium text-gray-700 mb-2">
                             Confirmar contraseña
                         </label>
-                        <div class="relative">
+                        <div class="relative t-input">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <i class="fas fa-lock text-gray-400"></i>
                             </div>
@@ -464,6 +510,11 @@
                 passwordConfirm.addEventListener('input', () => {
                     this.validatePasswordMatch();
                 });
+
+                // Al corregir un campo marcado en rojo, su borde vuelve a gris
+                form.querySelectorAll('.t-input > input').forEach(input => {
+                    input.addEventListener('input', () => input.closest('.t-input').classList.remove('is-error'));
+                });
             }
 
             selectPlan(plan) {
@@ -584,12 +635,12 @@
                 }
 
                 if (password !== passwordConfirm) {
-                    this.showError('Las contraseñas no coinciden');
+                    this.showError('Las contraseñas no coinciden', ['password-confirm']);
                     return;
                 }
 
                 if (password.length < 8) {
-                    this.showError('La contraseña debe tener al menos 8 caracteres');
+                    this.showError('La contraseña debe tener al menos 8 caracteres', ['password']);
                     return;
                 }
 
@@ -635,7 +686,8 @@
                         window.location.href = './dashboard.html';
                     }, 2000);
                 } else {
-                    this.showError(result.error);
+                    // p. ej. "Email ya registrado" -> tiembla el email
+                    this.showError(result.error, /email/i.test(result.error || '') ? ['email'] : []);
                 }
             }
 
@@ -685,7 +737,8 @@
                 }
             }
 
-            showError(message) {
+            // fields: ids de los inputs con error (tiemblan y se ponen en rojo)
+            showError(message, fields = []) {
                 const alert = document.getElementById('error-alert');
                 const messageEl = document.getElementById('error-message');
                 const successAlert = document.getElementById('success-alert');
@@ -693,6 +746,24 @@
                 messageEl.textContent = message;
                 alert.classList.remove('hidden');
                 successAlert.classList.add('hidden');
+                this.flagFields(fields);
+            }
+
+            // "Error state shake" (transitions.dev): borde rojo + temblor en el contenedor del campo
+            flagFields(ids) {
+                const cs = getComputedStyle(document.documentElement);
+                const ms = (name, fb) => { const v = parseFloat(cs.getPropertyValue(name)); return Number.isFinite(v) ? v : fb; };
+                const shakeMs = ms('--shake-dur-a', 80) * 2 + ms('--shake-dur-b', 60) * 2;
+                ids.forEach(id => {
+                    const box = document.getElementById(id)?.closest('.t-input');
+                    if (!box) return;
+                    box.classList.add('is-error');
+                    box.classList.remove('is-shaking');
+                    void box.offsetWidth; // reflow para repetir el temblor
+                    box.classList.add('is-shaking');
+                    clearTimeout(box._shakeTimer);
+                    box._shakeTimer = setTimeout(() => box.classList.remove('is-shaking'), shakeMs + 20);
+                });
             }
 
             showSuccess(message) {
@@ -710,6 +781,7 @@
                 const successAlert = document.getElementById('success-alert');
                 alert.classList.add('hidden');
                 successAlert.classList.add('hidden');
+                document.querySelectorAll('#register-form .t-input.is-error').forEach(b => b.classList.remove('is-error'));
             }
         }
 
