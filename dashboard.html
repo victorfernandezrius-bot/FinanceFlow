@@ -10369,8 +10369,9 @@
             }
 
             _tutorialKey() {
-                const user = (window.Auth && Auth.getCurrentUser) ? Auth.getCurrentUser() : null;
-                return user && user.id ? `tutorial_seen_${user.id}` : 'hasSeenTutorial';
+                // Auth se importa como módulo y no existe window.Auth: el id sale de la sesión.
+                const userId = this._sessionUserId();
+                return userId ? `tutorial_seen_${userId}` : 'hasSeenTutorial';
             }
 
             hasSeenTutorial() {
