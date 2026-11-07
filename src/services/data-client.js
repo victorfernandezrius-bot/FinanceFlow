@@ -547,6 +547,17 @@ const DataClient = {
         } catch (e) {
             return { success: false, error: 'Sin conexión. Inténtalo de nuevo o pulsa «Saltar».' };
         }
+    },
+
+    // Borra las respuestas del cuestionario (retirada del consentimiento). true si ha ido bien.
+    async deleteProfileSurvey(userId) {
+        if (MODE === 'local') { lsDel(KEYS.profileSurvey(userId)); return true; }
+        try {
+            const r = await authFetch(`${window.API_URL}/profile-survey`, { method: 'DELETE' });
+            return r.ok;
+        } catch (e) {
+            return false;
+        }
     }
 };
 

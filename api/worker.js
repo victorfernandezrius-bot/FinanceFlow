@@ -14,7 +14,7 @@
 //              POST /api/stripe/verify-session, POST /api/stripe/customer-portal
 //   GoCardless:POST /api/banking/institutions, /api/banking/requisition,
 //              GET /api/banking/accounts, POST /api/banking/sync
-//   Perfil:    POST /api/profile-survey, GET /api/profile-survey/status (cuestionario opcional)
+//   Perfil:    POST/DELETE /api/profile-survey, GET /api/profile-survey/status (cuestionario opcional)
 //
 // Bindings (wrangler.toml): DB (D1), CACHE (KV)
 // Secrets: JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
@@ -1693,6 +1693,13 @@ export default {
                     .bind(uid, body.age_range, body.life_situation, body.main_goal,
                         body.monthly_income_range, body.current_method, completedAt).run();
                 return json({ success: true, completed: true, completedAt }, 200, cors);
+            }
+            // Retirada del consentimiento: borra las respuestas del propio usuario (Mi Perfil).
+            // Idempotente: si no había respuestas, responde igual con deleted:false.
+            if (path === '/api/profile-survey' && method === 'DELETE') {
+                if (!uid) return json({ error: 'No autorizado' }, 401, cors);
+                const del = await env.DB.prepare('DELETE FROM user_profile_survey WHERE user_id=?').bind(uid).run();
+                return json({ success: true, deleted: !!(del.meta && del.meta.changes > 0) }, 200, cors);
             }
 
             // ---------- BANK CONNECTIONS ----------

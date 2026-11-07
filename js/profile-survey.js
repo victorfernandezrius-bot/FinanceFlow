@@ -85,6 +85,7 @@ html.dark .ffps { --ffps-on-brand: #0b1220; --ffps-err: #fca5a5; --ffps-ok: #86e
   background: var(--bg-elevated, var(--bg-primary, #ffffff)); }
 .ffps .ffps-msg { margin: 0 0 10px; font-size: 0.85rem; color: var(--ffps-err); }
 .ffps .ffps-msg.ok { color: var(--ffps-ok); }
+.ffps .ffps-privacy a { color: var(--brand-primary, #0158c9); text-decoration: underline; }
 .ffps .ffps-privacy { margin: 0 0 12px; font-size: 0.75rem; line-height: 1.45; color: var(--text-secondary, #6b7280); }
 .ffps-actions { display: flex; gap: 10px; align-items: center; }
 .ffps-actions .ffps-progress { margin-right: auto; font-size: 0.8rem; color: var(--text-secondary, #6b7280); }
@@ -156,7 +157,10 @@ export function showProfileSurvey({ save }) {
         // div (no p): el dashboard fuerza el color de los <p> en modo oscuro con !important
         const msg = el('div', { class: 'ffps-msg', role: 'alert', 'aria-live': 'polite', hidden: '' });
         const privacy = el('p', { class: 'ffps-privacy' },
-            'Tus respuestas se guardan solo en tu cuenta de Finance Flow, sin cookies, y no se comparten con terceros.');
+            'Tus respuestas se guardan solo en tu cuenta de Finance Flow, sin cookies, y no se comparten con terceros. Puedes borrarlas cuando quieras desde Mi Perfil. ');
+        const privacyUrl = (window.APP_CONFIG && window.APP_CONFIG.privacyUrl) ||
+            'https://www.contabilidadpersonal.com/politica-de-privacidad/';
+        privacy.append(el('a', { href: privacyUrl, target: '_blank', rel: 'noopener' }, 'Política de privacidad'), '.');
         const actions = el('div', { class: 'ffps-actions' });
         const progress = el('span', { class: 'ffps-progress', 'aria-live': 'polite' }, `0 de ${total} respondidas`);
         const skipBtn = el('button', { type: 'button', class: 'ffps-btn ffps-skip' }, 'Saltar');
