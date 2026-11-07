@@ -7,7 +7,7 @@
 // correctamente desde la raíz: ./offline.html -> /offline.html y
 // ./public/logo.png -> /public/logo.png.
 
-const CACHE_NAME = 'financeflow-v3'; // subir versión fuerza limpieza de la caché vieja
+const CACHE_NAME = 'financeflow-v4'; // subir versión fuerza limpieza de la caché vieja
 const OFFLINE_URL = './offline.html';
 
 const PRECACHE_URLS = [
