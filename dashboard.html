@@ -2535,8 +2535,18 @@
                 document.getElementById('close-account-modal').addEventListener('click', () => {
                     this.closeAccountModal();
                 });
+
+                // "Cancelar" no tenía listener: cierra igual que la ✕
+                document.getElementById('cancel-account-btn').addEventListener('click', () => {
+                    this.closeAccountModal();
+                });
                 
                 document.getElementById('close-movement-modal').addEventListener('click', () => {
+                    this.closeMovementModal();
+                });
+
+                // "Cancelar" no tenía listener: cierra igual que la ✕
+                document.getElementById('cancel-movement-btn').addEventListener('click', () => {
                     this.closeMovementModal();
                 });
                 
