@@ -547,6 +547,54 @@
             letter-spacing: -0.02em;
         }
 
+        /* ── Number pop-in (transitions.dev/detail.html?t=number-pop-in) ──────
+           Se aplica a los KPI del dashboard cuando cambian tras la primera carga
+           (ver DashboardApp._popIn). Tokens con los valores por defecto del sitio. */
+        :root {
+            --digit-dur: 500ms;
+            --digit-distance: 8px;
+            --digit-stagger: 70ms;
+            --digit-blur: 2px;
+            --digit-ease: cubic-bezier(0.34, 1.45, 0.64, 1);
+            --digit-dir-x: 0;
+            --digit-dir-y: 1;
+        }
+        @keyframes t-digit-pop-in {
+            0%   {
+                transform: translate(
+                    calc(var(--digit-distance) * var(--digit-dir-x)),
+                    calc(var(--digit-distance) * var(--digit-dir-y))
+                );
+                opacity: 0;
+                filter: blur(var(--digit-blur));
+            }
+            100% { transform: translate(0, 0); opacity: 1; filter: blur(0); }
+        }
+        .t-digit-group {
+            display: inline-flex;
+            align-items: baseline;
+        }
+        .t-digit {
+            display: inline-block;
+            will-change: transform, opacity, filter;
+        }
+        .t-digit-group.is-animating .t-digit {
+            animation: t-digit-pop-in var(--digit-dur) var(--digit-ease) both;
+        }
+        .t-digit-group.is-animating .t-digit[data-stagger="1"] {
+            animation-delay: var(--digit-stagger);
+        }
+        .t-digit-group.is-animating .t-digit[data-stagger="2"] {
+            animation-delay: calc(var(--digit-stagger) * 2);
+        }
+        /* Los caracteres que no cambian se quedan quietos; solo entran los que cambian. */
+        .t-digit-group.is-animating .t-digit[data-same] {
+            animation: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .t-digit-group .t-digit { animation: none !important; }
+        }
+
         /* Sombra única de tarjeta desde token (sustituye la de Tailwind) */
         .shadow-sm { box-shadow: var(--shadow-card) !important; }
 
@@ -6047,13 +6095,63 @@
                 if (reduced) { el.textContent = formatter(target); return; }
                 const start = performance.now();
                 const dur = 400;
+                // Token: si llega un valor nuevo (_popIn) mientras corre, este count-up
+                // se detiene y no pisa la cifra nueva con la antigua.
+                const token = el._numAnim = {};
                 const tick = (now) => {
+                    if (el._numAnim !== token) return;
                     const t = Math.min((now - start) / dur, 1);
                     const eased = 1 - Math.pow(1 - t, 3);
                     el.textContent = formatter(target * eased);
                     if (t < 1) requestAnimationFrame(tick);
                 };
                 requestAnimationFrame(tick);
+            }
+
+            // "Number pop-in" (transitions.dev): al cambiar una cifra, solo entran los
+            // caracteres que cambian. Adaptado al formato es-ES ("1234,56 €"): el sufijo
+            // " €" no se anima si no cambia y el escalonado va a los dos últimos DÍGITOS
+            // (los céntimos), no a los dos últimos caracteres. El CSS está en .t-digit-*.
+            _popIn(el, text) {
+                if (!el) return;
+                el._numAnim = null; // cancela un count-up en curso
+                const sr = el.querySelector(':scope > .sr-only');
+                const prev = sr ? sr.textContent : el.textContent;
+                if (prev === text) return;
+
+                // Prefijo común (como el snippet original) + sufijo común no numérico
+                let same = 0;
+                while (same < prev.length && same < text.length && prev[same] === text[same]) same++;
+                let suf = 0;
+                while (suf < prev.length - same && suf < text.length - same
+                       && prev[prev.length - 1 - suf] === text[text.length - 1 - suf]
+                       && !/\d/.test(text[text.length - 1 - suf])) suf++;
+
+                const digitIdx = [];
+                for (let i = 0; i < text.length; i++) if (/\d/.test(text[i])) digitIdx.push(i);
+                const lastDigit = digitIdx[digitIdx.length - 1];
+                const prevDigit = digitIdx[digitIdx.length - 2];
+
+                // Lectores de pantalla: leen la cifra entera (sr-only), no carácter a carácter
+                const srSpan = document.createElement('span');
+                srSpan.className = 'sr-only';
+                srSpan.textContent = text;
+                const group = document.createElement('span');
+                group.className = 't-digit-group';
+                group.setAttribute('aria-hidden', 'true');
+                for (let i = 0; i < text.length; i++) {
+                    const span = document.createElement('span');
+                    span.className = 't-digit';
+                    // Un espacio normal dentro de un inline-block colapsa a ancho 0
+                    span.textContent = text[i] === ' ' ? ' ' : text[i];
+                    if (i < same || i >= text.length - suf) span.dataset.same = '';
+                    if (i === prevDigit) span.dataset.stagger = '1';
+                    else if (i === lastDigit) span.dataset.stagger = '2';
+                    group.appendChild(span);
+                }
+                el.replaceChildren(srSpan, group);
+                void group.offsetHeight; // reflow para reiniciar la animación
+                group.classList.add('is-animating');
             }
 
             updateDashboardMetrics() {
@@ -6073,11 +6171,12 @@
                     this._countUp(document.getElementById('monthly-expenses'), stats.gastos_mes, fmtC);
                     this._countUp(document.getElementById('monthly-balance'), stats.balance_mes, fmtC);
                 } else {
-                    document.getElementById('total-balance').textContent = fmtC(stats.saldo_total);
-                    document.getElementById('bank-balance').textContent = fmtC(bankBalance);
-                    document.getElementById('monthly-income').textContent = fmtC(stats.ingresos_mes);
-                    document.getElementById('monthly-expenses').textContent = fmtC(stats.gastos_mes);
-                    document.getElementById('monthly-balance').textContent = fmtC(stats.balance_mes);
+                    // Actualizaciones posteriores: "Number pop-in" solo en las cifras que cambian
+                    this._popIn(document.getElementById('total-balance'), fmtC(stats.saldo_total));
+                    this._popIn(document.getElementById('bank-balance'), fmtC(bankBalance));
+                    this._popIn(document.getElementById('monthly-income'), fmtC(stats.ingresos_mes));
+                    this._popIn(document.getElementById('monthly-expenses'), fmtC(stats.gastos_mes));
+                    this._popIn(document.getElementById('monthly-balance'), fmtC(stats.balance_mes));
                 }
                 
                 // Widgets Premium de Saldo Real
