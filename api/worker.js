@@ -3259,6 +3259,17 @@ export default {
             console.error('Cron audit_log (¿migración 0002 aplicada?):', e && e.message);
         }
 
+        // ── Retención de los avisos de pago de Stripe: 6 años (política de privacidad) ──
+        // Plazo de conservación de la documentación mercantil (art. 30 Código de Comercio).
+        // cancelUserSubscriptions usa estos registros para encontrar suscripciones duplicadas al
+        // borrar una cuenta: solo dejaría de ver una duplicada que llevara más de 6 años activa.
+        try {
+            await env.DB.prepare('DELETE FROM stripe_events WHERE processed_at < ?')
+                .bind(new Date(Date.now() - 6 * 365 * 86400000).toISOString()).run();
+        } catch (e) {
+            console.error('Cron stripe_events:', e && e.message);
+        }
+
         // ── Solicitud de valoración al mes de registro (email, una sola vez) ──
         try {
             const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
