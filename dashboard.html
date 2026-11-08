@@ -592,6 +592,163 @@
 /* Forzar texto legible SOLO en el modal de planes, sin afectar al resto del dashboard */
         #plan-selector-modal h3 { color: #111827 !important; }
         #plan-selector-modal p { color: #374151 !important; }
+
+        /* ── Importación de extractos · vista móvil (mazo / lista) ─────────────────
+           Solo ≤768px (DashboardApp._imx*). Solo se animan transform y opacity. */
+        :root {
+            --imx-ease: cubic-bezier(0.32, 0.72, 0, 1);
+            --imx-dur: 350ms;
+            --imx-income: #16a34a;
+            --imx-expense: #dc2626;
+            --imx-warn: #b45309;
+        }
+        html.dark {
+            --imx-income: #4ade80;
+            --imx-expense: #f87171;
+            --imx-warn: #fbbf24;
+        }
+        #import-preview.is-mobile .imx-desktop { display: none !important; }
+        .imx-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+        .imx-titles { position: relative; flex: 1; min-width: 0; height: 2.75rem; }
+        .imx-title {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column; justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 220ms ease;
+        }
+        .imx-title.is-active { opacity: 1; pointer-events: auto; }
+        .imx-title strong {
+            font-family: var(--font-display); font-size: 1rem; line-height: 1.25; color: var(--text-primary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .imx-title span { font-size: 0.8125rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .imx-toggle {
+            flex-shrink: 0; min-height: 44px; padding: 0 14px; border-radius: 999px;
+            font-size: 0.875rem; font-weight: 600; color: var(--brand-primary);
+            background: color-mix(in srgb, var(--brand-primary) 10%, transparent);
+        }
+        .imx-toggle[hidden], .imx-stage[hidden], .imx-summary[hidden], .imx-actions[hidden], .imx-exit[hidden] { display: none; }
+
+        .imx-stage { position: relative; }
+        .imx-card {
+            background: var(--bg-primary); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: 16px; padding: 16px;
+            box-shadow: 0 10px 28px -14px rgba(2, 20, 50, 0.35);
+        }
+        /* Mazo: 3 tarjetas visibles; 2.ª y 3.ª más abajo (10/20px), más pequeñas y tenues.
+           La de delante va en flujo (da el alto al mazo); el resto, absolutas encima. */
+        .imx-stage.is-deck { padding-bottom: 24px; }
+        .imx-stage.is-deck .imx-card {
+            position: absolute; top: 0; left: 0; right: 0;
+            transform-origin: 50% 100%;
+            transition: transform var(--imx-dur) var(--imx-ease), opacity var(--imx-dur) var(--imx-ease);
+        }
+        .imx-stage.is-deck .imx-card[data-depth="0"] { position: relative; z-index: 4; transform: translateY(0) scale(1); opacity: 1; will-change: transform, opacity; }
+        .imx-stage.is-deck .imx-card[data-depth="1"] { z-index: 3; transform: translateY(10px) scale(0.95); opacity: 0.7; will-change: transform, opacity; }
+        .imx-stage.is-deck .imx-card[data-depth="2"] { z-index: 2; transform: translateY(20px) scale(0.9); opacity: 0.4; will-change: transform, opacity; }
+        .imx-stage.is-deck .imx-card[data-depth="3"] { z-index: 1; transform: translateY(30px) scale(0.85); opacity: 0; }
+        .imx-stage.is-deck .imx-card[data-depth="h"] { z-index: 0; transform: translateY(30px) scale(0.85); opacity: 0; visibility: hidden; transition: none; }
+        /* Tarjeta resuelta (sale) o que vuelve al deshacer (entra desde aquí) */
+        .imx-stage.is-deck .imx-card.is-out,
+        .imx-stage.is-deck .imx-card.is-in { z-index: 5; transform: translateY(60px) scale(0.9); opacity: 0; pointer-events: none; }
+        .imx-card.no-anim, .imx-stage.is-switching .imx-card { transition: none !important; }
+        /* Lista */
+        .imx-stage.is-list { display: flex; flex-direction: column; gap: 10px; }
+        .imx-stage.is-list .imx-card { position: relative; }
+
+        .imx-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+        .imx-date { font-size: 0.8125rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+        .imx-amount {
+            font-family: var(--font-display); font-size: 1.375rem; font-weight: 700; letter-spacing: -0.01em;
+            font-variant-numeric: tabular-nums; white-space: nowrap;
+        }
+        .imx-amount.is-income { color: var(--imx-income); }
+        .imx-amount.is-expense { color: var(--imx-expense); }
+        .imx-concept {
+            margin: 6px 0 14px; font-size: 0.9375rem; font-weight: 500; line-height: 1.35;
+            min-height: 2.7em; overflow-wrap: anywhere;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .imx-account { display: block; }
+        .imx-account-head {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;
+            font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);
+        }
+        .imx-tag { padding: 2px 8px; border-radius: 999px; font-size: 0.6875rem; font-weight: 700; text-transform: none; letter-spacing: 0; }
+        .imx-tag:empty { display: none; }
+        .imx-tag.is-suggested { color: var(--brand-primary); background: color-mix(in srgb, var(--brand-primary) 12%, transparent); }
+        .imx-tag.is-missing { color: var(--imx-warn); background: color-mix(in srgb, var(--imx-warn) 14%, transparent); }
+        .imx-select {
+            width: 100%; min-height: 44px; padding: 10px 12px;
+            font-size: 16px; /* 16px: iOS no hace zoom al tocar el selector */
+            color: var(--text-primary); background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color); border-radius: 10px;
+        }
+        .imx-card.is-flagged { border-color: var(--imx-warn); box-shadow: 0 0 0 1px var(--imx-warn), 0 10px 28px -14px rgba(2, 20, 50, 0.35); }
+
+        .imx-actions { margin-top: 18px; min-height: 52px; }
+        .imx-actions-bar { display: grid; }
+        .imx-actions-group {
+            grid-area: 1 / 1; display: flex; gap: 10px;
+            opacity: 0; pointer-events: none; transition: opacity 220ms ease;
+        }
+        .imx-actions-group.is-active { opacity: 1; pointer-events: auto; }
+        .imx-btn { flex: 1; min-height: 52px; border-radius: 14px; font-size: 1rem; font-weight: 600; transition: opacity 150ms ease, transform 150ms ease; }
+        .imx-btn:active { transform: scale(0.98); }
+        .imx-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        .imx-btn--ghost { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .imx-btn--primary { background: var(--brand-primary); color: var(--bg-primary); }
+        .imx-btn--block { width: 100%; }
+        .imx-exit {
+            display: block; min-height: 44px; margin: 10px auto 0; padding: 0 12px;
+            font-size: 0.875rem; color: var(--text-secondary); text-decoration: underline;
+        }
+        /* Lista larga: la barra de "Registrar todos" flota abajo mientras se ve la lista */
+        #import-mobile.is-list.bar-floating .imx-actions-bar {
+            position: fixed; left: 0; right: 0; bottom: 0; z-index: 9000;
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+            background: var(--bg-primary); border-top: 1px solid var(--border-color);
+            box-shadow: 0 -10px 24px -16px rgba(2, 20, 50, 0.4);
+        }
+
+        .imx-summary {
+            padding: 24px 16px; text-align: center;
+            background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 16px;
+        }
+        .imx-summary-icon {
+            width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 50%;
+            display: grid; place-items: center; font-size: 1.25rem; color: #fff; background: var(--imx-income);
+        }
+        .imx-summary-title { display: block; font-family: var(--font-display); font-size: 1.125rem; color: var(--text-primary); }
+        .imx-summary-stats { display: flex; justify-content: center; gap: 32px; margin: 16px 0 20px; }
+        .imx-summary-stats b { display: block; font-family: var(--font-display); font-size: 1.75rem; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+        .imx-summary-stats span { font-size: 0.8125rem; color: var(--text-secondary); }
+
+        /* Toast "Deshacer" (por encima de la barra flotante) */
+        .imx-undo {
+            position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 88px); z-index: 10001;
+            max-width: 480px; margin: 0 auto;
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 8px 8px 8px 16px; border-radius: 14px;
+            background: var(--text-primary); color: var(--bg-primary);
+            box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.45); font-size: 0.9375rem;
+            opacity: 0; transform: translateY(16px); pointer-events: none;
+            transition: opacity 250ms var(--imx-ease), transform 250ms var(--imx-ease);
+        }
+        .imx-undo.is-visible { opacity: 1; transform: none; pointer-events: auto; }
+        .imx-undo-btn {
+            flex-shrink: 0; min-height: 40px; padding: 0 14px; border-radius: 10px;
+            font-weight: 700; color: inherit; background: color-mix(in srgb, currentColor 16%, transparent);
+        }
+
+        /* Movimiento reducido: solo fundidos, sin desplazamientos */
+        @media (prefers-reduced-motion: reduce) {
+            .imx-stage.is-deck .imx-card { transition: opacity 200ms ease; }
+            .imx-stage.is-deck .imx-card.is-out,
+            .imx-stage.is-deck .imx-card.is-in { transform: translateY(0) scale(1); }
+            .imx-undo { transform: none; transition: opacity 200ms ease; }
+            .imx-btn:active { transform: none; }
+        }
     </style>
 </head>
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
@@ -1077,11 +1234,13 @@
 
                         <!-- Paso 2: previsualización -->
                         <div id="import-preview" class="hidden mt-5">
-                            <div class="flex items-center justify-between mb-2">
+                            <!-- Vista móvil (≤768px): mazo de tarjetas / lista. La pinta DashboardApp._imxRender() -->
+                            <div id="import-mobile" class="hidden"></div>
+                            <div class="imx-desktop flex items-center justify-between mb-2">
                                 <h4 class="font-medium text-gray-900">Movimientos detectados</h4>
                                 <span id="import-preview-summary" class="text-xs text-gray-500"></span>
                             </div>
-                            <div class="overflow-x-auto bg-white border border-gray-200 rounded-lg">
+                            <div class="imx-desktop overflow-x-auto bg-white border border-gray-200 rounded-lg">
                                 <table class="min-w-full text-sm">
                                     <thead class="bg-gray-50 text-gray-600">
                                         <tr>
@@ -1095,7 +1254,7 @@
                                     <tbody id="import-preview-body"></tbody>
                                 </table>
                             </div>
-                            <div class="flex justify-end space-x-3 mt-4">
+                            <div class="imx-desktop flex justify-end space-x-3 mt-4">
                                 <button id="import-cancel-btn" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 text-sm">Cancelar</button>
                                 <button id="import-confirm-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm">
                                     <i class="fas fa-check mr-2"></i>Confirmar e importar
@@ -2229,6 +2388,8 @@
         // Límites de la importación de extractos (el parseo se hace en el navegador):
         // tipo de archivo, tamaño, número de filas y páginas de PDF.
         const IMPORT_LIMITS = { maxBytes: 10 * 1024 * 1024, maxRows: 2000, maxPdfPages: 50 };
+        // Vista móvil de la importación (mazo / lista): curva, duraciones (ms) y FLIP
+        const IMX = { ease: 'cubic-bezier(0.32, 0.72, 0, 1)', out: 350, flip: 300, stagger: 40, maxFlip: 10, undoMs: 5000 };
 
         // Texto explicativo del Índice Flow — peso, fórmula en lenguaje llano y cómo leer
         // cada sub-índice. Usado por renderFinancialHealth() y renderFlowDetailContent().
@@ -3078,6 +3239,8 @@
                         return;
                     }
                     this._importRows = rows;
+                    this._importItems = this._buildImportItems(rows);
+                    this._imx = null;
                     this.renderImportPreview();
                 } catch (err) {
                     console.error('Error analizando extracto:', err);
@@ -3088,52 +3251,164 @@
                 }
             }
 
-            renderImportPreview() {
-                const rows = this._importRows || [];
-                const tbody = document.getElementById('import-preview-body');
-                const gastoAccounts = this.accountingManager.getAccounts().filter(a => a.tipo === 'gasto');
-                const ingresoAccounts = this.accountingManager.getAccounts().filter(a => a.tipo === 'ingreso');
-
-                tbody.innerHTML = rows.map((row, idx) => {
+            // Estado por movimiento detectado. Lo comparten la tabla (escritorio) y la vista
+            // móvil (mazo/lista): sugerencia de la regla, cuenta elegida y estado.
+            _buildImportItems(rows) {
+                const accounts = this.accountingManager.getAccounts();
+                const gastoAccounts = accounts.filter(a => a.tipo === 'gasto');
+                const ingresoAccounts = accounts.filter(a => a.tipo === 'ingreso');
+                return rows.map((row, idx) => {
                     const tipo = row.importe < 0 ? 'gasto' : 'ingreso';
                     const opciones = tipo === 'gasto' ? gastoAccounts : ingresoAccounts;
                     const rule = this.accountingManager.findMatchingRule(row.descripcion);
-                    let preselectValue = '';
-                    let createOption = '';
+                    let suggested = '';
+                    let canCreate = false;
                     if (rule && rule.accountType === tipo) {
                         const existing = opciones.find(a => (a.nombre || '').toLowerCase() === (rule.accountName || '').toLowerCase());
                         if (existing) {
-                            preselectValue = existing.id;
+                            suggested = existing.id;
                         } else if (rule.accountName) {
-                            preselectValue = '__create__';
-                            createOption = `<option value="__create__" selected>➕ Crear: ${this._escapeHtml(rule.accountName)}</option>`;
+                            suggested = '__create__';
+                            canCreate = true;
                         }
                     }
-                    const opts = opciones.map(a =>
-                        `<option value="${a.id}"${a.id === preselectValue ? ' selected' : ''}>${this._escapeHtml(a.nombre)}</option>`).join('');
-                    const sinAsignar = `<option value=""${preselectValue === '' ? ' selected' : ''}>— Sin asignar —</option>`;
+                    return {
+                        idx, row, tipo,
+                        hasRule: !!rule,
+                        ruleName: (rule && rule.accountName) || '',
+                        canCreate,
+                        suggested,
+                        category: suggested,
+                        status: 'pending',   // pending | registering | registered | skipped
+                        op: 0,               // contador de acciones (registrar/deshacer) para ignorar respuestas viejas
+                        movementId: null,
+                        flagged: false
+                    };
+                });
+            }
+
+            // Opciones del selector de cuenta: las mismas en la tabla y en las tarjetas
+            _importOptionsHtml(item, emptyLabel) {
+                const opciones = this.accountingManager.getAccounts().filter(a => a.tipo === item.tipo);
+                if (item.canCreate) {
+                    // Si la cuenta de la regla ya existe (creada desde otra tarjeta), se usa esa
+                    const name = (item.ruleName || '').toLowerCase();
+                    const existing = opciones.find(a => (a.nombre || '').toLowerCase() === name);
+                    if (existing) {
+                        item.canCreate = false;
+                        if (item.category === '__create__') item.category = existing.id;
+                        if (item.suggested === '__create__') item.suggested = existing.id;
+                    }
+                }
+                const sel = String(item.category == null ? '' : item.category);
+                const sinAsignar = `<option value=""${sel === '' ? ' selected' : ''}>${emptyLabel}</option>`;
+                const createOption = item.canCreate
+                    ? `<option value="__create__"${sel === '__create__' ? ' selected' : ''}>➕ Crear: ${this._escapeHtml(item.ruleName)}</option>`
+                    : '';
+                const opts = opciones.map(a =>
+                    `<option value="${a.id}"${String(a.id) === sel ? ' selected' : ''}>${this._escapeHtml(a.nombre)}</option>`).join('');
+                return `${sinAsignar}${createOption}${opts}`;
+            }
+
+            renderImportPreview() {
+                const rows = this._importRows || [];
+                if (!this._importItems || this._importItems.length !== rows.length) {
+                    this._importItems = this._buildImportItems(rows);
+                }
+                const items = this._importItems;
+                const preview = document.getElementById('import-preview');
+                const tbody = document.getElementById('import-preview-body');
+                this._imxWatchViewport();
+
+                // Móvil (≤768px): mazo de tarjetas / lista. La tabla no se usa.
+                if (this._importIsMobile()) {
+                    tbody.innerHTML = '';
+                    preview.classList.add('is-mobile');
+                    preview.classList.remove('hidden');
+                    this._imxRender();
+                    return;
+                }
+                preview.classList.remove('is-mobile');
+                this._imxUnmount(false);
+
+                tbody.innerHTML = items.filter(item => item.status === 'pending').map(item => {
+                    const row = item.row;
+                    const idx = item.idx;
+                    const tipo = item.tipo;
                     const importeFmt = (row.importe < 0 ? '-' : '+') + this.formatCurrency(Math.abs(row.importe));
                     const tipoBadge = tipo === 'gasto'
                         ? '<span class="text-red-600">Gasto</span>'
                         : '<span class="text-green-600">Ingreso</span>';
                     return `
-                        <tr class="border-t border-gray-100" data-rule-name="${this._escapeHtml((rule && rule.accountName) || '')}">
+                        <tr class="border-t border-gray-100" data-rule-name="${this._escapeHtml(item.ruleName)}">
                             <td class="px-3 py-2 whitespace-nowrap">${this._escapeHtml(row.fecha)}</td>
                             <td class="px-3 py-2">${this._escapeHtml(row.descripcion)}</td>
                             <td class="px-3 py-2 text-right whitespace-nowrap ${row.importe < 0 ? 'text-red-600' : 'text-green-600'}">${importeFmt}</td>
                             <td class="px-3 py-2">${tipoBadge}</td>
                             <td class="px-3 py-2">
                                 <select class="import-row-account w-full px-2 py-1 border border-gray-300 rounded text-xs" data-idx="${idx}">
-                                    ${sinAsignar}${createOption}${opts}
+                                    ${this._importOptionsHtml(item, '— Sin asignar —')}
                                 </select>
                             </td>
                         </tr>`;
                 }).join('');
 
-                const matched = rows.filter(r => this.accountingManager.findMatchingRule(r.descripcion)).length;
+                // Lo elegido en la tabla se guarda también en el estado (por si se pasa a móvil)
+                if (!tbody._imxBound) {
+                    tbody._imxBound = true;
+                    tbody.addEventListener('change', (e) => {
+                        const sel = e.target.closest('.import-row-account');
+                        const item = sel && (this._importItems || [])[parseInt(sel.dataset.idx, 10)];
+                        if (item) item.category = sel.value;
+                    });
+                }
+
+                const matched = items.filter(item => item.hasRule).length;
                 document.getElementById('import-preview-summary').textContent =
                     `${rows.length} movimientos · ${matched} con regla`;
-                document.getElementById('import-preview').classList.remove('hidden');
+                preview.classList.remove('hidden');
+            }
+
+            // Registra UN movimiento del extracto. Es la lógica que antes estaba dentro del
+            // bucle de confirmStatementImport; la usan la tabla y la vista móvil.
+            // Devuelve { status: 'imported' | 'skipped' | 'failed', movementId }.
+            async _importRegisterRow(row, categoryValue, ruleName, accountId, createdAccounts) {
+                const tipo = row.importe < 0 ? 'gasto' : 'ingreso';
+                let categoryId = categoryValue;
+                if (!categoryId) return { status: 'skipped' };
+
+                if (categoryId === '__create__') {
+                    const name = ruleName || '';
+                    if (!name) return { status: 'skipped' };
+                    const key = tipo + '|' + name.trim().toLowerCase();
+                    // Reutilizar una cuenta válida ya existente (o creada antes en este lote);
+                    // solo crear UNA vez por nombre+tipo. Nunca duplicar.
+                    let acc = this.accountingManager.getAccounts().find(a =>
+                        a.tipo === tipo && (a.nombre || '').trim().toLowerCase() === name.trim().toLowerCase());
+                    if (!acc && createdAccounts.has(key)) acc = { id: createdAccounts.get(key) };
+                    if (!acc) {
+                        const res = await this.accountingManager.createAccount({ nombre: name, tipo, saldo_inicial: 0 });
+                        if (!res || !res.success) return { status: 'failed' };
+                        acc = res.account;
+                        createdAccounts.set(key, acc.id);
+                    }
+                    categoryId = acc.id;
+                }
+
+                const movementData = {
+                    tipo,
+                    cantidad: Math.abs(row.importe),
+                    descripcion: row.descripcion,
+                    fecha: row.fecha,
+                    cuenta_id: tipo === 'gasto' ? accountId : categoryId,
+                    cuenta_destino_id: tipo === 'gasto' ? categoryId : accountId,
+                    manually_categorized: true,
+                    auto_imported: true
+                };
+                const result = await this.accountingManager.createMovement(movementData);
+                return (result && result.success)
+                    ? { status: 'imported', movementId: result.movement && result.movement.id }
+                    : { status: 'failed' };
             }
 
             async confirmStatementImport() {
@@ -3155,41 +3430,12 @@
                         const idx = parseInt(select.dataset.idx, 10);
                         const row = rows[idx];
                         if (!row) continue;
-                        const tipo = row.importe < 0 ? 'gasto' : 'ingreso';
-                        let categoryId = select.value;
-                        if (!categoryId) { skipped++; continue; }
-
-                        if (categoryId === '__create__') {
-                            const tr = select.closest('tr');
-                            const name = tr ? tr.getAttribute('data-rule-name') : '';
-                            if (!name) { skipped++; continue; }
-                            const key = tipo + '|' + name.trim().toLowerCase();
-                            // Reutilizar una cuenta válida ya existente (o creada antes en este lote);
-                            // solo crear UNA vez por nombre+tipo. Nunca duplicar.
-                            let acc = this.accountingManager.getAccounts().find(a =>
-                                a.tipo === tipo && (a.nombre || '').trim().toLowerCase() === name.trim().toLowerCase());
-                            if (!acc && createdAccounts.has(key)) acc = { id: createdAccounts.get(key) };
-                            if (!acc) {
-                                const res = await this.accountingManager.createAccount({ nombre: name, tipo, saldo_inicial: 0 });
-                                if (!res || !res.success) { failed++; continue; }
-                                acc = res.account;
-                                createdAccounts.set(key, acc.id);
-                            }
-                            categoryId = acc.id;
-                        }
-
-                        const movementData = {
-                            tipo,
-                            cantidad: Math.abs(row.importe),
-                            descripcion: row.descripcion,
-                            fecha: row.fecha,
-                            cuenta_id: tipo === 'gasto' ? accountId : categoryId,
-                            cuenta_destino_id: tipo === 'gasto' ? categoryId : accountId,
-                            manually_categorized: true,
-                            auto_imported: true
-                        };
-                        const result = await this.accountingManager.createMovement(movementData);
-                        if (result && result.success) imported++; else failed++;
+                        const tr = select.closest('tr');
+                        const res = await this._importRegisterRow(row, select.value,
+                            tr ? tr.getAttribute('data-rule-name') : '', accountId, createdAccounts);
+                        if (res.status === 'imported') imported++;
+                        else if (res.status === 'skipped') skipped++;
+                        else failed++;
                     }
 
                     let msg = `Importados ${imported} movimientos`;
@@ -3197,24 +3443,7 @@
                     if (failed) msg += `, ${failed} con error`;
                     this.showToast(msg, imported > 0 ? 'success' : 'error');
 
-                    // Notificación in-app de importación completada (todos los planes)
-                    await this.accountingManager.notifyImportCompleted({
-                        success: true,
-                        importedCount: imported,
-                        duplicatesSkipped: skipped
-                    });
-                    this.updateNotificationsBadge();
-                    const notifSection = document.getElementById('section-notifications');
-                    if (notifSection && !notifSection.classList.contains('hidden')) {
-                        this.renderNotificationsList();
-                    }
-
-                    this.resetStatementImport(true);
-                    if (this.renderMovementsList) this.renderMovementsList();
-                    if (this.updateDashboardMetrics) this.updateDashboardMetrics();
-                    if (this.renderRecentMovements) this.renderRecentMovements();
-                    if (this.renderInsights) this.renderInsights();
-                    this._populateImportAccountSelector();
+                    await this._importAfterRegister(imported, skipped);
                 } catch (err) {
                     console.error('Error importando movimientos:', err);
                     this.showToast('Error al importar: ' + err.message, 'error');
@@ -3224,10 +3453,42 @@
                 }
             }
 
+            // Después de registrar: notificación in-app, reset del importador y refresco de vistas
+            async _importAfterRegister(imported, skipped) {
+                if (this._imx) this._imx.dirty = false;
+                // Notificación in-app de importación completada (todos los planes)
+                await this.accountingManager.notifyImportCompleted({
+                    success: true,
+                    importedCount: imported,
+                    duplicatesSkipped: skipped
+                });
+                this.updateNotificationsBadge();
+                const notifSection = document.getElementById('section-notifications');
+                if (notifSection && !notifSection.classList.contains('hidden')) {
+                    this.renderNotificationsList();
+                }
+
+                this.resetStatementImport(true);
+                this._importRefreshViews();
+            }
+
+            _importRefreshViews() {
+                if (this.renderMovementsList) this.renderMovementsList();
+                if (this.updateDashboardMetrics) this.updateDashboardMetrics();
+                if (this.renderRecentMovements) this.renderRecentMovements();
+                if (this.renderInsights) this.renderInsights();
+                this._populateImportAccountSelector();
+            }
+
             resetStatementImport(clearFile = true) {
                 this._importRows = [];
+                this._importItems = [];
+                this._imxUnmount(true);
                 const preview = document.getElementById('import-preview');
-                if (preview) preview.classList.add('hidden');
+                if (preview) {
+                    preview.classList.add('hidden');
+                    preview.classList.remove('is-mobile');
+                }
                 const body = document.getElementById('import-preview-body');
                 if (body) body.innerHTML = '';
                 if (clearFile) {
@@ -3237,6 +3498,657 @@
                     if (warning) warning.classList.add('hidden');
                 }
             }
+
+            // ===== IMPORTACIÓN DE EXTRACTOS · VISTA MÓVIL (mazo / lista) =====
+            // Solo capa visual para ≤768px. Registra con _importRegisterRow (la misma lógica
+            // que la tabla) y deshace con accountingManager.deleteMovement. Solo se animan
+            // transform y opacity (fluido en Safari iOS). El CSS está en .imx-*.
+
+            _importIsMobile() {
+                return window.matchMedia('(max-width: 768px)').matches;
+            }
+
+            _imxReduced() {
+                return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            }
+
+            // Si cambia el ancho (girar el móvil, redimensionar) con la previsualización abierta,
+            // se vuelve a pintar en el modo que toque sin perder lo ya hecho.
+            _imxWatchViewport() {
+                if (this._imxMq) return;
+                this._imxMq = window.matchMedia('(max-width: 768px)');
+                const onChange = () => {
+                    const preview = document.getElementById('import-preview');
+                    if (this._importItems && this._importItems.length && preview && !preview.classList.contains('hidden')) {
+                        this.renderImportPreview();
+                    }
+                };
+                if (this._imxMq.addEventListener) this._imxMq.addEventListener('change', onChange);
+                else if (this._imxMq.addListener) this._imxMq.addListener(onChange);
+            }
+
+            _imxSession() {
+                if (!this._imx) {
+                    this._imx = {
+                        mode: 'deck',                 // deck | list
+                        queue: Promise.resolve(),     // registros/deshacer en orden, uno tras otro
+                        createdAccounts: new Map(),
+                        dirty: false,                 // hubo cambios en los datos -> refrescar vistas al salir
+                        busy: false,
+                        animating: false,
+                        undo: null
+                    };
+                }
+                return this._imx;
+            }
+
+            _imxLive(st) {
+                return !!(st && this._imx === st && st.stage && st.stage.isConnected);
+            }
+
+            _imxRender() {
+                const root = document.getElementById('import-mobile');
+                if (!root) return;
+                const st = this._imxSession();
+                root.classList.remove('hidden');
+                root.innerHTML = `
+                    <div class="imx-header">
+                        <div class="imx-titles">
+                            <div class="imx-title" data-title="deck">
+                                <strong>Revisa tus movimientos</strong>
+                                <span class="imx-count"></span>
+                            </div>
+                            <div class="imx-title" data-title="list">
+                                <strong class="imx-list-title"></strong>
+                                <span class="imx-list-sub"></span>
+                            </div>
+                            <div class="imx-title" data-title="done">
+                                <strong>Revisión terminada</strong>
+                                <span>Pulsa Terminar para cerrar</span>
+                            </div>
+                        </div>
+                        <button type="button" class="imx-toggle" data-act="toggle"></button>
+                    </div>
+                    <div class="imx-stage"></div>
+                    <div class="imx-summary" hidden></div>
+                    <div class="imx-actions">
+                        <div class="imx-actions-bar">
+                            <div class="imx-actions-group" data-group="deck">
+                                <button type="button" class="imx-btn imx-btn--ghost" data-act="skip">Omitir</button>
+                                <button type="button" class="imx-btn imx-btn--primary" data-act="register">Registrar</button>
+                            </div>
+                            <div class="imx-actions-group" data-group="list">
+                                <button type="button" class="imx-btn imx-btn--primary imx-btn--block" data-act="register-all"></button>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="imx-exit" data-act="exit">Salir de la importación</button>`;
+                st.root = root;
+                st.stage = root.querySelector('.imx-stage');
+                st.animating = false;
+                if (!root._imxBound) {
+                    root._imxBound = true;
+                    root.addEventListener('click', (e) => {
+                        const btn = e.target.closest('[data-act]');
+                        if (!btn || btn.disabled || !root.contains(btn)) return;
+                        this._imxAction(btn.dataset.act);
+                    });
+                    root.addEventListener('change', (e) => {
+                        const sel = e.target.closest('.imx-select');
+                        if (sel) this._imxSelectChange(sel);
+                    });
+                }
+                // Una tarjeta por movimiento pendiente, en orden
+                this._importItems.filter(it => it.status === 'pending')
+                    .forEach(item => st.stage.appendChild(this._imxCreateCard(item)));
+                this._imxLayout({ instant: true });
+                this._imxUpdateChrome();
+                this._imxObserveBar();
+                if (!this._imxReduced()) {
+                    st.stage.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }],
+                        { duration: 300, easing: IMX.ease });
+                }
+            }
+
+            // Saca la vista móvil del DOM. endSession: además termina la sesión (reset).
+            _imxUnmount(endSession = false) {
+                const st = this._imx;
+                const root = document.getElementById('import-mobile');
+                if (root) {
+                    root.classList.add('hidden');
+                    root.classList.remove('is-list', 'bar-floating');
+                    root.innerHTML = '';
+                }
+                const toast = document.getElementById('imx-undo');
+                if (toast) toast.classList.remove('is-visible');
+                if (!st) return;
+                clearTimeout(st.undoTimer);
+                clearTimeout(st.summaryTimer);
+                st.undo = null;
+                st.stage = null;
+                if (st.io) { st.io.disconnect(); st.io = null; }
+                if (endSession) {
+                    // Si quedaba algo en cola, refrescar las vistas cuando termine
+                    st.queue.then(() => {
+                        if (st.dirty) { st.dirty = false; this._importRefreshViews(); }
+                    });
+                    this._imx = null;
+                }
+            }
+
+            _imxCreateCard(item) {
+                const row = item.row;
+                const el = document.createElement('div');
+                el.className = 'imx-card';
+                el.dataset.idx = String(item.idx);
+                const importe = (row.importe < 0 ? '-' : '+') + this.formatCurrency(Math.abs(row.importe));
+                el.innerHTML = `
+                    <div class="imx-card-top">
+                        <span class="imx-date">${this._escapeHtml(row.fecha)}</span>
+                        <span class="imx-amount ${row.importe < 0 ? 'is-expense' : 'is-income'}">${importe}</span>
+                    </div>
+                    <div class="imx-concept">${this._escapeHtml(row.descripcion)}</div>
+                    <label class="imx-account">
+                        <span class="imx-account-head">
+                            <span>Cuenta de ${item.tipo}</span>
+                            <span class="imx-tag"></span>
+                        </span>
+                        <select class="imx-select" data-idx="${item.idx}">${this._importOptionsHtml(item, 'Sin cuenta')}</select>
+                    </label>`;
+                this._imxCardState(el, item);
+                return el;
+            }
+
+            // Etiqueta "Sugerida" / "Sin cuenta" y marca de "asígnale una cuenta"
+            _imxCardState(el, item) {
+                const missing = !item.category;
+                el.classList.toggle('is-flagged', missing && item.flagged);
+                const tag = el.querySelector('.imx-tag');
+                if (!tag) return;
+                const suggested = !missing && item.suggested !== '' && String(item.category) === String(item.suggested);
+                tag.textContent = missing ? 'Sin cuenta' : (suggested ? 'Sugerida' : '');
+                tag.className = 'imx-tag' + (missing ? ' is-missing' : (suggested ? ' is-suggested' : ''));
+            }
+
+            _imxCards() {
+                const st = this._imx;
+                return st && st.stage ? Array.from(st.stage.querySelectorAll('.imx-card:not(.is-out)')) : [];
+            }
+
+            _imxCardFor(item) {
+                return this._imxCards().find(el => Number(el.dataset.idx) === item.idx) || null;
+            }
+
+            // Profundidad de cada tarjeta en el mazo (0-3 visibles, h = oculta) y quién es
+            // interactiva. En lista todas son filas normales.
+            _imxLayout({ instant = false } = {}) {
+                const st = this._imx;
+                const cards = this._imxCards();
+                const deck = st.mode === 'deck';
+                st.stage.classList.toggle('is-deck', deck);
+                st.stage.classList.toggle('is-list', !deck);
+                if (instant) cards.forEach(el => el.classList.add('no-anim'));
+                cards.forEach((el, i) => {
+                    if (deck) {
+                        el.dataset.depth = i < 4 ? String(i) : 'h';
+                        el.toggleAttribute('inert', i !== 0);
+                        if (i === 0) el.removeAttribute('aria-hidden'); else el.setAttribute('aria-hidden', 'true');
+                    } else {
+                        el.removeAttribute('data-depth');
+                        el.removeAttribute('inert');
+                        el.removeAttribute('aria-hidden');
+                    }
+                });
+                if (instant) {
+                    void st.stage.offsetWidth;
+                    cards.forEach(el => el.classList.remove('no-anim'));
+                }
+            }
+
+            // Cabecera (título con fundido cruzado, contador), botones y resumen final
+            _imxUpdateChrome() {
+                const st = this._imx;
+                if (!this._imxLive(st)) return;
+                const root = st.root;
+                const items = this._importItems;
+                const pending = items.filter(it => it.status === 'pending');
+                const done = pending.length === 0;
+                const total = items.length;
+                const resolved = total - pending.length;
+                const ready = pending.filter(it => it.category).length;
+                const view = done ? 'done' : st.mode;
+
+                root.classList.toggle('is-list', !done && st.mode === 'list');
+                root.querySelectorAll('.imx-title').forEach(t => {
+                    const on = t.dataset.title === view;
+                    t.classList.toggle('is-active', on);
+                    t.setAttribute('aria-hidden', on ? 'false' : 'true');
+                });
+                root.querySelector('.imx-count').textContent = `${Math.min(resolved + 1, total)} de ${total}`;
+                root.querySelector('.imx-list-title').textContent = `Pendientes (${pending.length})`;
+                root.querySelector('.imx-list-sub').textContent = `${ready} con cuenta · ${pending.length - ready} sin cuenta`;
+
+                const toggle = root.querySelector('.imx-toggle');
+                toggle.textContent = st.mode === 'list' ? 'Ver uno a uno' : 'Ver todos';
+                toggle.hidden = done || (st.mode === 'deck' && pending.length < 2);
+
+                root.querySelectorAll('.imx-actions-group').forEach(g => {
+                    const on = !done && g.dataset.group === st.mode;
+                    g.classList.toggle('is-active', on);
+                    g.toggleAttribute('inert', !on);
+                    g.setAttribute('aria-hidden', on ? 'false' : 'true');
+                });
+                const front = pending[0];
+                root.querySelector('[data-act="register"]').disabled = !front || !front.category || st.busy;
+                root.querySelector('[data-act="skip"]').disabled = !front || st.busy;
+                const allBtn = root.querySelector('[data-act="register-all"]');
+                allBtn.textContent = `Registrar todos (${ready})`;
+                allBtn.disabled = ready === 0 || st.busy;
+                root.querySelector('.imx-actions').hidden = done;
+                root.querySelector('.imx-exit').hidden = done;
+
+                clearTimeout(st.summaryTimer);
+                if (done) {
+                    // Deja terminar la salida de la última tarjeta antes de enseñar el resumen
+                    st.summaryTimer = setTimeout(() => { if (this._imxLive(st)) this._imxSummary(true); }, IMX.out + 40);
+                } else {
+                    this._imxSummary(false);
+                }
+            }
+
+            _imxSummary(show) {
+                const st = this._imx;
+                const box = st.root.querySelector('.imx-summary');
+                if (!show) {
+                    box.hidden = true;
+                    st.stage.hidden = false;
+                    return;
+                }
+                const items = this._importItems;
+                const registered = items.filter(it => it.status === 'registered' || it.status === 'registering').length;
+                const skipped = items.filter(it => it.status === 'skipped').length;
+                box.innerHTML = `
+                    <div class="imx-summary-icon" aria-hidden="true"><i class="fas fa-check"></i></div>
+                    <strong class="imx-summary-title">Has revisado ${items.length === 1 ? 'el movimiento' : `los ${items.length} movimientos`}</strong>
+                    <div class="imx-summary-stats">
+                        <div><b>${registered}</b><span>${registered === 1 ? 'registrado' : 'registrados'}</span></div>
+                        <div><b>${skipped}</b><span>${skipped === 1 ? 'omitido' : 'omitidos'}</span></div>
+                    </div>
+                    <button type="button" class="imx-btn imx-btn--primary imx-btn--block" data-act="finish">Terminar</button>`;
+                const wasHidden = box.hidden;
+                st.stage.hidden = true;
+                box.hidden = false;
+                if (wasHidden) {
+                    box.animate(this._imxReduced()
+                        ? [{ opacity: 0 }, { opacity: 1 }]
+                        : [{ opacity: 0, transform: 'translateY(12px) scale(0.98)' }, { opacity: 1, transform: 'none' }],
+                        { duration: IMX.out, easing: IMX.ease });
+                }
+            }
+
+            _imxAction(act) {
+                const st = this._imx;
+                if (!this._imxLive(st) || st.animating) return;
+                if (act === 'skip') this._imxResolveFront('skip');
+                else if (act === 'register') this._imxResolveFront('register');
+                else if (act === 'toggle') this._imxSetMode(st.mode === 'deck' ? 'list' : 'deck');
+                else if (act === 'register-all') this._imxRegisterAll();
+                else if (act === 'exit') this._imxExit(true);
+                else if (act === 'finish') this._imxExit(false);
+            }
+
+            _imxSelectChange(sel) {
+                const item = (this._importItems || [])[parseInt(sel.dataset.idx, 10)];
+                if (!item) return;
+                item.category = sel.value;
+                if (item.category) item.flagged = false;
+                const card = sel.closest('.imx-card');
+                if (card) this._imxCardState(card, item);
+                this._imxUpdateChrome();
+            }
+
+            // Mazo: Omitir / Registrar la tarjeta de delante. Sale bajando, encogiéndose y
+            // desvaneciéndose; las de detrás avanzan una posición con la misma curva.
+            _imxResolveFront(action) {
+                const st = this._imx;
+                const item = this._importItems.find(it => it.status === 'pending');
+                if (!item) return;
+                let accountId = '';
+                if (action === 'register') {
+                    if (!item.category) return;
+                    accountId = document.getElementById('import-bank-account').value;
+                    if (!accountId) { this.showToast('Selecciona la cuenta bancaria del extracto', 'error'); return; }
+                    item.op += 1;
+                    item.status = 'registering';
+                } else {
+                    item.status = 'skipped';
+                }
+                this._imxExitCard(this._imxCardFor(item));
+                this._imxLayout();
+                this._imxUpdateChrome();
+                if (action === 'skip') {
+                    this._imxShowUndo('Movimiento omitido', [item]);
+                } else {
+                    this._imxShowUndo('Movimiento registrado', [item]);
+                    this._imxRegisterItems([item], accountId);
+                }
+            }
+
+            _imxExitCard(card) {
+                if (!card) return;
+                card.classList.add('is-out');
+                card.removeAttribute('data-depth');
+                card.setAttribute('inert', '');
+                card.setAttribute('aria-hidden', 'true');
+                setTimeout(() => card.remove(), IMX.out + 60);
+            }
+
+            _imxEnqueue(st, fn) {
+                st.queue = st.queue.then(fn).catch(err => {
+                    console.error('Importación (móvil):', err);
+                    this.showToast('Error al registrar: ' + err.message, 'error');
+                });
+                return st.queue;
+            }
+
+            // Registro real, en cola (uno detrás de otro). La tarjeta ya salió (optimista):
+            // si falla, vuelve al mazo/lista y se avisa.
+            _imxRegisterItems(items, accountId) {
+                const st = this._imx;
+                const ops = items.map(it => it.op);
+                this._imxEnqueue(st, async () => {
+                    const failed = [];
+                    for (let i = 0; i < items.length; i++) {
+                        const item = items[i];
+                        let res;
+                        try {
+                            res = await this._importRegisterRow(item.row, item.category, item.ruleName, accountId, st.createdAccounts);
+                        } catch (err) {
+                            console.error('Error registrando movimiento:', err);
+                            res = { status: 'failed' };
+                        }
+                        const current = item.op === ops[i]; // nadie lo ha deshecho/rehecho entretanto
+                        if (res.status === 'imported') {
+                            item.movementId = res.movementId; // aunque se haya deshecho: el borrado en cola lo usa
+                            st.dirty = true;
+                            if (current) item.status = 'registered';
+                        } else if (current) {
+                            item.status = 'pending';
+                            failed.push(item);
+                        }
+                    }
+                    if (!failed.length || this._imx !== st) return;
+                    if (this._imxLive(st)) this._imxRestore(failed);
+                    else if (!this._importIsMobile()) this.renderImportPreview();
+                    this.showToast(failed.length === 1
+                        ? 'No se pudo registrar el movimiento. Inténtalo de nuevo.'
+                        : `No se pudieron registrar ${failed.length} movimientos. Inténtalo de nuevo.`, 'error');
+                });
+            }
+
+            // Toast "Deshacer" (~5s). Solo se puede deshacer la última acción.
+            _imxShowUndo(message, items) {
+                const st = this._imx;
+                st.undo = { items };
+                let el = document.getElementById('imx-undo');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'imx-undo';
+                    el.className = 'imx-undo';
+                    el.setAttribute('role', 'status');
+                    el.setAttribute('aria-live', 'polite');
+                    el.innerHTML = '<span class="imx-undo-msg"></span><button type="button" class="imx-undo-btn">Deshacer</button>';
+                    el.querySelector('.imx-undo-btn').addEventListener('click', () => this._imxUndo());
+                    document.body.appendChild(el);
+                }
+                el.querySelector('.imx-undo-msg').textContent = message;
+                el.classList.add('is-visible');
+                clearTimeout(st.undoTimer);
+                st.undoTimer = setTimeout(() => this._imxHideUndo(), IMX.undoMs);
+            }
+
+            _imxHideUndo() {
+                const el = document.getElementById('imx-undo');
+                if (el) el.classList.remove('is-visible');
+                if (this._imx) {
+                    clearTimeout(this._imx.undoTimer);
+                    this._imx.undo = null;
+                }
+            }
+
+            _imxUndo() {
+                const st = this._imx;
+                if (!st || !st.undo) return;
+                const items = st.undo.items;
+                this._imxHideUndo();
+                const back = [];
+                items.forEach(item => {
+                    if (item.status === 'skipped') {
+                        item.status = 'pending';
+                        back.push(item);
+                    } else if (item.status === 'registering' || item.status === 'registered') {
+                        item.op += 1;
+                        item.status = 'pending';
+                        back.push(item);
+                        // Borra el movimiento cuando el registro (en cola) haya terminado
+                        this._imxEnqueue(st, async () => {
+                            if (!item.movementId) return;
+                            const ok = await this.accountingManager.deleteMovement(item.movementId);
+                            if (ok) { item.movementId = null; st.dirty = true; }
+                        });
+                    }
+                });
+                if (back.length && this._imxLive(st)) this._imxRestore(back);
+            }
+
+            // Devuelve tarjetas (deshacer o error). En el mazo vuelven delante subiendo
+            // desde abajo (inverso de la salida); en la lista entran con FLIP.
+            _imxRestore(items) {
+                const st = this._imx;
+                clearTimeout(st.summaryTimer);
+                const pending = this._importItems.filter(it => it.status === 'pending');
+                const existing = new Map(this._imxCards().map(el => [Number(el.dataset.idx), el]));
+                const fresh = [];
+                const mutate = () => {
+                    let prev = null;
+                    pending.forEach(item => {
+                        let el = existing.get(item.idx);
+                        if (!el) {
+                            el = this._imxCreateCard(item);
+                            fresh.push(el);
+                        } else {
+                            this._imxCardState(el, item);
+                        }
+                        const ref = prev ? prev.nextElementSibling : st.stage.firstElementChild;
+                        if (el !== ref) st.stage.insertBefore(el, ref);
+                        prev = el;
+                    });
+                };
+                this._imxSummary(false);
+                if (st.mode === 'deck') {
+                    mutate();
+                    fresh.forEach(el => el.classList.add('no-anim', 'is-in'));
+                    this._imxLayout();
+                    void st.stage.offsetWidth;
+                    fresh.forEach(el => el.classList.remove('no-anim', 'is-in'));
+                } else {
+                    this._imxFlipList(mutate, fresh);
+                }
+                this._imxUpdateChrome();
+            }
+
+            // FLIP dentro de la lista: mide, aplica el cambio, vuelve a medir y anima desde la
+            // posición anterior. Solo las primeras filas (IMX.maxFlip); el resto, sin animar.
+            _imxFlipList(mutate, fresh = []) {
+                const reduce = this._imxReduced();
+                const before = new Map(this._imxCards().slice(0, IMX.maxFlip * 2)
+                    .map(el => [el, el.getBoundingClientRect().top]));
+                mutate();
+                this._imxLayout();
+                this._imxCards().slice(0, IMX.maxFlip).forEach((el, i) => {
+                    if (fresh.includes(el)) {
+                        el.animate(reduce
+                            ? [{ opacity: 0 }, { opacity: 1 }]
+                            : [{ opacity: 0, transform: 'scale(0.96)' }, { opacity: 1, transform: 'none' }],
+                            { duration: reduce ? 200 : IMX.flip, delay: reduce ? 0 : i * IMX.stagger, easing: IMX.ease, fill: 'backwards' });
+                    } else if (!reduce && before.has(el)) {
+                        const dy = before.get(el) - el.getBoundingClientRect().top;
+                        if (Math.abs(dy) > 0.5) {
+                            el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }],
+                                { duration: IMX.flip, easing: IMX.ease });
+                        }
+                    }
+                });
+            }
+
+            // "Ver todos" / "Ver uno a uno": el mazo se despliega en lista (y vuelve) con FLIP.
+            // Se mide dónde está cada tarjeta, se cambia el layout, se mide dónde acaba y se
+            // anima transform/opacity entre ambas, en cascada de 40ms (solo las primeras 10).
+            _imxSetMode(mode) {
+                const st = this._imx;
+                if (st.mode === mode) return;
+                const reduce = this._imxReduced();
+                const stage = st.stage;
+                // Al recoger la lista la página se acorta: primero se vuelve al inicio del bloque
+                if (mode === 'deck' && st.root.getBoundingClientRect().top < 0) {
+                    st.root.scrollIntoView({ block: 'start' });
+                }
+                const anim = this._imxCards().slice(0, IMX.maxFlip);
+                const first = anim.map(el => ({
+                    rect: el.getBoundingClientRect(),
+                    opacity: parseFloat(getComputedStyle(el).opacity)
+                }));
+
+                stage.classList.add('is-switching'); // sin transiciones CSS mientras dura el FLIP
+                st.mode = mode;
+                this._imxLayout();
+                this._imxUpdateChrome();
+
+                if (reduce) {
+                    stage.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease' });
+                    void stage.offsetWidth;
+                    stage.classList.remove('is-switching');
+                    return;
+                }
+
+                st.animating = true;
+                const plays = anim.map((el, i) => {
+                    const end = el.getBoundingClientRect();
+                    const endOpacity = parseFloat(getComputedStyle(el).opacity);
+                    // Caja sin transform: base común para expresar inicio y fin con origen 0 0
+                    const prev = el.style.transform;
+                    el.style.transform = 'none';
+                    const box = el.getBoundingClientRect();
+                    el.style.transform = prev;
+                    const toTransform = (r) =>
+                        `translate(${r.left - box.left}px, ${r.top - box.top}px) scale(${box.width ? r.width / box.width : 1})`;
+                    return el.animate([
+                        { transformOrigin: '0 0', transform: toTransform(first[i].rect), opacity: first[i].opacity, visibility: 'visible' },
+                        { transformOrigin: '0 0', transform: toTransform(end), opacity: endOpacity, visibility: 'visible' }
+                    ], { duration: IMX.flip, delay: i * IMX.stagger, easing: IMX.ease, fill: 'backwards' })
+                        .finished.catch(() => {});
+                });
+                Promise.all(plays).then(() => {
+                    stage.classList.remove('is-switching');
+                    st.animating = false;
+                });
+            }
+
+            // Lista: "Registrar todos (N)" (N = pendientes con cuenta). Pide confirmación y
+            // ofrece Deshacer. Los que no tienen cuenta se quedan marcados para asignarla.
+            _imxRegisterAll() {
+                const pending = this._importItems.filter(it => it.status === 'pending');
+                const ready = pending.filter(it => it.category);
+                const missing = pending.filter(it => !it.category);
+                if (!ready.length) return;
+                const accountId = document.getElementById('import-bank-account').value;
+                if (!accountId) { this.showToast('Selecciona la cuenta bancaria del extracto', 'error'); return; }
+                let msg = ready.length === 1 ? '¿Registrar 1 movimiento?' : `¿Registrar ${ready.length} movimientos?`;
+                if (missing.length) {
+                    msg += missing.length === 1
+                        ? '\n\n1 movimiento sin cuenta se quedará pendiente para que le asignes una.'
+                        : `\n\n${missing.length} movimientos sin cuenta se quedarán pendientes para que les asignes una.`;
+                }
+                if (!confirm(msg)) return;
+
+                ready.forEach(it => { it.op += 1; it.status = 'registering'; });
+                missing.forEach(it => { it.flagged = true; });
+                this._imxCards().forEach(el => {
+                    const it = this._importItems[Number(el.dataset.idx)];
+                    if (it && it.status === 'pending') this._imxCardState(el, it);
+                });
+                this._imxListRemove(ready);
+                this._imxUpdateChrome();
+                this._imxShowUndo(ready.length === 1 ? '1 movimiento registrado' : `${ready.length} movimientos registrados`, ready);
+                this._imxRegisterItems(ready, accountId);
+            }
+
+            // Lista: las filas registradas se desvanecen y el resto sube a su sitio (FLIP)
+            _imxListRemove(items) {
+                const st = this._imx;
+                const reduce = this._imxReduced();
+                const set = new Set(items.map(it => it.idx));
+                const leaving = this._imxCards().filter(el => set.has(Number(el.dataset.idx)));
+                if (!leaving.length) return;
+                st.animating = true;
+                const anims = leaving.slice(0, IMX.maxFlip).map((el, i) => el.animate(reduce
+                    ? [{ opacity: 1 }, { opacity: 0 }]
+                    : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.96)' }],
+                    { duration: 200, delay: reduce ? 0 : Math.min(i, 5) * 20, easing: IMX.ease, fill: 'forwards' })
+                    .finished.catch(() => {}));
+                Promise.all(anims).then(() => {
+                    st.animating = false;
+                    if (!this._imxLive(st)) return;
+                    this._imxFlipList(() => leaving.forEach(el => el.remove()));
+                    this._imxUpdateChrome();
+                });
+            }
+
+            // Lista larga: la barra de "Registrar todos" flota abajo mientras se ve la lista
+            // (sticky no sirve aquí: hay contenedores con overflow:hidden por encima).
+            _imxObserveBar() {
+                const st = this._imx;
+                if (st.io) st.io.disconnect();
+                if (!('IntersectionObserver' in window)) return;
+                const actions = st.root.querySelector('.imx-actions');
+                const seen = { stage: false, actions: true };
+                st.io = new IntersectionObserver((entries) => {
+                    entries.forEach(e => {
+                        if (e.target === actions) seen.actions = e.isIntersecting;
+                        else seen.stage = e.isIntersecting;
+                    });
+                    st.root.classList.toggle('bar-floating', seen.stage && !seen.actions);
+                });
+                st.io.observe(st.stage);
+                st.io.observe(actions);
+            }
+
+            // Salir (a mitad) o Terminar (desde el resumen). Lo registrado se queda.
+            async _imxExit(ask) {
+                const st = this._imx;
+                const pending = this._importItems.filter(it => it.status === 'pending').length;
+                if (ask && pending) {
+                    const msg = (pending === 1 ? 'Queda 1 movimiento sin revisar.' : `Quedan ${pending} movimientos sin revisar.`) +
+                        ' ¿Salir de la importación?\n\nLo que ya has registrado se mantiene.';
+                    if (!confirm(msg)) return;
+                }
+                this._imxHideUndo();
+                st.busy = true;
+                this._imxUpdateChrome();
+                await st.queue; // que terminen los registros/deshacer pendientes
+                if (this._imx !== st) return;
+                const registered = this._importItems.filter(it => it.status === 'registered').length;
+                const skipped = this._importItems.filter(it => it.status === 'skipped').length;
+                if (registered > 0) {
+                    let msg = `Importados ${registered} movimientos`;
+                    if (skipped) msg += `, ${skipped} omitidos`;
+                    this.showToast(msg, 'success');
+                    await this._importAfterRegister(registered, skipped);
+                } else {
+                    this.resetStatementImport(true);
+                }
+            }
+            // ===== FIN IMPORTACIÓN MÓVIL =====
 
             // --- Parsers de extracto ---
 
