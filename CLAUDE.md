@@ -63,7 +63,7 @@ Regla general: haz tú todo lo que puedas. Si no puedes, dame los pasos exactos 
 - **Tabla nueva**: añádela a `db/schema.sql` con `IF NOT EXISTS` y también al borrado en cascada de la cuenta de usuario (`DELETE ... WHERE user_id=?` en el `batch` de `worker.js`, ~L745).
 - **Cambios en precios de Stripe**: los price IDs están duplicados en `js/stripe-checkout.js` y en `api/worker.js` (create-checkout). Cambia ambos a la vez.
 - **Lógica premium**: comprueba con `Auth.isPremium()` en el cliente, pero la fuente de verdad es el campo `plan` del usuario en D1, que actualiza el webhook de Stripe. Nunca des acceso premium solo desde el frontend.
-- **Si cambias archivos que cachea el service worker**, sube `CACHE_NAME` en `/sw.js` (ahora `financeflow-v4`).
+- **Si cambias archivos que cachea el service worker**, sube `CACHE_NAME` en `/sw.js` (ahora `financeflow-v5`).
 - **Contabilidad**: cada movimiento debe cuadrar (debe = haber). Si tocas cálculos de saldos, balance o 50/30/20, explícame el impacto con un ejemplo numérico.
 - **Dark mode**: usa variables CSS (`var(--border-color)`, etc.) y no colores fijos.
 - **Secrets del Worker** (solo con `wrangler secret put`): `JWT_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`, `GOCARDLESS_SECRET_ID`, `GOCARDLESS_SECRET_KEY`, `VAPID_PRIVATE_KEY`. Las claves públicas (Stripe `pk_`, VAPID pública, Google Client ID) sí pueden ir en `config.js` / `wrangler.toml`.

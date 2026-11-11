@@ -5,39 +5,27 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#3B82F6",
+  "theme_color": "#0158C9",
   "orientation": "portrait-primary",
   "scope": "/",
   "icons": [
     {
-      "src": "./icons/icon-192.png",
+      "src": "./brand/web/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./icons/icon-192-maskable.png", 
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "./icons/icon-512.png",
-      "sizes": "512x512", 
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "./icons/icon-512-maskable.png",
+      "src": "./brand/web/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png", 
-      "purpose": "maskable"
-    },
-    {
-      "src": "./icons/apple-touch-icon.png",
-      "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "./brand/web/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

@@ -2250,10 +2250,9 @@ function welcomeEmailHTML() {
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
       <tr><td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-          <tr><td style="background:#0158C9;padding:24px 32px;">
+          <tr><td style="background:#0158C9;padding:8px 14px;">
             <table cellpadding="0" cellspacing="0"><tr>
-              <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
-              <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+              <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/brand/logo/financeflow-logo-blanco-800.png" width="220" height="85" alt="FinanceFlow by Contabilidad Personal" style="display:block;border:0;color:#ffffff;font-size:20px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;"></td>
             </tr></table>
           </td></tr>
           <tr><td style="padding:32px;">
@@ -2304,10 +2303,9 @@ function resetPasswordEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
-    <tr><td style="background:#0158C9;padding:24px 32px;">
+    <tr><td style="background:#0158C9;padding:8px 14px;">
       <table cellpadding="0" cellspacing="0"><tr>
-        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
-        <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/brand/logo/financeflow-logo-blanco-800.png" width="220" height="85" alt="FinanceFlow by Contabilidad Personal" style="display:block;border:0;color:#ffffff;font-size:20px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;"></td>
       </tr></table>
     </td></tr>
     <tr><td style="padding:32px;">
@@ -2324,10 +2322,9 @@ function verifyCodeEmailHTML(code) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
-    <tr><td style="background:#0158C9;padding:24px 32px;">
+    <tr><td style="background:#0158C9;padding:8px 14px;">
       <table cellpadding="0" cellspacing="0"><tr>
-        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
-        <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/brand/logo/financeflow-logo-blanco-800.png" width="220" height="85" alt="FinanceFlow by Contabilidad Personal" style="display:block;border:0;color:#ffffff;font-size:20px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;"></td>
       </tr></table>
     </td></tr>
     <tr><td style="padding:32px;">
@@ -2344,10 +2341,9 @@ function feedbackRequestEmailHTML(link) {
   return `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;"><tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-    <tr><td style="background:#0158C9;padding:24px 32px;">
+    <tr><td style="background:#0158C9;padding:8px 14px;">
       <table cellpadding="0" cellspacing="0"><tr>
-        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/logo.png" width="36" height="36" alt="Finance Flow" style="display:block;border-radius:8px;"></td>
-        <td style="vertical-align:middle;padding-left:12px;"><h1 style="margin:0;color:#ffffff;font-size:22px;">Finance Flow</h1></td>
+        <td style="vertical-align:middle;"><img src="https://app.contabilidadpersonal.com/public/brand/logo/financeflow-logo-blanco-800.png" width="220" height="85" alt="FinanceFlow by Contabilidad Personal" style="display:block;border:0;color:#ffffff;font-size:20px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;"></td>
       </tr></table>
     </td></tr>
     <tr><td style="padding:32px;">

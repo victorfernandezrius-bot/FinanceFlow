@@ -8,9 +8,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FinanceFlow">
     <link rel="manifest" href="./public/manifest.json">
-    <link rel="apple-touch-icon" href="./public/logo.png">
-    <link rel="icon" type="image/png" href="./public/logo.png">
-    <link rel="shortcut icon" type="image/png" href="./public/logo.png">
+    <link rel="icon" href="./public/brand/web/favicon.ico" sizes="32x32">
+    <link rel="icon" href="./public/brand/web/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./public/brand/web/apple-touch-icon.png">
     <title>Dashboard - FinanceFlow</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -890,6 +890,10 @@
 /* Forzar texto legible SOLO en el modal de planes, sin afectar al resto del dashboard */
         #plan-selector-modal h3 { color: #111827 !important; }
         #plan-selector-modal p { color: #374151 !important; }
+/* Logo FinanceFlow (kit de marca en public/brand): versión color en modo claro
+   y blanca en modo oscuro. Los SVG ya traen su zona de protección. */
+        html.dark .ff-logo-light { display: none !important; }
+        html:not(.dark) .ff-logo-dark { display: none !important; }
     </style>
 </head>
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
@@ -904,8 +908,12 @@
                     </button>
                     <div class="flex-shrink-0 flex items-center" style="margin-left: var(--space-2);">
                         <a href="javascript:void(0)" onclick="dashboard.handleNavigation('dashboard')" class="flex items-center" style="text-decoration: none; cursor: pointer;" title="Ir al Dashboard">
-                            <img src="./public/logo.png" alt="FinanceFlow Logo" style="height: 1.75rem; margin-right: var(--space-2); flex-shrink: 0;">
-                            <h1 class="heading-2 hidden xs:block sm:block" style="color: var(--brand-primary); margin-bottom: 0; white-space: nowrap;">FinanceFlow</h1>
+                            <img src="./public/brand/simbolo/nucleo-color.svg" alt="FinanceFlow" class="ff-logo-light sm:hidden" style="height: 2rem; width: auto; flex-shrink: 0;">
+                            <img src="./public/brand/simbolo/nucleo-blanco.svg" alt="FinanceFlow" class="ff-logo-dark sm:hidden" style="height: 2rem; width: auto; flex-shrink: 0;">
+                            <h1 class="hidden sm:block" style="margin: 0 0 0 -0.5rem;">
+                                <img src="./public/brand/logo/financeflow-logo-sin-endoso-color.svg" alt="FinanceFlow" class="ff-logo-light" style="height: 3rem; width: auto; display: block;">
+                                <img src="./public/brand/logo/financeflow-logo-sin-endoso-blanco.svg" alt="FinanceFlow" class="ff-logo-dark" style="height: 3rem; width: auto; display: block;">
+                            </h1>
                         </a>
                     </div>
                 </div>
@@ -1009,9 +1017,11 @@
         <div id="sidebar" class="sidebar-behavior shadow-lg shrink-0" style="background-color: var(--bg-primary); border-right: 1px solid var(--border-color);">
             <div class="flex flex-col h-full">
                 <!-- Logo en sidebar móvil -->
-                <div class="flex items-center lg:hidden" style="padding: var(--space-4); border-bottom: 1px solid var(--border-color);">
-                    <img src="./public/logo.png" alt="FinanceFlow Logo" style="height: 2rem; margin-right: var(--space-3);">
-                    <h2 class="heading-3" style="color: var(--brand-primary); margin-bottom: 0;">FinanceFlow</h2>
+                <div class="flex items-center lg:hidden" style="padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border-color);">
+                    <h2 style="margin: 0 0 0 -0.69rem;">
+                        <img src="./public/brand/logo/financeflow-logo-sin-endoso-color.svg" alt="FinanceFlow" class="ff-logo-light" style="height: 3rem; width: auto; display: block;">
+                        <img src="./public/brand/logo/financeflow-logo-sin-endoso-blanco.svg" alt="FinanceFlow" class="ff-logo-dark" style="height: 3rem; width: auto; display: block;">
+                    </h2>
                 </div>
                 
                 <!-- Navegación -->
@@ -11288,7 +11298,8 @@
                 <!-- Tutorial Header -->
                 <div class="flex items-center justify-between" style="padding: var(--space-6); border-bottom: 1px solid var(--border-color);">
                     <div class="flex items-center" style="gap: var(--space-3);">
-                        <img src="./public/logo.png" alt="FinanceFlow Logo" style="height: 2rem;">
+                        <img src="./public/brand/simbolo/nucleo-color.svg" alt="" class="ff-logo-light" style="height: 2rem; width: auto;">
+                        <img src="./public/brand/simbolo/nucleo-blanco.svg" alt="" class="ff-logo-dark" style="height: 2rem; width: auto;">
                         <h2 class="heading-2" style="margin-bottom: 0;">Tutorial FinanceFlow</h2>
                     </div>
                     <button id="tutorial-close" style="color: var(--text-secondary);" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
@@ -11302,7 +11313,7 @@
                     <!-- Slide 1: Bienvenida -->
                     <div class="tutorial-slide active" data-slide="1">
                         <div class="text-center" style="margin-bottom: var(--space-6);">
-                            <img src="./public/logo.png" alt="FinanceFlow" style="height: 4rem; margin: 0 auto var(--space-4); display: block;">
+                            <img src="./public/brand/icono-app/icono.svg" alt="FinanceFlow" style="height: 4rem; width: 4rem; margin: 0 auto var(--space-4); display: block;">
                             <h3 class="heading-2">¡Bienvenido a FinanceFlow!</h3>
                             <p class="body-text" style="color: var(--text-secondary); margin-bottom: var(--space-4);">
                                 Tu herramienta de contabilidad personal profesional. En menos de 5 minutos aprenderás a controlar tus finanzas con precisión.
@@ -11488,7 +11499,7 @@
                     <!-- Slide 7: Todo listo -->
                     <div class="tutorial-slide hidden" data-slide="7">
                         <div class="text-center" style="padding: var(--space-4) 0;">
-                            <img src="./public/logo.png" alt="FinanceFlow" style="height: 3.5rem; margin: 0 auto var(--space-4); display: block;">
+                            <img src="./public/brand/icono-app/icono.svg" alt="FinanceFlow" style="height: 3.5rem; width: 3.5rem; margin: 0 auto var(--space-4); display: block;">
                             <h3 class="heading-2">¡Todo listo para empezar!</h3>
                             <p class="body-text" style="color: var(--text-secondary); margin-bottom: var(--space-6);">Sigue este orden recomendado para configurar tu contabilidad desde cero:</p>
                             <div style="display: flex; flex-direction: column; gap: var(--space-3); text-align: left; max-width: 420px; margin: 0 auto;">

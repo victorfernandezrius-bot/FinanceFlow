@@ -231,11 +231,11 @@ export function loadExcelJS() {
     return excelJSPromise;
 }
 
-// Logo de FinanceFlow (el mismo del header de la web) en base64, con su tamaño real
+// Símbolo de FinanceFlow (kit de marca, public/brand) en base64, con su tamaño real
 let logoPromise = null;
 export function loadLogo() {
     if (logoPromise) return logoPromise;
-    const url = new URL('../public/logo.png', import.meta.url).href;
+    const url = new URL('../public/brand/simbolo/nucleo-color-512.png', import.meta.url).href;
     logoPromise = fetch(url)
         .then(res => (res.ok ? res.arrayBuffer() : null))
         .then(buf => (buf ? logoFromBuffer(buf) : null))

@@ -9,9 +9,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="FinanceFlow">
     <link rel="manifest" href="./public/manifest.json">
-    <link rel="apple-touch-icon" href="./public/logo.png">
-    <link rel="icon" type="image/png" href="./public/logo.png">
-    <link rel="shortcut icon" type="image/png" href="./public/logo.png">
+    <link rel="icon" href="./public/brand/web/favicon.ico" sizes="32x32">
+    <link rel="icon" href="./public/brand/web/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./public/brand/web/apple-touch-icon.png">
+    <meta property="og:image" content="https://app.contabilidadpersonal.com/public/brand/web/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
     <title>FinanceFlow — Contabilidad personal real, gratis para siempre</title>
     <script src="https://js.stripe.com/v3/"></script>
     <script src="./public/config.js"></script>
@@ -572,12 +576,13 @@ table { border-collapse: collapse; }
             background: rgba(255,255,255,0.16);
         }
         .home-app.ff .ai {
-            background: var(--blanco);
+            background: transparent;
+            border-radius: 22.37%; /* mismo radio que icono.svg (229/1024) */
             display: flex; align-items: center; justify-content: center;
             box-shadow: 0 6px 16px rgba(0,0,0,0.28);
             position: relative;
         }
-        .home-app.ff .ai img { width: 68%; height: 68%; object-fit: contain; }
+        .home-app.ff .ai img { width: 100%; height: 100%; object-fit: contain; }
         .home-app .lb { font-size: 0.5rem; color: rgba(255,255,255,0.9); font-weight: 500; text-align: center; }
         .home-app.ff .lb { font-weight: 700; color: #fff; }
         .home-dock {
@@ -829,6 +834,13 @@ table { border-collapse: collapse; }
         }
         .fade-up { animation: fade-up 0.6s ease forwards; }
 
+        /* Logo FinanceFlow (kit de marca en public/brand). Los SVG ya traen su zona
+           de protección: el margen negativo solo alinea el borde visible del logo
+           con el contenido de la página; no se pega nada dentro de esa zona. */
+        .ff-logo-nav { height: 3rem; width: auto; max-width: none; margin-left: -0.69rem; }
+        @media (min-width: 640px) { .ff-logo-nav { height: 3.5rem; margin-left: -0.81rem; } }
+        .ff-logo-footer { width: 15rem; height: auto; max-width: none; margin: -1.2rem 0 -0.4rem -1.2rem; }
+
         /* Iconos SVG inline (reemplazan a Font Awesome, sin dependencias) */
         .ficon {
             display: inline-flex;
@@ -850,9 +862,8 @@ table { border-collapse: collapse; }
     <nav class="bg-white border-b border-gray-100 sticky top-0 z-30">
         <div class="max-w-6xl mx-auto px-4 sm:px-6">
             <div class="flex justify-between items-center" style="min-height: 4rem;">
-                <a href="index.html" class="flex items-center gap-2.5" style="text-decoration: none;">
-                    <img src="https://app.contabilidadpersonal.com/public/logo.png" alt="FinanceFlow" style="height: 1.85rem;">
-                    <span class="font-bold" style="color: var(--negro); font-size: 1.05rem; letter-spacing: -0.01em;">FinanceFlow</span>
+                <a href="index.html" class="flex items-center" style="text-decoration: none;">
+                    <img src="./public/brand/logo/financeflow-logo-sin-endoso-color.svg" alt="FinanceFlow" class="ff-logo-nav">
                 </a>
                 <div class="flex items-center gap-3 sm:gap-5">
                     <a href="#features" class="hidden md:inline text-sm text-gray-600 hover:text-gray-900">Funciones</a>
@@ -1367,7 +1378,7 @@ table { border-collapse: collapse; }
                                 <div class="home-app"><span class="ai"></span><span class="lb">Fotos</span></div>
                                 <div class="home-app"><span class="ai"></span><span class="lb">Banco</span></div>
                                 <div class="home-app"><span class="ai"></span><span class="lb">Notas</span></div>
-                                <div class="home-app ff"><span class="ai"><img src="./public/logo.png" alt="FinanceFlow"></span><span class="lb">FinanceFlow</span></div>
+                                <div class="home-app ff"><span class="ai"><img src="./public/brand/icono-app/icono.svg" alt="FinanceFlow"></span><span class="lb">FinanceFlow</span></div>
                                 <div class="home-app"><span class="ai"></span><span class="lb">Correo</span></div>
                                 <div class="home-app"><span class="ai"></span><span class="lb">Cámara</span></div>
                                 <div class="home-app"><span class="ai"></span><span class="lb">Reloj</span></div>
@@ -1448,9 +1459,8 @@ table { border-collapse: collapse; }
         <div class="max-w-6xl mx-auto px-4 sm:px-6">
             <div class="grid md:grid-cols-3 gap-8 mb-8">
                 <div>
-                    <div class="flex items-center gap-2.5 mb-4">
-                        <img src="https://app.contabilidadpersonal.com/public/logo.png" alt="FinanceFlow" style="height: 1.85rem; opacity: 0.95;">
-                        <span class="font-bold text-white" style="font-size: 1.05rem;">FinanceFlow</span>
+                    <div class="mb-4">
+                        <img src="./public/brand/logo/financeflow-logo-blanco.svg" alt="FinanceFlow by Contabilidad Personal" class="ff-logo-footer">
                     </div>
                     <p class="text-sm text-gray-400 leading-relaxed">
                         Contabilidad personal real, gratis para siempre.<br>
