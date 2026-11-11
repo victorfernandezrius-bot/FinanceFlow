@@ -5,14 +5,15 @@
 // UBICACIÓN: raíz del sitio (scope '/'), para controlar dashboard.html y el
 // resto de páginas de la app. Las rutas relativas de PRECACHE_URLS resuelven
 // correctamente desde la raíz: ./offline.html -> /offline.html y
-// ./public/logo.png -> /public/logo.png.
+// ./public/brand/web/icon-192.png -> /public/brand/web/icon-192.png.
 
-const CACHE_NAME = 'financeflow-v4'; // subir versión fuerza limpieza de la caché vieja
+const CACHE_NAME = 'financeflow-v5'; // subir versión fuerza limpieza de la caché vieja
 const OFFLINE_URL = './offline.html';
 
 const PRECACHE_URLS = [
     './offline.html',
-    './public/logo.png'
+    './public/brand/web/favicon.svg',
+    './public/brand/web/icon-192.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -80,8 +81,9 @@ self.addEventListener('push', (event) => {
     event.waitUntil(
         self.registration.showNotification(payload.title || 'FinanceFlow', {
             body: payload.body || '',
-            icon: '/public/logo.png',
-            badge: '/public/logo.png',
+            icon: '/public/brand/web/icon-192.png',
+            // Android pinta el badge como silueta (solo usa la transparencia): el símbolo en blanco
+            badge: '/public/brand/simbolo/nucleo-blanco-512.png',
             tag: payload.tag || undefined,
             data: { url: payload.url || '/dashboard.html' }
         })
