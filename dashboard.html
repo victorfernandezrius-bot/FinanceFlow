@@ -899,7 +899,7 @@
 <body class="transition-colors duration-300" style="background-color: var(--bg-secondary); color: var(--text-primary);">
     
     <!-- Navegación superior -->
-    <nav style="background-color: var(--bg-primary); border-bottom: 1px solid var(--border-color);" class="shadow-sm transition-colors duration-300">
+    <nav id="app-header" style="background-color: var(--bg-primary); border-bottom: 1px solid var(--border-color);" class="shadow-sm transition-colors duration-300">
         <div class="container-responsive">
             <div class="flex justify-between items-center" style="min-height: 4rem;">
                 <div class="flex items-center">
@@ -1416,6 +1416,12 @@
 
                     <!-- Filtros -->
                     <div class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
+                        <!-- Buscador de texto (se suma a los filtros de abajo) -->
+                        <div class="relative mb-4">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <input type="search" id="movement-search" placeholder="Buscar por descripción, cuenta, importe o fecha…" autocomplete="off"
+                                   class="w-full border border-gray-300 rounded-md pl-9 pr-3 py-2">
+                        </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
                             <select id="movement-type-filter" class="border border-gray-300 rounded-md px-3 py-2">
                                 <option value="all">Todos los tipos</option>
@@ -1461,6 +1467,7 @@
                                 </tbody>
                             </table>
                         </div>
+                        <p id="movement-results-more" class="hidden px-6 py-3 text-xs text-gray-500"></p>
                     </div>
                 </div>
             </div>
@@ -1500,6 +1507,12 @@
                     
                     <!-- Filtros de fecha para reportes -->
                     <div class="bg-white rounded-lg p-4 shadow-sm border border-gray-200 mb-6">
+                        <!-- Buscador de texto: solo en la pestaña Libro Diario -->
+                        <div id="report-search-wrap" class="relative mb-4">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <input type="search" id="report-search" placeholder="Buscar por descripción, cuenta, importe o fecha…" autocomplete="off"
+                                   class="w-full border border-gray-300 rounded-md pl-9 pr-3 py-2">
+                        </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Período</label>
@@ -1994,12 +2007,12 @@
                             <p class="text-gray-600">Historial de notificaciones del sistema</p>
                             <span class="premium-badge px-2 py-1 text-xs text-white rounded-full mt-2">PREMIUM</span>
                         </div>
-                        <div class="flex items-center space-x-3">
-                            <button id="mark-all-notifications-read-btn" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors">
+                        <div class="flex flex-wrap gap-2">
+                            <button id="mark-all-notifications-read-btn" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors text-sm whitespace-nowrap flex-1 sm:flex-none">
                                 <i class="fas fa-check-double mr-2"></i>
                                 Marcar todas como leídas
                             </button>
-                            <button id="clear-notifications-btn" class="bg-red-100 text-red-700 px-4 py-2 rounded-lg hover:bg-red-200 transition-colors">
+                            <button id="clear-notifications-btn" class="bg-red-100 text-red-700 px-4 py-2 rounded-lg hover:bg-red-200 transition-colors text-sm whitespace-nowrap flex-1 sm:flex-none">
                                 <i class="fas fa-trash mr-2"></i>
                                 Limpiar historial
                             </button>
@@ -2829,6 +2842,12 @@
                 document.getElementById('clear-filters-btn')?.addEventListener('click', () => {
                     this.clearMovementsFilters();
                 });
+
+                // Buscador de movimientos: en vivo, con 200 ms de espera
+                document.getElementById('movement-search')?.addEventListener('input', () => {
+                    clearTimeout(this._movementSearchTimer);
+                    this._movementSearchTimer = setTimeout(() => this.applyMovementsFilters(), 200);
+                });
                 
                 // Filtros de reportes
                 document.getElementById('report-period-filter')?.addEventListener('change', (e) => {
@@ -2842,6 +2861,16 @@
 
                 document.getElementById('apply-report-filters-btn')?.addEventListener('click', () => {
                     this.applyReportFilters();
+                });
+
+                // Buscador del Libro Diario: en vivo, con 200 ms de espera y solo en esa pestaña.
+                // El input está fuera de #reports-content, así que no pierde el foco al re-renderizar.
+                document.getElementById('report-search')?.addEventListener('input', () => {
+                    clearTimeout(this._reportSearchTimer);
+                    this._reportSearchTimer = setTimeout(() => {
+                        const activeReport = document.querySelector('.report-tab.active')?.dataset.report || 'libro-diario';
+                        if (activeReport === 'libro-diario') this.applyReportFilters();
+                    }, 200);
                 });
 
                 // Forms
@@ -3301,6 +3330,46 @@
                 return String(str == null ? '' : str)
                     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            // ===== BUSCADOR DE MOVIMIENTOS (Movimientos y Libro Diario) =====
+
+            // Minúsculas y sin tildes: "Alimentación" → "alimentacion"
+            _normalizeSearch(str) {
+                return String(str ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            }
+
+            // Mapa id → nombre de cuenta, una vez por filtrado (evita un find por movimiento)
+            _accountNamesById(accounts) {
+                const names = new Map();
+                (accounts || []).forEach(acc => names.set(acc.id, acc.nombre));
+                return names;
+            }
+
+            // Coincide si TODAS las palabras de la búsqueda aparecen en la descripción, las cuentas,
+            // el tipo, la fecha (AAAA-MM-DD y dd/mm/aaaa) o el importe (59.07, 59,07 y 1.234,56).
+            // accounts: array de cuentas o un Map id → nombre ya preparado.
+            _movementMatchesSearch(mov, query, accounts) {
+                const words = this._normalizeSearch(query).split(/\s+/).filter(Boolean);
+                if (words.length === 0) return true;
+                const names = accounts instanceof Map ? accounts : this._accountNamesById(accounts);
+                const fecha = String(mov.fecha || '');
+                const [y, m, d] = fecha.slice(0, 10).split('-');
+                const importe = Number(mov.cantidad);
+                const importeTxt = Number.isFinite(importe)
+                    ? [importe.toFixed(2), importe.toFixed(2).replace('.', ','),
+                       importe.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' })]
+                    : [];
+                const text = this._normalizeSearch([
+                    mov.descripcion,
+                    names.get(mov.cuenta_id),
+                    names.get(mov.cuenta_destino_id),
+                    mov.tipo,
+                    fecha,
+                    (y && m && d) ? `${d}/${m}/${y}` : '',
+                    ...importeTxt
+                ].join(' '));
+                return words.every(w => text.includes(w));
             }
 
             handleStatementFileChange(e) {
@@ -5402,33 +5471,33 @@
                 
                 container.innerHTML = filteredNotifications.map(notification => `
                     <div class="p-4 border-b border-gray-200 ${notification.read ? 'bg-gray-50' : 'bg-blue-50'} hover:bg-gray-100 transition-colors">
-                        <div class="flex items-start justify-between">
-                            <div class="flex items-start space-x-3 flex-1">
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
+                            <div class="flex items-start space-x-3 flex-1 min-w-0">
                                 <div class="flex-shrink-0">
                                     ${this.getNotificationIcon(notification.type)}
                                 </div>
                                 <div class="flex-1 min-w-0">
-                                    <div class="flex items-center space-x-2">
-                                        <h4 class="font-medium text-gray-900 truncate">${this._escapeHtml(notification.title)}</h4>
+                                    <div class="flex items-center gap-2 min-w-0">
+                                        <h4 class="font-medium text-gray-900 truncate min-w-0">${this._escapeHtml(notification.title)}</h4>
                                         ${!notification.read ? 
-                                            '<span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">Nueva</span>' : 
+                                            '<span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full flex-shrink-0 whitespace-nowrap">Nueva</span>' : 
                                             ''
                                         }
                                     </div>
-                                    <p class="text-sm text-gray-600 mt-1">${this._escapeHtml(notification.message)}</p>
+                                    <p class="text-sm text-gray-600 mt-1 ff-wrap">${this._escapeHtml(notification.message)}</p>
                                     <p class="text-xs text-gray-500 mt-2">
                                         ${this.formatNotificationDate(notification.createdAt || notification.created_at)}
                                     </p>
                                 </div>
                             </div>
-                            <div class="flex items-center space-x-2 ml-4">
+                            <div class="flex items-center gap-3 flex-shrink-0 sm:ml-4 pl-8 sm:pl-0">
                                 ${!notification.read ? `
-                                    <button onclick="dashboard.markNotificationRead('${notification.id}')" class="text-sm text-blue-600 hover:text-blue-800">
+                                    <button onclick="dashboard.markNotificationRead('${notification.id}')" class="text-sm text-blue-600 hover:text-blue-800 whitespace-nowrap">
                                         <i class="fas fa-check mr-1"></i>
                                         Marcar leída
                                     </button>
                                 ` : ''}
-                                <button onclick="dashboard.deleteNotification('${notification.id}')" class="text-sm text-red-600 hover:text-red-800">
+                                <button onclick="dashboard.deleteNotification('${notification.id}')" class="text-sm text-red-600 hover:text-red-800 whitespace-nowrap">
                                     <i class="fas fa-trash mr-1"></i>
                                     Eliminar
                                 </button>
@@ -5482,6 +5551,18 @@
                 menu.classList.toggle('hidden');
                 
                 if (!menu.classList.contains('hidden')) {
+                    // Móvil: el menú es fixed (CSS ≤640px); se coloca justo bajo el header real,
+                    // midiéndolo al abrir (su altura puede cambiar con el logo o el contenido).
+                    // En escritorio se dejan vacíos para no alterar el desplegable.
+                    if (window.innerWidth <= 640) {
+                        const navBottom = document.getElementById('app-header')?.getBoundingClientRect().bottom ?? 97;
+                        const top = Math.max(12, navBottom + 8);
+                        menu.style.top = top + 'px';
+                        menu.style.maxHeight = `calc(100dvh - ${top + 12}px)`;
+                    } else {
+                        menu.style.top = '';
+                        menu.style.maxHeight = '';
+                    }
                     this.renderNotificationsDropdown();
                 }
             }
@@ -5507,7 +5588,7 @@
                 
                 container.innerHTML = notifications.map(notification => `
                     <div class="p-3 hover:bg-gray-50 ${!notification.read ? 'bg-blue-50' : ''}">
-                        <div class="flex items-start space-x-2">
+                        <div class="flex items-start space-x-2 min-w-0">
                             <div class="flex-shrink-0 mt-1">
                                 ${this.getNotificationIcon(notification.type)}
                             </div>
@@ -7066,6 +7147,7 @@
             renderMovementsList() {
                 const tbody = document.getElementById('movements-table-body');
                 const movements = this.accountingManager.getMovements();
+                document.getElementById('movement-results-more')?.classList.add('hidden');
                 
                 if (movements.length === 0) {
                     tbody.innerHTML = `
@@ -7176,6 +7258,13 @@
                 if (dateToFilter) {
                     movements = movements.filter(mov => mov.fecha <= dateToFilter);
                 }
+
+                // Buscador de texto (sobre todos los movimientos, no solo los 50 visibles)
+                const search = document.getElementById('movement-search')?.value || '';
+                if (this._normalizeSearch(search)) {
+                    const names = this._accountNamesById(this.accountingManager.getAccounts());
+                    movements = movements.filter(mov => this._movementMatchesSearch(mov, search, names));
+                }
                 
                 // Renderizar la tabla filtrada
                 this.renderFilteredMovementsList(movements);
@@ -7183,6 +7272,15 @@
             
             renderFilteredMovementsList(movements) {
                 const tbody = document.getElementById('movements-table-body');
+
+                // Aviso cuando hay más resultados de los 50 que se muestran
+                const moreNote = document.getElementById('movement-results-more');
+                if (moreNote) {
+                    moreNote.textContent = movements.length > 50
+                        ? `Mostrando 50 de ${movements.length} resultados. Afina la búsqueda.`
+                        : '';
+                    moreNote.classList.toggle('hidden', movements.length <= 50);
+                }
                 
                 if (movements.length === 0) {
                     tbody.innerHTML = `
@@ -7248,6 +7346,9 @@
                 document.getElementById('movement-account-filter').value = 'all';
                 document.getElementById('date-from-filter').value = '';
                 document.getElementById('date-to-filter').value = '';
+                const movementSearch = document.getElementById('movement-search');
+                if (movementSearch) movementSearch.value = '';
+                clearTimeout(this._movementSearchTimer);
                 
                 // Mostrar todos los movimientos
                 this.renderMovementsList();
@@ -7323,11 +7424,15 @@
                 // Tipo de movimiento (solo lo usa el Libro Diario). '' = Todos.
                 const type = document.getElementById('report-type-filter')?.value || '';
 
+                // Texto del buscador (solo lo usa el Libro Diario)
+                const search = document.getElementById('report-search')?.value || '';
+
                 return {
                     period,
                     dateFrom,
                     dateTo,
-                    type
+                    type,
+                    search
                 };
             }
 
@@ -7571,6 +7676,14 @@
                 this.renderReportContent(reportType);
             }
 
+            // El buscador solo se ve en la pestaña Libro Diario. Lee la pestaña activa igual que
+            // applyReportFilters(); se llama desde handleReportTab() vía renderReportContent(),
+            // y también al entrar en Reportes (pestaña por defecto: Libro Diario).
+            _syncReportSearchVisibility() {
+                const activeReport = document.querySelector('.report-tab.active')?.dataset.report || 'libro-diario';
+                document.getElementById('report-search-wrap')?.classList.toggle('hidden', activeReport !== 'libro-diario');
+            }
+
             renderReports() {
                 // Renderizar sección de exportación (Premium)
                 this.renderExportSection();
@@ -7581,6 +7694,7 @@
 
             renderReportContent(reportType) {
                 this.activeDetailAccountId = null; // Al cambiar de tab se sale del detalle
+                this._syncReportSearchVisibility();
                 // Obtener filtros actuales o usar valores por defecto
                 const filters = this.getReportFilters();
                 
@@ -7617,13 +7731,22 @@
                     movements = movements.filter(mov => mov.tipo === filters.type);
                 }
 
+                // Buscador de texto: se combina con fechas y tipo
+                const search = (filters.search || '').trim();
+                if (search) {
+                    const names = this._accountNamesById(accounts);
+                    movements = movements.filter(mov => this._movementMatchesSearch(mov, search, names));
+                }
+
                 if (movements.length === 0) {
                     return `
                         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                             <h3 class="text-xl font-semibold text-gray-900 mb-6">Libro Diario</h3>
                             <div class="text-center py-8">
                                 <i class="fas fa-list text-4xl text-gray-300 mb-4"></i>
-                                <p class="text-gray-500">No hay movimientos registrados</p>
+                                <p class="text-gray-500">${search
+                                    ? `Ningún movimiento coincide con «${this._escapeHtml(search)}»`
+                                    : 'No hay movimientos registrados'}</p>
                             </div>
                         </div>
                     `;
