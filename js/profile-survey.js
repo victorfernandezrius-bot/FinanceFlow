@@ -1,6 +1,7 @@
-// Cuestionario de perfil opcional (se muestra una sola vez, tras el registro).
+// Cuestionario de perfil obligatorio (se muestra hasta que el usuario lo responde).
 // showProfileSurvey({ save }) abre el modal y devuelve una promesa que se resuelve con
-// 'completed' (respuestas guardadas) o 'skipped' (pulsó «Saltar» o Escape: no se guarda nada).
+// 'completed' cuando las respuestas se guardan. No se puede cerrar de otra forma: sin
+// «Saltar», sin Escape y sin clic fuera. Edad e ingresos admiten «Prefiero no decirlo».
 //  - save(answers) → Promise<{ success, error? }> (DataClient.saveProfileSurvey).
 // Sin scripts externos ni cookies: las respuestas van solo al Worker (D1).
 // Los valores (value) deben coincidir con PROFILE_SURVEY_OPTIONS de api/worker.js:
@@ -12,7 +13,8 @@ export const PROFILE_SURVEY_QUESTIONS = [
         label: '¿Qué edad tienes?',
         options: [
             ['18_24', '18–24'], ['25_34', '25–34'], ['35_44', '35–44'],
-            ['45_54', '45–54'], ['55_64', '55–64'], ['65_mas', '65 o más']
+            ['45_54', '45–54'], ['55_64', '55–64'], ['65_mas', '65 o más'],
+            ['prefiero_no_decirlo', 'Prefiero no decirlo']
         ]
     },
     {
@@ -90,8 +92,6 @@ html.dark .ffps { --ffps-on-brand: #0b1220; --ffps-err: #fca5a5; --ffps-ok: #86e
 .ffps-actions { display: flex; gap: 10px; align-items: center; }
 .ffps-actions .ffps-progress { margin-right: auto; font-size: 0.8rem; color: var(--text-secondary, #6b7280); }
 .ffps-btn { padding: 10px 16px; border-radius: var(--radius-control, 8px); font-size: 0.9rem; font-weight: 600; cursor: pointer; }
-.ffps-skip { background: transparent; color: var(--text-primary, #111827); border: 1px solid var(--border-color, #d1d5db); }
-.ffps-skip:hover { background: var(--bg-secondary, #f3f4f6); }
 .ffps-send { background: var(--brand-primary, #0158c9); color: var(--ffps-on-brand); border: 1px solid transparent; }
 .ffps-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ffps-btn:focus-visible { outline: 2px solid var(--brand-primary, #0158c9); outline-offset: 2px; }
@@ -132,10 +132,10 @@ export function showProfileSurvey({ save }) {
 
         const head = el('div', { class: 'ffps-head' });
         head.append(
-            el('div', { class: 'ffps-kicker' }, 'Opcional · menos de 1 minuto'),
+            el('div', { class: 'ffps-kicker' }, 'Último paso · menos de 1 minuto'),
             el('h2', { id: 'ffps-title' }, 'Cuéntanos un poco sobre ti'),
             el('p', { class: 'ffps-sub' },
-                'Nos ayuda a adaptar Finance Flow a lo que necesitas. Si prefieres no responder, pulsa «Saltar»: no cambia nada en tu cuenta.')
+                'Necesitamos estos datos para adaptar Finance Flow a ti. Responde las 5 preguntas para continuar.')
         );
 
         const form = el('form', { id: 'ffps-form', class: 'ffps-body', novalidate: '' });
@@ -157,15 +157,14 @@ export function showProfileSurvey({ save }) {
         // div (no p): el dashboard fuerza el color de los <p> en modo oscuro con !important
         const msg = el('div', { class: 'ffps-msg', role: 'alert', 'aria-live': 'polite', hidden: '' });
         const privacy = el('p', { class: 'ffps-privacy' },
-            'Tus respuestas se guardan solo en tu cuenta de Finance Flow, sin cookies, y no se comparten con terceros. Puedes borrarlas cuando quieras desde Mi Perfil. ');
+            'Tus respuestas se guardan solo en tu cuenta de Finance Flow, sin cookies, y no se comparten con terceros. Más información en la ');
         const privacyUrl = (window.APP_CONFIG && window.APP_CONFIG.privacyUrl) ||
             'https://www.contabilidadpersonal.com/politica-de-privacidad/';
-        privacy.append(el('a', { href: privacyUrl, target: '_blank', rel: 'noopener' }, 'Política de privacidad'), '.');
+        privacy.append(el('a', { href: privacyUrl, target: '_blank', rel: 'noopener' }, 'política de privacidad'), '.');
         const actions = el('div', { class: 'ffps-actions' });
         const progress = el('span', { class: 'ffps-progress', 'aria-live': 'polite' }, `0 de ${total} respondidas`);
-        const skipBtn = el('button', { type: 'button', class: 'ffps-btn ffps-skip' }, 'Saltar');
         const sendBtn = el('button', { type: 'submit', form: 'ffps-form', class: 'ffps-btn ffps-send', disabled: '' }, 'Enviar');
-        actions.append(progress, skipBtn, sendBtn);
+        actions.append(progress, sendBtn);
         foot.append(msg, privacy, actions);
 
         card.append(head, form, foot);
@@ -190,26 +189,21 @@ export function showProfileSurvey({ save }) {
             progress.textContent = `${n} de ${total} respondidas`;
             sendBtn.disabled = busy || n < total;
         };
+        // Solo se cierra al guardar con éxito (no hay «Saltar», Escape ni clic fuera)
         const close = (result) => {
             if (closed) return;
             closed = true;
-            document.removeEventListener('keydown', onKey);
             overlay.remove();
             document.body.style.overflow = prevOverflow;
             resolve(result);
         };
-        const onKey = (e) => { if (e.key === 'Escape' && !busy) close('skipped'); };
-
         form.addEventListener('change', () => { msg.hidden = true; refresh(); });
-        skipBtn.addEventListener('click', () => { if (!busy) close('skipped'); });
-        document.addEventListener('keydown', onKey);
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const data = answers();
             if (busy || Object.keys(data).length < total) return;
             busy = true;
-            skipBtn.disabled = true;
             sendBtn.textContent = 'Guardando…';
             refresh();
             let result;
@@ -222,10 +216,10 @@ export function showProfileSurvey({ save }) {
                 return;
             }
             busy = false;
-            skipBtn.disabled = false;
             sendBtn.textContent = 'Enviar';
             msg.className = 'ffps-msg';
-            msg.textContent = (result && result.error) || 'No se han podido guardar tus respuestas. Inténtalo de nuevo o pulsa «Saltar».';
+            // Mensaje fijo: el de DataClient sin conexión aún menciona «Saltar»
+            msg.textContent = 'No se han podido guardar tus respuestas. Inténtalo de nuevo.';
             msg.hidden = false;
             refresh();
         });

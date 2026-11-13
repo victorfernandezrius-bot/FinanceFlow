@@ -5713,20 +5713,20 @@
                 try { await this.checkFeedbackRequest(); } catch (e) { console.error('checkFeedbackRequest:', e); }
             }
 
-            // ── Cuestionario de perfil (opcional, una sola vez tras el registro) ──
-            // Auth deja una marca al terminar el registro y aquí se consume: sale una vez,
-            // tanto si responde como si pulsa «Saltar» (que no guarda nada). Si el estado no se
-            // puede consultar (sin conexión), la marca se queda para la siguiente carga. Al
-            // cerrarse, o si no procede, arranca el tutorial de bienvenida, que espera a esto.
+            // ── Cuestionario de perfil (obligatorio, hasta que se responda) ──
+            // En cada carga se consulta el estado en el servidor: si el usuario (nuevo o
+            // existente) no lo ha respondido, el modal sale y no se cierra hasta guardar. Si el
+            // estado no se puede consultar (sin conexión o error) no se bloquea la app
+            // (fail-open) y se vuelve a intentar en la siguiente carga. La cuenta demo no lo ve.
+            // Al terminar, arranca el tutorial de bienvenida, que espera a esto.
             async maybeShowProfileSurvey() {
                 const uid = this.currentUser?.id;
                 try {
-                    if (!uid || !DataClient.isProfileSurveyPending(uid)) return;
+                    if (!uid || uid === 'demo-user-financeflow') return;
                     const status = await DataClient.getProfileSurveyStatus(uid);
-                    if (!status) return;
+                    if (!status || status.completed) return;
                     const { showProfileSurvey } = await import('./js/profile-survey.js');
                     DataClient.clearProfileSurveyPending(uid);
-                    if (status.completed) return;
                     await showProfileSurvey({ save: (answers) => DataClient.saveProfileSurvey(uid, answers) });
                 } finally {
                     if (window.tutorialManager) window.tutorialManager.showDeferred();
@@ -10137,10 +10137,9 @@
                                     <label class="block small-text font-medium mb-1" style="color: var(--text-secondary);">Cuestionario de perfil</label>
                                     <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.6rem 0.75rem;border:1px solid var(--border-color);border-radius:0.5rem;background-color:var(--bg-secondary);">
                                         <div id="profile-survey-info" class="small-text" style="color:var(--text-primary);min-width:0;"></div>
-                                        <button type="button" id="profile-survey-delete-btn" class="small-text" style="flex-shrink:0;padding:0.35rem 0.75rem;border-radius:0.4rem;border:1px solid var(--border-color);background:transparent;color:#EF4444;cursor:pointer;">Borrar mis respuestas</button>
                                     </div>
                                     <p class="small-text" style="margin-top:0.5rem;color:var(--text-secondary);line-height:1.5;">
-                                        Solo se usan para mejorar Finance Flow. Borrarlas no afecta a tu cuenta.
+                                        Solo se usan para mejorar Finance Flow. Si borras tu cuenta, se eliminan también.
                                     </p>
                                 </div>
                             </div>
@@ -10173,30 +10172,18 @@
                 this._renderProfileSurveySection();
             }
 
-            // Solo se muestra si el usuario respondió el cuestionario. «Borrar mis respuestas»
-            // retira el consentimiento: borra la fila en D1 (DELETE /api/profile-survey).
+            // Solo se muestra si el usuario respondió el cuestionario (fecha de respuesta). Con el
+            // cuestionario obligatorio ya no hay «Borrar mis respuestas»: la fila se elimina al
+            // borrar la cuenta (DELETE /api/profile-survey sigue existiendo en el Worker).
             async _renderProfileSurveySection() {
                 const section = document.getElementById('profile-survey-section');
                 const info = document.getElementById('profile-survey-info');
-                const btn = document.getElementById('profile-survey-delete-btn');
                 const uid = this.currentUser?.id;
-                if (!section || !info || !btn || !uid) return;
+                if (!section || !info || !uid) return;
                 const status = await DataClient.getProfileSurveyStatus(uid).catch(() => null);
                 if (!status || !status.completed) { section.classList.add('hidden'); return; }
                 const d = status.completedAt ? new Date(status.completedAt) : null;
                 info.textContent = d && !isNaN(d) ? `Respondido el ${d.toLocaleDateString('es-ES')}` : 'Respondido';
-                btn.onclick = async () => {
-                    if (!confirm('¿Borrar tus respuestas del cuestionario de perfil? No se puede deshacer.')) return;
-                    btn.disabled = true;
-                    const ok = await DataClient.deleteProfileSurvey(uid).catch(() => false);
-                    if (!ok) {
-                        btn.disabled = false;
-                        this.showToast('No se han podido borrar tus respuestas. Inténtalo de nuevo.', 'error');
-                        return;
-                    }
-                    section.classList.add('hidden');
-                    this.showToast('Respuestas del cuestionario borradas', 'success');
-                };
                 section.classList.remove('hidden');
             }
 
@@ -10847,15 +10834,9 @@
                     // Marcar como visto inmediatamente: así no reaparece aunque se cierre
                     // con la X, Escape o clic fuera (no solo al "saltar"/"finalizar").
                     this.markTutorialAsSeen();
-                    // Recién registrado: primero el cuestionario de perfil. El dashboard llama a
-                    // showDeferred() al cerrarlo (o si al final no procede mostrarlo).
-                    if (DataClient.isProfileSurveyPending(this._sessionUserId())) {
-                        this._deferredAutoShow = true;
-                        return;
-                    }
-                    setTimeout(() => {
-                        this.showTutorial();
-                    }, 1000); // Pequeño delay para que cargue la interfaz
+                    // Primero el cuestionario de perfil (obligatorio): el dashboard llama siempre a
+                    // showDeferred() al terminar maybeShowProfileSurvey(), se muestre o no.
+                    this._deferredAutoShow = true;
                 }
             }
 
