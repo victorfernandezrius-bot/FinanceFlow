@@ -1,7 +1,8 @@
 // Cuestionario de perfil obligatorio (se muestra hasta que el usuario lo responde).
 // showProfileSurvey({ save }) abre el modal y devuelve una promesa que se resuelve con
 // 'completed' cuando las respuestas se guardan. No se puede cerrar de otra forma: sin
-// «Saltar», sin Escape y sin clic fuera. Edad e ingresos admiten «Prefiero no decirlo».
+// «Saltar», sin Escape y sin clic fuera. Las 5 preguntas admiten «Prefiero no decirlo»:
+// el paso es obligatorio, pero dar cada dato es voluntario.
 //  - save(answers) → Promise<{ success, error? }> (DataClient.saveProfileSurvey).
 // Sin scripts externos ni cookies: las respuestas van solo al Worker (D1).
 // Los valores (value) deben coincidir con PROFILE_SURVEY_OPTIONS de api/worker.js:
@@ -23,7 +24,8 @@ export const PROFILE_SURVEY_QUESTIONS = [
         options: [
             ['estudiante', 'Estudio'], ['cuenta_ajena', 'Trabajo por cuenta ajena'],
             ['autonomo', 'Autónomo/a o freelance'], ['empresario', 'Tengo una empresa'],
-            ['desempleado', 'Busco empleo'], ['jubilado', 'Jubilado/a']
+            ['desempleado', 'Busco empleo'], ['jubilado', 'Jubilado/a'],
+            ['prefiero_no_decirlo', 'Prefiero no decirlo']
         ]
     },
     {
@@ -32,7 +34,8 @@ export const PROFILE_SURVEY_QUESTIONS = [
         options: [
             ['controlar_gastos', 'Saber en qué se me va el dinero'], ['ahorrar', 'Ahorrar más cada mes'],
             ['salir_deudas', 'Salir de deudas'], ['objetivo_concreto', 'Ahorrar para algo concreto (casa, viaje…)'],
-            ['invertir', 'Empezar a invertir'], ['finanzas_negocio', 'Separar mis finanzas personales y las de mi negocio']
+            ['invertir', 'Empezar a invertir'], ['finanzas_negocio', 'Separar mis finanzas personales y las de mi negocio'],
+            ['prefiero_no_decirlo', 'Prefiero no decirlo']
         ]
     },
     {
@@ -49,7 +52,7 @@ export const PROFILE_SURVEY_QUESTIONS = [
         options: [
             ['nada', 'No llevo ningún control'], ['de_cabeza', 'De cabeza'], ['papel', 'En papel o libreta'],
             ['hoja_calculo', 'En Excel o Google Sheets'], ['app_banco', 'Con la app de mi banco'],
-            ['otra_app', 'Con otra app de finanzas']
+            ['otra_app', 'Con otra app de finanzas'], ['prefiero_no_decirlo', 'Prefiero no decirlo']
         ]
     }
 ];

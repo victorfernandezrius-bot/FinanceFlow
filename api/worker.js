@@ -303,10 +303,10 @@ const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 4
 // Las etiquetas visibles están en js/profile-survey.js: si cambias una opción, cambia ambos.
 const PROFILE_SURVEY_OPTIONS = {
     age_range: ['18_24', '25_34', '35_44', '45_54', '55_64', '65_mas', 'prefiero_no_decirlo'],
-    life_situation: ['estudiante', 'cuenta_ajena', 'autonomo', 'empresario', 'desempleado', 'jubilado'],
-    main_goal: ['controlar_gastos', 'ahorrar', 'salir_deudas', 'objetivo_concreto', 'invertir', 'finanzas_negocio'],
+    life_situation: ['estudiante', 'cuenta_ajena', 'autonomo', 'empresario', 'desempleado', 'jubilado', 'prefiero_no_decirlo'],
+    main_goal: ['controlar_gastos', 'ahorrar', 'salir_deudas', 'objetivo_concreto', 'invertir', 'finanzas_negocio', 'prefiero_no_decirlo'],
     monthly_income_range: ['menos_1000', '1000_1500', '1500_2500', '2500_4000', 'mas_4000', 'prefiero_no_decirlo'],
-    current_method: ['nada', 'de_cabeza', 'papel', 'hoja_calculo', 'app_banco', 'otra_app']
+    current_method: ['nada', 'de_cabeza', 'papel', 'hoja_calculo', 'app_banco', 'otra_app', 'prefiero_no_decirlo']
 };
 
 // ---------- Plan Premium y límites (fuente de verdad: D1) ----------
