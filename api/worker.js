@@ -302,7 +302,7 @@ const invalid = (campo, cors) => json({ error: `Datos inválidos: ${campo}` }, 4
 // Cuestionario de perfil (tabla user_profile_survey): valores permitidos por columna.
 // Las etiquetas visibles están en js/profile-survey.js: si cambias una opción, cambia ambos.
 const PROFILE_SURVEY_OPTIONS = {
-    age_range: ['18_24', '25_34', '35_44', '45_54', '55_64', '65_mas'],
+    age_range: ['18_24', '25_34', '35_44', '45_54', '55_64', '65_mas', 'prefiero_no_decirlo'],
     life_situation: ['estudiante', 'cuenta_ajena', 'autonomo', 'empresario', 'desempleado', 'jubilado'],
     main_goal: ['controlar_gastos', 'ahorrar', 'salir_deudas', 'objetivo_concreto', 'invertir', 'finanzas_negocio'],
     monthly_income_range: ['menos_1000', '1000_1500', '1500_2500', '2500_4000', 'mas_4000', 'prefiero_no_decirlo'],
