@@ -35,7 +35,8 @@ window.APP_CONFIG = {
     parentBrand: 'Contabilidad Personal',
     parentUrl: 'https://www.contabilidadpersonal.com',
     helpUrl: 'https://www.contabilidadpersonal.com/category/financeflow/',
-    privacyUrl: 'https://www.contabilidadpersonal.com/politica-de-privacidad/',
+    // Política específica de la app (enlaza a su vez a la política general del sitio web)
+    privacyUrl: 'https://www.contabilidadpersonal.com/politica-de-privacidad/finance-flow/',
     termsUrl: 'https://www.contabilidadpersonal.com/terminos-y-condiciones/',
     supportEmail: 'clientes@contabilidadpersonal.com'
 };
